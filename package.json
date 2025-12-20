@@ -9,7 +9,9 @@
   "files": [
     "apps/",
     "drive_forms/",
-    "drive_root/"
+    "drive_root/",
+    "main_server.js",
+    "server.config.json"
   ],
   "keywords": ["framework", "core", "my-old-space"],
   "author": "Andrey",
