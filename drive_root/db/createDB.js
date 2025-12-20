@@ -224,8 +224,9 @@ async function createAll() {
     models[def.name] = sequelize.define(def.name, fields, { ...def.options, tableName: def.tableName });
   }
 
-  // Start transaction for all migration operations
-  const transaction = await sequelize.transaction();
+  // Start transaction for all migration operations (skip transaction for SQLite to avoid file locks)
+  const isSqliteGlobal = sequelize.getDialect && sequelize.getDialect() === 'sqlite';
+  const transaction = isSqliteGlobal ? null : await sequelize.transaction();
 
   try {
     console.log('[MIGRATION] Starting database schema check...');
@@ -265,31 +266,61 @@ async function createAll() {
       console.log(`[MIGRATION] Batch migration needed for ${tablesToMigrate.length} tables.`);
 
       // A. Backup Data
+      const isSqlite = sequelize.getDialect && sequelize.getDialect() === 'sqlite';
       for (const item of tablesToMigrate) {
         const { def } = item;
         const tempTableName = `${def.tableName}_temp_backup`;
         console.log(`[MIGRATION] Backing up ${def.tableName} to ${tempTableName}`);
-        await sequelize.query(
-          `CREATE TABLE "${tempTableName}" AS SELECT * FROM "${def.tableName}"`,
-          { transaction }
-        );
+        if (isSqlite) {
+          await sequelize.query(`CREATE TABLE "${tempTableName}" AS SELECT * FROM "${def.tableName}"`);
+        } else {
+          await sequelize.query(`CREATE TABLE "${tempTableName}" AS SELECT * FROM "${def.tableName}"`, { transaction });
+        }
       }
 
-      // B. Drop Old Tables (Cascade)
+      // B. Drop Old Tables (Cascade for Postgres; for SQLite temporarily disable FK checks)
+      if (isSqlite) {
+        try {
+          await sequelize.query('PRAGMA foreign_keys = OFF');
+        } catch (e) {
+          console.warn('[MIGRATION] Warning: could not disable sqlite foreign_keys:', e.message);
+        }
+      }
+
       for (const item of tablesToMigrate) {
         console.log(`[MIGRATION] Dropping table ${item.def.tableName}`);
-        await sequelize.query(`DROP TABLE "${item.def.tableName}" CASCADE`, { transaction });
+        const dropSql = sequelize.getDialect && sequelize.getDialect() === 'postgres'
+          ? `DROP TABLE "${item.def.tableName}" CASCADE`
+          : `DROP TABLE "${item.def.tableName}"`;
+        if (isSqlite) {
+          await sequelize.query(dropSql);
+        } else {
+          await sequelize.query(dropSql, { transaction });
+        }
       }
 
       // C. Recreate/Sync ALL Tables 
       // Sync ALL models to ensure cascading drops are healed (FKs restored)
       console.log(`[MIGRATION] Re-syncing all tables structure...`);
       for (const def of mergedModelsDef) {
-        await models[def.name].sync({ transaction });
-        await syncUniqueConstraints(sequelize, transaction, def.tableName, def.fields);
+        if (isSqlite) {
+          await models[def.name].sync();
+          await syncUniqueConstraints(sequelize, null, def.tableName, def.fields);
+        } else {
+          await models[def.name].sync({ transaction });
+          await syncUniqueConstraints(sequelize, transaction, def.tableName, def.fields);
+        }
       }
 
       // D. Restore Data from backups FIRST
+      if (isSqlite) {
+        try {
+          await sequelize.query('PRAGMA foreign_keys = ON');
+        } catch (e) {
+          console.warn('[MIGRATION] Warning: could not enable sqlite foreign_keys:', e.message);
+        }
+      }
+
       console.log('[MIGRATION] Restoring all data from backups...');
 
       for (const item of tablesToMigrate) {
@@ -622,13 +653,17 @@ async function createAll() {
       }
     }
 
-    // Commit transaction
-    await transaction.commit();
+    // Commit transaction (if created)
+    if (transaction) {
+      await transaction.commit();
+    }
     console.log('[MIGRATION] Database migration completed successfully.');
 
   } catch (error) {
-    // Rollback transaction on error
-    await transaction.rollback();
+    // Rollback transaction on error (if created)
+    if (transaction) {
+      await transaction.rollback();
+    }
     console.error('[MIGRATION] ERROR: Migration cancelled, all changes rolled back.');
     console.error('[MIGRATION] Error details:', error.message);
     console.error(error.stack);
