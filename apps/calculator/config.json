@@ -1,0 +1,18 @@
+{
+    "level": "app",
+    "system": ["mySpace"],
+    "access": ["admin", "public", "user"],
+    "dependencies": {},
+    "mainMenuCommands": 
+        [
+            {"id": "main", "items": 
+                [
+                    { "caption": "apps", "items": 
+                        [
+                            { "caption": "Calculator", "action": "open"}
+                        ]
+                    }
+                ]
+            }
+        ]
+}

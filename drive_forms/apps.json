@@ -1,0 +1,41 @@
+{
+    "path": "/apps",
+    "apps": [
+        {
+            "name": "tetris",
+            "path": "/tetris"
+        },
+        {
+            "name": "login",
+            "path": "/login"
+        },
+        {
+            "name": "calculator",
+            "path": "/calculator"
+        },
+        {
+            "name": "messenger",
+            "path": "/messenger"
+        },
+        {
+            "name": "taskbar",
+            "path": "/taskbar"
+        },
+        {
+            "name": "main_menu",
+            "path": "/main_menu"
+        },
+        {
+            "name": "cpp_app",
+            "path": "/cpp_app"
+        },
+        {
+            "name": "fileSystem",
+            "path": "/fileSystem"
+        },
+        {
+            "name": "UserSettings",
+            "path": "/UserSettings"
+        }
+    ]
+}

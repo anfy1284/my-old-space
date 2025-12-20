@@ -1,0 +1,145 @@
+{
+    "models": [
+        {
+            "name": "FileSystem_Files",
+            "tableName": "FileSystem_Files",
+            "fields": {
+                "id": {
+                    "type": "INTEGER",
+                    "primaryKey": true,
+                    "autoIncrement": true
+                },
+                "name": {
+                    "type": "STRING",
+                    "allowNull": false
+                },
+                "parentId": {
+                    "type": "INTEGER",
+                    "allowNull": true,
+                    "references": {
+                        "model": "FileSystem_Files",
+                        "key": "id"
+                    }
+                },
+                "isFolder": {
+                    "type": "BOOLEAN",
+                    "allowNull": false,
+                    "defaultValue": false
+                },
+                "size": {
+                    "type": "INTEGER",
+                    "allowNull": false,
+                    "defaultValue": 0
+                },
+                "filePath": {
+                    "type": "STRING",
+                    "allowNull": true
+                },
+                "ownerId": {
+                    "type": "INTEGER",
+                    "allowNull": false,
+                    "references": {
+                        "model": "users",
+                        "key": "id"
+                    }
+                },
+                "agentId": {
+                    "type": "STRING",
+                    "allowNull": true
+                },
+                "provider": {
+                    "type": "STRING",
+                    "allowNull": false,
+                    "defaultValue": "local"
+                },
+                "externalId": {
+                    "type": "STRING",
+                    "allowNull": true
+                },
+                "metadata": {
+                    "type": "JSON",
+                    "allowNull": true
+                }
+            },
+            "options": {
+                "timestamps": true
+            }
+        },
+        {
+            "name": "FileSystem_Agents",
+            "tableName": "FileSystem_Agents",
+            "fields": {
+                "id": {
+                    "type": "STRING",
+                    "primaryKey": true
+                },
+                "token": {
+                    "type": "STRING",
+                    "allowNull": false
+                },
+                "status": {
+                    "type": "BOOLEAN",
+                    "defaultValue": false
+                },
+                "hostInfo": {
+                    "type": "JSON",
+                    "allowNull": true
+                },
+                "lastSeen": {
+                    "type": "DATE",
+                    "allowNull": true
+                }
+            },
+            "options": {
+                "timestamps": true
+            }
+        }
+    ],
+    "associations": [
+        {
+            "source": "FileSystem_Files",
+            "target": "FileSystem_Files",
+            "type": "hasMany",
+            "options": {
+                "foreignKey": "parentId",
+                "as": "children"
+            }
+        },
+        {
+            "source": "FileSystem_Files",
+            "target": "FileSystem_Files",
+            "type": "belongsTo",
+            "options": {
+                "foreignKey": "parentId",
+                "as": "parent"
+            }
+        },
+        {
+            "source": "FileSystem_Files",
+            "target": "Users",
+            "type": "belongsTo",
+            "options": {
+                "foreignKey": "ownerId",
+                "as": "owner"
+            }
+        },
+        {
+            "source": "FileSystem_Files",
+            "target": "FileSystem_Agents",
+            "type": "belongsTo",
+            "options": {
+                "foreignKey": "agentId",
+                "as": "agent"
+            }
+        },
+        {
+            "source": "FileSystem_Agents",
+            "target": "FileSystem_Files",
+            "type": "hasMany",
+            "options": {
+                "foreignKey": "agentId",
+                "as": "files"
+            }
+        }
+    ]
+}

@@ -1,0 +1,28 @@
+{
+    "level": "app",
+    "autoStart": false,
+    "system": [
+        "user_settings"
+    ],
+    "access": [
+        "admin",
+        "user"
+    ],
+    "dependencies": {},
+    "mainMenuCommands": [
+        {
+            "id": "main",
+            "items": [
+                {
+                    "caption": "apps",
+                    "items": [
+                        {
+                            "caption": "User Settings",
+                            "action": "open"
+                        }
+                    ]
+                }
+            ]
+        }
+    ]
+}

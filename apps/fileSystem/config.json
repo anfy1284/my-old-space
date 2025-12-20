@@ -1,0 +1,38 @@
+{
+    "level": "app",
+    "autoStart": false,
+    "system": [
+        "mySpace"
+    ],
+    "access": [
+        "admin",
+        "public",
+        "user"
+    ],
+    "dependencies": {},
+    "storageType": {
+        "development": "local",
+        "production": "remote_agent"
+    },
+    "supportedStorageTypes": [
+        "local",
+        "remote_agent"
+    ],
+    "storagePath": "../../uploads",
+    "mainMenuCommands": [
+        {
+            "id": "main",
+            "items": [
+                {
+                    "caption": "apps",
+                    "items": [
+                        {
+                            "caption": "File System",
+                            "action": "open"
+                        }
+                    ]
+                }
+            ]
+        }
+    ]
+}

@@ -1,0 +1,5 @@
+{
+  "Messenger_Chats": [
+    { "id": 1, "userId": 1, "name": "Local chat", "description": "Локальный чат", "isActive": true }
+  ]
+}

@@ -1,0 +1,34 @@
+{
+    "level": "app",
+    "system": [
+        "mySpace"
+    ],
+    "access": [
+        "admin",
+        "public",
+        "user"
+    ],
+    "dependencies": {},
+    "mainMenuCommands": [
+        {
+            "id": "main",
+            "items": [
+                {
+                    "caption": "apps",
+                    "items": [
+                        {
+                            "caption": "Cpp App",
+                            "action": "open",
+                            "params": { "program": "CppApp" }
+                        },
+                        {
+                            "caption": "Test App",
+                            "action": "open",
+                            "params": { "program": "TestApp" }
+                        }
+                    ]
+                }
+            ]
+        }
+    ]
+}

@@ -1,0 +1,85 @@
+{
+  "users": [
+    {
+      "id": 1,
+      "name": "admin",
+      "email": "admin@example.com",
+      "password": "admin123"
+    }
+  ],
+  "user_settings_types": [
+    {
+      "id": 1,
+      "name": "string",
+      "valueTableName": "user_settings_string_values"
+    },
+    {
+      "id": 2,
+      "name": "number",
+      "valueTableName": "user_settings_number_values"
+    },
+    {
+      "id": 3,
+      "name": "boolean",
+      "valueTableName": "user_settings_boolean_values"
+    },
+    {
+      "id": 4,
+      "name": "date",
+      "valueTableName": "user_settings_date_values"
+    },
+    {
+      "id": 5,
+      "name": "enum",
+      "valueTableName": "user_settings_string_values"
+    }
+  ],
+  "user_settings_fields": [
+    {
+      "id": 1,
+      "name": "Theme",
+      "displayName": "Тема",
+      "typeId": 5,
+      "options": [
+        "Classic",
+        "Dark",
+        "Blue",
+        "Matrix"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "ShowNotifications",
+      "displayName": "Показывать уведомления",
+      "typeId": 3
+    },
+    {
+      "id": 3,
+      "name": "FontSize",
+      "displayName": "Размер шрифта",
+      "typeId": 2
+    },
+    {
+      "id": 4,
+      "name": "ProfileName",
+      "displayName": "Имя профиля",
+      "typeId": 1
+    },
+    {
+      "id": 5,
+      "name": "StartMenuIconSize",
+      "displayName": "Размер иконок меню",
+      "typeId": 5,
+      "options": [
+        "Small",
+        "Large"
+      ]
+    },
+    {
+      "id": 6,
+      "name": "Birthday",
+      "displayName": "День рождения",
+      "typeId": 4
+    }
+  ]
+}

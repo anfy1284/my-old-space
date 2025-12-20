@@ -1,0 +1,518 @@
+{
+    "models": [
+        {
+            "name": "DefaultValues",
+            "tableName": "default_values",
+            "fields": {
+                "id": {
+                    "type": "INTEGER",
+                    "primaryKey": true,
+                    "autoIncrement": true
+                },
+                "level": {
+                    "type": "STRING",
+                    "allowNull": false
+                },
+                "defaultValueId": {
+                    "type": "INTEGER",
+                    "allowNull": false
+                },
+                "tableName": {
+                    "type": "STRING",
+                    "allowNull": false
+                },
+                "recordId": {
+                    "type": "INTEGER",
+                    "allowNull": false
+                }
+            },
+            "options": {
+                "timestamps": true,
+                "indexes": [
+                    {
+                        "unique": true,
+                        "fields": [
+                            "level",
+                            "defaultValueId",
+                            "tableName"
+                        ]
+                    }
+                ]
+            }
+        },
+        {
+            "name": "Users",
+            "tableName": "users",
+            "fields": {
+                "id": {
+                    "type": "INTEGER",
+                    "primaryKey": true,
+                    "autoIncrement": true
+                },
+                "email": {
+                    "type": "STRING",
+                    "allowNull": true,
+                    "validate": {
+                        "isEmail": true
+                    }
+                },
+                "name": {
+                    "type": "STRING",
+                    "allowNull": false,
+                    "unique": false
+                },
+                "password_hash": {
+                    "type": "STRING",
+                    "allowNull": true
+                },
+                "isGuest": {
+                    "type": "BOOLEAN",
+                    "allowNull": false,
+                    "defaultValue": false
+                }
+            },
+            "options": {
+                "timestamps": true,
+                "defaultScope": {
+                    "attributes": {
+                        "exclude": [
+                            "password_hash"
+                        ]
+                    }
+                },
+                "scopes": {
+                    "withPassword": {
+                        "attributes": {}
+                    }
+                }
+            }
+        },
+        {
+            "name": "Sessions",
+            "tableName": "sessions",
+            "fields": {
+                "id": {
+                    "type": "INTEGER",
+                    "primaryKey": true,
+                    "autoIncrement": true
+                },
+                "sessionId": {
+                    "type": "STRING",
+                    "allowNull": false
+                },
+                "userId": {
+                    "type": "INTEGER",
+                    "allowNull": true,
+                    "references": {
+                        "model": "users",
+                        "key": "id"
+                    }
+                },
+                "isGuest": {
+                    "type": "BOOLEAN",
+                    "allowNull": false,
+                    "defaultValue": false
+                }
+            },
+            "options": {
+                "timestamps": true
+            }
+        },
+        {
+            "name": "UserSettingsTypes",
+            "tableName": "user_settings_types",
+            "fields": {
+                "id": {
+                    "type": "INTEGER",
+                    "primaryKey": true,
+                    "autoIncrement": true
+                },
+                "name": {
+                    "type": "STRING",
+                    "allowNull": false,
+                    "unique": true
+                },
+                "valueTableName": {
+                    "type": "STRING",
+                    "allowNull": false
+                }
+            },
+            "options": {
+                "timestamps": true
+            }
+        },
+        {
+            "name": "UserSettingsFields",
+            "tableName": "user_settings_fields",
+            "fields": {
+                "id": {
+                    "type": "INTEGER",
+                    "primaryKey": true,
+                    "autoIncrement": true
+                },
+                "name": {
+                    "type": "STRING",
+                    "allowNull": false,
+                    "unique": true
+                },
+                "displayName": {
+                    "type": "STRING",
+                    "allowNull": false
+                },
+                "typeId": {
+                    "type": "INTEGER",
+                    "allowNull": false,
+                    "references": {
+                        "model": "user_settings_types",
+                        "key": "id"
+                    }
+                },
+                "options": {
+                    "type": "JSON",
+                    "allowNull": true,
+                    "defaultValue": null
+                }
+            },
+            "options": {
+                "timestamps": true
+            }
+        },
+        {
+            "name": "UserSettingsStringValues",
+            "tableName": "user_settings_string_values",
+            "fields": {
+                "id": {
+                    "type": "INTEGER",
+                    "primaryKey": true,
+                    "autoIncrement": true
+                },
+                "userId": {
+                    "type": "INTEGER",
+                    "allowNull": false,
+                    "references": {
+                        "model": "users",
+                        "key": "id"
+                    }
+                },
+                "settingsFieldId": {
+                    "type": "INTEGER",
+                    "allowNull": false,
+                    "references": {
+                        "model": "user_settings_fields",
+                        "key": "id"
+                    }
+                },
+                "value": {
+                    "type": "STRING",
+                    "allowNull": true
+                }
+            },
+            "options": {
+                "timestamps": true,
+                "indexes": [
+                    {
+                        "unique": true,
+                        "fields": [
+                            "userId",
+                            "settingsFieldId"
+                        ]
+                    }
+                ]
+            }
+        },
+        {
+            "name": "UserSettingsNumberValues",
+            "tableName": "user_settings_number_values",
+            "fields": {
+                "id": {
+                    "type": "INTEGER",
+                    "primaryKey": true,
+                    "autoIncrement": true
+                },
+                "userId": {
+                    "type": "INTEGER",
+                    "allowNull": false,
+                    "references": {
+                        "model": "users",
+                        "key": "id"
+                    }
+                },
+                "settingsFieldId": {
+                    "type": "INTEGER",
+                    "allowNull": false,
+                    "references": {
+                        "model": "user_settings_fields",
+                        "key": "id"
+                    }
+                },
+                "value": {
+                    "type": "INTEGER",
+                    "allowNull": true
+                }
+            },
+            "options": {
+                "timestamps": true,
+                "indexes": [
+                    {
+                        "unique": true,
+                        "fields": [
+                            "userId",
+                            "settingsFieldId"
+                        ]
+                    }
+                ]
+            }
+        },
+        {
+            "name": "UserSettingsBooleanValues",
+            "tableName": "user_settings_boolean_values",
+            "fields": {
+                "id": {
+                    "type": "INTEGER",
+                    "primaryKey": true,
+                    "autoIncrement": true
+                },
+                "userId": {
+                    "type": "INTEGER",
+                    "allowNull": false,
+                    "references": {
+                        "model": "users",
+                        "key": "id"
+                    }
+                },
+                "settingsFieldId": {
+                    "type": "INTEGER",
+                    "allowNull": false,
+                    "references": {
+                        "model": "user_settings_fields",
+                        "key": "id"
+                    }
+                },
+                "value": {
+                    "type": "BOOLEAN",
+                    "allowNull": true
+                }
+            },
+            "options": {
+                "timestamps": true,
+                "indexes": [
+                    {
+                        "unique": true,
+                        "fields": [
+                            "userId",
+                            "settingsFieldId"
+                        ]
+                    }
+                ]
+            }
+        },
+        {
+            "name": "UserSettingsDateValues",
+            "tableName": "user_settings_date_values",
+            "fields": {
+                "id": {
+                    "type": "INTEGER",
+                    "primaryKey": true,
+                    "autoIncrement": true
+                },
+                "userId": {
+                    "type": "INTEGER",
+                    "allowNull": false,
+                    "references": {
+                        "model": "users",
+                        "key": "id"
+                    }
+                },
+                "settingsFieldId": {
+                    "type": "INTEGER",
+                    "allowNull": false,
+                    "references": {
+                        "model": "user_settings_fields",
+                        "key": "id"
+                    }
+                },
+                "value": {
+                    "type": "DATE",
+                    "allowNull": true
+                }
+            },
+            "options": {
+                "timestamps": true,
+                "indexes": [
+                    {
+                        "unique": true,
+                        "fields": [
+                            "userId",
+                            "settingsFieldId"
+                        ]
+                    }
+                ]
+            }
+        }
+    ],
+    "associations": [
+        {
+            "source": "UserSettingsTypes",
+            "target": "UserSettingsFields",
+            "type": "hasMany",
+            "options": {
+                "foreignKey": "typeId",
+                "as": "fields"
+            }
+        },
+        {
+            "source": "UserSettingsFields",
+            "target": "UserSettingsTypes",
+            "type": "belongsTo",
+            "options": {
+                "foreignKey": "typeId",
+                "as": "type"
+            }
+        },
+        {
+            "source": "Users",
+            "target": "UserSettingsStringValues",
+            "type": "hasMany",
+            "options": {
+                "foreignKey": "userId",
+                "as": "settingsStringValues"
+            }
+        },
+        {
+            "source": "UserSettingsStringValues",
+            "target": "Users",
+            "type": "belongsTo",
+            "options": {
+                "foreignKey": "userId",
+                "as": "user"
+            }
+        },
+        {
+            "source": "UserSettingsFields",
+            "target": "UserSettingsStringValues",
+            "type": "hasMany",
+            "options": {
+                "foreignKey": "settingsFieldId",
+                "as": "stringValues"
+            }
+        },
+        {
+            "source": "UserSettingsStringValues",
+            "target": "UserSettingsFields",
+            "type": "belongsTo",
+            "options": {
+                "foreignKey": "settingsFieldId",
+                "as": "field"
+            }
+        },
+        {
+            "source": "Users",
+            "target": "UserSettingsNumberValues",
+            "type": "hasMany",
+            "options": {
+                "foreignKey": "userId",
+                "as": "settingsNumberValues"
+            }
+        },
+        {
+            "source": "UserSettingsNumberValues",
+            "target": "Users",
+            "type": "belongsTo",
+            "options": {
+                "foreignKey": "userId",
+                "as": "user"
+            }
+        },
+        {
+            "source": "UserSettingsFields",
+            "target": "UserSettingsNumberValues",
+            "type": "hasMany",
+            "options": {
+                "foreignKey": "settingsFieldId",
+                "as": "numberValues"
+            }
+        },
+        {
+            "source": "UserSettingsNumberValues",
+            "target": "UserSettingsFields",
+            "type": "belongsTo",
+            "options": {
+                "foreignKey": "settingsFieldId",
+                "as": "field"
+            }
+        },
+        {
+            "source": "Users",
+            "target": "UserSettingsBooleanValues",
+            "type": "hasMany",
+            "options": {
+                "foreignKey": "userId",
+                "as": "settingsBooleanValues"
+            }
+        },
+        {
+            "source": "UserSettingsBooleanValues",
+            "target": "Users",
+            "type": "belongsTo",
+            "options": {
+                "foreignKey": "userId",
+                "as": "user"
+            }
+        },
+        {
+            "source": "UserSettingsFields",
+            "target": "UserSettingsBooleanValues",
+            "type": "hasMany",
+            "options": {
+                "foreignKey": "settingsFieldId",
+                "as": "booleanValues"
+            }
+        },
+        {
+            "source": "UserSettingsBooleanValues",
+            "target": "UserSettingsFields",
+            "type": "belongsTo",
+            "options": {
+                "foreignKey": "settingsFieldId",
+                "as": "field"
+            }
+        },
+        {
+            "source": "Users",
+            "target": "UserSettingsDateValues",
+            "type": "hasMany",
+            "options": {
+                "foreignKey": "userId",
+                "as": "settingsDateValues"
+            }
+        },
+        {
+            "source": "UserSettingsDateValues",
+            "target": "Users",
+            "type": "belongsTo",
+            "options": {
+                "foreignKey": "userId",
+                "as": "user"
+            }
+        },
+        {
+            "source": "UserSettingsFields",
+            "target": "UserSettingsDateValues",
+            "type": "hasMany",
+            "options": {
+                "foreignKey": "settingsFieldId",
+                "as": "dateValues"
+            }
+        },
+        {
+            "source": "UserSettingsDateValues",
+            "target": "UserSettingsFields",
+            "type": "belongsTo",
+            "options": {
+                "foreignKey": "settingsFieldId",
+                "as": "field"
+            }
+        }
+    ],
+    "DEFAULT_VALUES_TABLE": "default_values"
+}

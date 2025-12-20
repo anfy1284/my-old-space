@@ -1,0 +1,13 @@
+{
+    "level": "forms",
+    "publicFiles": [
+        "index.html",
+        "client.js",
+        "UI_classes.js",
+        "UI.js",
+        "style.css",
+        "background.jpg",
+        "client_config.json"
+    ],
+    "defaultColor": "#c0c0c0"
+}

@@ -1,0 +1,196 @@
+{
+    "models": [
+        {
+            "name": "Messenger_Chats",
+            "tableName": "Messenger_Chats",
+            "fields": {
+                "id": {
+                    "type": "INTEGER",
+                    "primaryKey": true,
+                    "autoIncrement": true
+                },
+                "userId": {
+                    "type": "INTEGER",
+                    "allowNull": false,
+                    "references": {
+                        "model": "users",
+                        "key": "id"
+                    }
+                },
+                "name": {
+                    "type": "STRING",
+                    "allowNull": false
+                },
+                "description": {
+                    "type": "STRING",
+                    "allowNull": true
+                },
+                "isActive": {
+                    "type": "BOOLEAN",
+                    "allowNull": false,
+                    "defaultValue": true
+                }
+            },
+            "options": {
+                "timestamps": true
+            }
+        },
+        {
+            "name": "Messenger_Messages",
+            "tableName": "Messenger_Messages",
+            "fields": {
+                "id": {
+                    "type": "INTEGER",
+                    "primaryKey": true,
+                    "autoIncrement": true
+                },
+                "chatId": {
+                    "type": "INTEGER",
+                    "allowNull": false,
+                    "references": {
+                        "model": "Messenger_Chats",
+                        "key": "id"
+                    }
+                },
+                "userId": {
+                    "type": "INTEGER",
+                    "allowNull": false,
+                    "references": {
+                        "model": "users",
+                        "key": "id"
+                    }
+                },
+                "content": {
+                    "type": "STRING",
+                    "allowNull": false
+                },
+                "isRead": {
+                    "type": "BOOLEAN",
+                    "allowNull": false,
+                    "defaultValue": false
+                },
+                "isDelivered": {
+                    "type": "BOOLEAN",
+                    "allowNull": false,
+                    "defaultValue": false
+                }
+            },
+            "options": {
+                "timestamps": true
+            }
+        },
+        {
+            "name": "Messenger_ChatMembers",
+            "tableName": "Messenger_ChatMembers",
+            "fields": {
+                "id": {
+                    "type": "INTEGER",
+                    "primaryKey": true,
+                    "autoIncrement": true
+                },
+                "chatId": {
+                    "type": "INTEGER",
+                    "allowNull": false,
+                    "references": {
+                        "model": "Messenger_Chats",
+                        "key": "id"
+                    }
+                },
+                "userId": {
+                    "type": "INTEGER",
+                    "allowNull": false,
+                    "references": {
+                        "model": "users",
+                        "key": "id"
+                    }
+                },
+                "role": {
+                    "type": "STRING",
+                    "allowNull": false,
+                    "defaultValue": "member"
+                },
+                "customName": {
+                    "type": "STRING",
+                    "allowNull": true
+                },
+                "joinedAt": {
+                    "type": "DATE",
+                    "allowNull": false
+                },
+                "isActive": {
+                    "type": "BOOLEAN",
+                    "allowNull": false,
+                    "defaultValue": true
+                }
+            },
+            "options": {
+                "timestamps": true,
+                "indexes": [
+                    {
+                        "unique": true,
+                        "fields": [
+                            "chatId",
+                            "userId"
+                        ]
+                    }
+                ]
+            }
+        }
+    ],
+    "associations": [
+        {
+            "source": "Messenger_Chats",
+            "target": "Messenger_ChatMembers",
+            "type": "hasMany",
+            "options": {
+                "foreignKey": "chatId",
+                "as": "members"
+            }
+        },
+        {
+            "source": "Messenger_ChatMembers",
+            "target": "Messenger_Chats",
+            "type": "belongsTo",
+            "options": {
+                "foreignKey": "chatId",
+                "as": "chat"
+            }
+        },
+        {
+            "source": "Messenger_Chats",
+            "target": "Messenger_Messages",
+            "type": "hasMany",
+            "options": {
+                "foreignKey": "chatId",
+                "as": "messages"
+            }
+        },
+        {
+            "source": "Messenger_Messages",
+            "target": "Messenger_Chats",
+            "type": "belongsTo",
+            "options": {
+                "foreignKey": "chatId",
+                "as": "chat"
+            }
+        },
+        {
+            "source": "Messenger_ChatMembers",
+            "target": "Users",
+            "type": "belongsTo",
+            "options": {
+                "foreignKey": "userId",
+                "as": "user"
+            }
+        },
+        {
+            "source": "Messenger_Messages",
+            "target": "Users",
+            "type": "belongsTo",
+            "options": {
+                "foreignKey": "userId",
+                "as": "author"
+            }
+        }
+    ]
+}

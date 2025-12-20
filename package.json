@@ -1,0 +1,22 @@
+{
+  "name": "my-old-space",
+  "version": "1.0.0",
+  "description": "Core framework extracted from the project for reuse as an NPM package.",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js"
+  },
+  "files": [
+    "apps/",
+    "drive_forms/",
+    "drive_root/"
+  ],
+  "keywords": ["framework", "core", "my-old-space"],
+  "author": "Andrey",
+  "license": "MIT",
+  "dependencies": {
+    "dotenv": "^16.0.0",
+    "selfsigned": "^2.0.0",
+    "sequelize": "^6.0.0"
+  }
+}

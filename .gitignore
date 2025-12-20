@@ -1,10 +1,25 @@
 .DS_Store
 Thumbs.db
-*.pyc
-__pycache__/
+ehthumbs.db
+Desktop.ini
+
+# Node/npm
 node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Logs
+logs/
+*.log
+
+# Editor / IDE
 .vscode/
+.idea/
+
+# Environment files
 .env
+
+# Build output
 dist/
 build/
-.idea/
