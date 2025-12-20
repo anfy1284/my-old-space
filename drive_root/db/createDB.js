@@ -224,9 +224,9 @@ async function createAll() {
     models[def.name] = sequelize.define(def.name, fields, { ...def.options, tableName: def.tableName });
   }
 
-  // Start transaction for all migration operations (skip transaction for SQLite to avoid file locks)
-  const isSqliteGlobal = sequelize.getDialect && sequelize.getDialect() === 'sqlite';
-  const transaction = isSqliteGlobal ? null : await sequelize.transaction();
+  // Start transaction for all migration operations (skip global transaction for SQLite to avoid file locks)
+  const isSqlite = sequelize.getDialect && sequelize.getDialect() === 'sqlite';
+  const transaction = isSqlite ? null : await sequelize.transaction();
 
   try {
     console.log('[MIGRATION] Starting database schema check...');
@@ -266,7 +266,6 @@ async function createAll() {
       console.log(`[MIGRATION] Batch migration needed for ${tablesToMigrate.length} tables.`);
 
       // A. Backup Data
-      const isSqlite = sequelize.getDialect && sequelize.getDialect() === 'sqlite';
       for (const item of tablesToMigrate) {
         const { def } = item;
         const tempTableName = `${def.tableName}_temp_backup`;
