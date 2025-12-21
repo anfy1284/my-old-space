@@ -13,37 +13,39 @@ try {
 	console.error('[drive_forms] Failed to read server_config.json:', e.message);
 }
 
-// Load apps.json config
+// Load apps.json config (consider framework-local, package root and project root)
 let appsConfig = { apps: [] };
 try {
 	const localAppsPath = path.join(__dirname, 'apps.json');
-	const rootAppsPath = path.join(__dirname, '..', 'apps.json');
+	const packageAppsPath = path.join(__dirname, '..', 'apps.json');
+	const projectAppsPath = path.resolve(process.cwd(), 'apps.json');
 
 	const configs = [];
 	if (fs.existsSync(localAppsPath)) {
-		configs.push(JSON.parse(fs.readFileSync(localAppsPath, 'utf8')));
+		configs.push({ cfg: JSON.parse(fs.readFileSync(localAppsPath, 'utf8')), baseDir: path.resolve(__dirname, '..') });
 	}
-	if (fs.existsSync(rootAppsPath)) {
-		configs.push(JSON.parse(fs.readFileSync(rootAppsPath, 'utf8')));
+	if (fs.existsSync(packageAppsPath)) {
+		configs.push({ cfg: JSON.parse(fs.readFileSync(packageAppsPath, 'utf8')), baseDir: path.resolve(__dirname, '..') });
+	}
+	if (fs.existsSync(projectAppsPath)) {
+		configs.push({ cfg: JSON.parse(fs.readFileSync(projectAppsPath, 'utf8')), baseDir: process.cwd() });
 	}
 
 	if (configs.length > 0) {
-		appsConfig = configs[0];
-		if (configs.length > 1) {
-			// Merge apps arrays from both configs
-			const mergedApps = [...(appsConfig.apps || [])];
-			const rootApps = configs[1].apps || [];
-			rootApps.forEach(app => {
-				if (!mergedApps.find(a => a.name === app.name)) {
-					mergedApps.push(app);
-				}
-			});
-			appsConfig.apps = mergedApps;
-			// If root config has a path, it takes precedence for root apps
-			if (configs[1].path) {
-				appsConfig.path = configs[1].path;
+		// Merge apps with priority: project (last) overrides package and framework
+		const appsMap = new Map();
+		let chosenPath = '/apps';
+		for (const entry of configs) {
+			const cfg = entry.cfg || {};
+			const appsPath = (cfg.path || '/apps').replace(/^[/\\]+/, '');
+			if (cfg.path) chosenPath = cfg.path;
+			const apps = cfg.apps || [];
+			for (const app of apps) {
+				appsMap.set(app.name, Object.assign({}, app));
 			}
 		}
+		appsConfig.apps = Array.from(appsMap.values());
+		appsConfig.path = chosenPath;
 	}
 	if (!appsConfig.path) appsConfig.path = '/apps';
 } catch (e) {

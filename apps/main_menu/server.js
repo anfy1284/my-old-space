@@ -5,37 +5,44 @@ async function getMainMenuCommands(appsJsonUrl = '/drive_forms/apps.json') {
     const path = require('path');
     const result = [];
     try {
-        // points to merged apps.json logic
+        // consider apps.json from drive_forms, package root and project root
         const localAppsJsonPath = path.resolve(__dirname, '../../drive_forms/apps.json');
-        const rootAppsJsonPath = path.resolve(__dirname, '../../apps.json');
+        const packageAppsJsonPath = path.resolve(__dirname, '../../apps.json');
+        const projectAppsJsonPath = path.resolve(process.cwd(), 'apps.json');
 
-        let allApps = [];
-        let appsBasePath = "apps"; // Default
-        const loadAppsFromPath = async (p) => {
-            if (require('fs').existsSync(p)) {
-                try {
-                    const cfg = JSON.parse(await fs.readFile(p, 'utf8'));
-                    if (cfg.path) appsBasePath = cfg.path.replace(/^[/\\]+/, '');
+        const sources = [
+            { p: localAppsJsonPath, baseDir: path.resolve(__dirname, '..', '..') },
+            { p: packageAppsJsonPath, baseDir: path.resolve(__dirname, '..', '..') },
+            { p: projectAppsJsonPath, baseDir: process.cwd() }
+        ];
+
+        const appsMap = new Map();
+        for (const src of sources) {
+            try {
+                if (require('fs').existsSync(src.p)) {
+                    const cfg = JSON.parse(await fs.readFile(src.p, 'utf8'));
+                    const appsPath = (cfg.path || 'apps').replace(/^[/\\]+/, '');
                     if (Array.isArray(cfg.apps)) {
-                        cfg.apps.forEach(app => {
-                            if (app.name && !allApps.find(a => a.name === app.name)) {
-                                allApps.push(app);
+                        for (const app of cfg.apps) {
+                            if (app.name) {
+                                appsMap.set(app.name, Object.assign({}, app, { __appsBaseDir: src.baseDir, __appsPath: appsPath }));
                             }
-                        });
+                        }
                     }
-                } catch (e) {
-                    console.error(`[main_menu] Error reading apps.json at ${p}:`, e.message);
                 }
+            } catch (e) {
+                console.error(`[main_menu] Error reading apps.json at ${src.p}:`, e.message);
             }
-        };
+        }
 
-        await loadAppsFromPath(localAppsJsonPath);
-        await loadAppsFromPath(rootAppsJsonPath);
-
+        const allApps = Array.from(appsMap.values());
         if (allApps.length === 0) return result;
 
         for (const app of allApps) {
-            const configPath = path.resolve(__dirname, `../../${appsBasePath}/${app.name}/config.json`);
+            const baseDir = app.__appsBaseDir || path.resolve(__dirname, '..');
+            const appsBasePath = app.__appsPath || 'apps';
+            const cleanAppPath = (app.path || `/${app.name}`).replace(/^[/\\]+/, '');
+            const configPath = path.resolve(baseDir, appsBasePath, cleanAppPath, 'config.json');
             try {
                 const cfg = JSON.parse(await fs.readFile(configPath, 'utf8'));
                 if (cfg.mainMenuCommands) {

@@ -205,12 +205,13 @@ async function handleRequest(req, res) {
             const resType = parts[3];
             const relPath = parts.slice(4).join(path.sep);
 
-            // Path to apps folder relative to drive_root
+            // Path to apps folder relative to drive_root, but prefer project-level apps when present
             let appsBasePath = "apps"; // Default
             try {
-                // Try to find path in apps.json files
+                // Try to find path in apps.json files: appDir/apps.json, drive_root/../apps.json, project/apps.json
                 const localAppsJsonPath = path.join(appDir, 'apps.json');
                 const rootAppsJsonPath = path.join(__dirname, '..', 'apps.json');
+                const projectAppsJsonPath = path.resolve(process.cwd(), 'apps.json');
                 const checkPath = (p) => {
                     if (fs.existsSync(p)) {
                         try {
@@ -221,11 +222,31 @@ async function handleRequest(req, res) {
                 };
                 checkPath(localAppsJsonPath);
                 checkPath(rootAppsJsonPath);
+                checkPath(projectAppsJsonPath);
             } catch (e) { }
-            const appsDir = path.join(__dirname, '..', appsBasePath);
+
+            const appsDirPackage = path.join(__dirname, '..', appsBasePath);
+            const appsDirProject = path.join(process.cwd(), appsBasePath);
 
             if (resType === 'public') {
-                const filePath = path.join(appsDir, appName, 'resources', 'public', relPath);
+                // Prefer project apps directory if file exists there
+                const projectFilePath = path.join(appsDirProject, appName, 'resources', 'public', relPath);
+                if (fs.existsSync(projectFilePath) && fs.statSync(projectFilePath).isFile()) {
+                    const contentType = getContentType(projectFilePath);
+                    fs.readFile(projectFilePath, (err, data) => {
+                        if (err) {
+                            res.writeHead(500, { 'Content-Type': 'text/plain' });
+                            res.end('Error reading file');
+                            return;
+                        }
+                        res.writeHead(200, { 'Content-Type': contentType });
+                        res.end(data);
+                    });
+                    return;
+                }
+
+                // Fallback to package apps directory
+                const filePath = path.join(appsDirPackage, appName, 'resources', 'public', relPath);
 
                 if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
                     res.writeHead(404, { 'Content-Type': 'text/plain' });

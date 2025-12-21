@@ -21,48 +21,59 @@ function collectModels() {
   let allModels = [...modelsDef];
   const defaultValuesByLevel = { [LEVEL]: defaultValues };
 
-  // Get list of apps
-  const localAppsJsonPath = path.resolve(__dirname, '../apps.json');
-  const rootAppsJsonPath = path.resolve(__dirname, '../../apps.json');
+  // Get list of apps from multiple possible apps.json locations:
+  // 1) drive_forms/apps.json (framework-local)
+  // 2) my-old-space package root apps.json
+  // 3) project root apps.json (process.cwd())
+  const sources = [];
+  const localAppsJsonPath = path.resolve(__dirname, '../apps.json'); // drive_forms/apps.json
+  const packageAppsJsonPath = path.resolve(__dirname, '../../apps.json'); // my-old-space/apps.json
+  const projectAppsJsonPath = path.resolve(process.cwd(), 'apps.json'); // project-level apps.json
 
-  let appsList = [];
-  try {
-    const configs = [];
-    if (fs.existsSync(localAppsJsonPath)) {
-      configs.push(JSON.parse(fs.readFileSync(localAppsJsonPath, 'utf8')));
-    }
-    if (fs.existsSync(rootAppsJsonPath)) {
-      configs.push(JSON.parse(fs.readFileSync(rootAppsJsonPath, 'utf8')));
-    }
-
-    if (configs.length > 0) {
-      const mergedApps = (configs[0].apps || []);
-      if (configs.length > 1) {
-        const rootApps = configs[1].apps || [];
-        rootApps.forEach(app => {
-          if (!mergedApps.find(a => a.name === app.name)) {
-            mergedApps.push(app);
-          }
-        });
-      }
-      appsList = mergedApps;
-    }
-  } catch (e) {
-    console.error('[COLLECT] Error reading or merging apps.json:', e.message);
-  }
-
-  // Collect models and defaultValues from each app
-  let appsBasePath = "apps"; // Default if not specified
   try {
     if (fs.existsSync(localAppsJsonPath)) {
       const cfg = JSON.parse(fs.readFileSync(localAppsJsonPath, 'utf8'));
-      if (cfg.path) appsBasePath = cfg.path.replace(/^[/\\]+/, '');
+      sources.push({ cfg, baseDir: path.resolve(__dirname, '..') });
     }
-  } catch (e) { }
+  } catch (e) { console.error('[COLLECT] Error reading', localAppsJsonPath, e.message); }
 
+  try {
+    if (fs.existsSync(packageAppsJsonPath)) {
+      const cfg = JSON.parse(fs.readFileSync(packageAppsJsonPath, 'utf8'));
+      sources.push({ cfg, baseDir: path.resolve(__dirname, '../../') });
+    }
+  } catch (e) { console.error('[COLLECT] Error reading', packageAppsJsonPath, e.message); }
+
+  try {
+    if (fs.existsSync(projectAppsJsonPath)) {
+      const cfg = JSON.parse(fs.readFileSync(projectAppsJsonPath, 'utf8'));
+      sources.push({ cfg, baseDir: process.cwd() });
+    }
+  } catch (e) { console.error('[COLLECT] Error reading', projectAppsJsonPath, e.message); }
+
+  // Merge apps with priority: project -> package -> framework (later sources override earlier)
+  const appsMap = new Map();
+  for (const src of sources) {
+    const cfg = src.cfg || {};
+    const apps = cfg.apps || [];
+    const appsPath = (cfg.path || 'apps').replace(/^[/\\]+/, '');
+    for (const app of apps) {
+      // prefer later sources (project) to override earlier entries
+      appsMap.set(app.name, Object.assign({}, app, { __appsBaseDir: src.baseDir, __appsPath: appsPath }));
+    }
+  }
+
+  const appsList = Array.from(appsMap.values());
+
+  // Collect models and defaultValues from each app
   for (const app of appsList) {
+    // Determine app directory based on source that provided this app
+    const baseDir = app.__appsBaseDir || path.resolve(__dirname, '../../');
+    const appsBasePath = app.__appsPath || 'apps';
+    const cleanAppPath = (app.path || `/${app.name}`).replace(/^[/\\]+/, '');
+
     // Load models from app's db/db.json
-    const dbPath = path.resolve(__dirname, `../../${appsBasePath}${app.path}/db/db.json`);
+    const dbPath = path.resolve(baseDir, `${appsBasePath}`, cleanAppPath, 'db', 'db.json');
     if (fs.existsSync(dbPath)) {
       try {
         const appExport = require(dbPath);
@@ -77,7 +88,7 @@ function collectModels() {
     }
 
     // Load defaultValues from app's db/defaultValues.json
-    const appDefPath = path.resolve(__dirname, `../../${appsBasePath}${app.path}/db/defaultValues.json`);
+    const appDefPath = path.resolve(baseDir, `${appsBasePath}`, cleanAppPath, 'db', 'defaultValues.json');
     if (fs.existsSync(appDefPath)) {
       try {
         const raw = JSON.parse(fs.readFileSync(appDefPath, 'utf8'));
@@ -94,7 +105,10 @@ function collectModels() {
   const accessSet = new Set();
 
   for (const app of appsList) {
-    const configPath = path.resolve(__dirname, `../../${appsBasePath}${app.path}/config.json`);
+    const baseDir = app.__appsBaseDir || path.resolve(__dirname, '../../');
+    const appsBasePath = app.__appsPath || 'apps';
+    const cleanAppPath = (app.path || `/${app.name}`).replace(/^[/\\]+/, '');
+    const configPath = path.resolve(baseDir, `${appsBasePath}`, cleanAppPath, 'config.json');
     try {
       const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
       if (Array.isArray(config.system)) {
@@ -104,7 +118,10 @@ function collectModels() {
         config.access.forEach(a => accessSet.add(a));
       }
     } catch (e) {
-      console.error(`[COLLECT] Error reading ${configPath}:`, e.message);
+      // ignore missing config files for some apps, log other errors
+      if (e.code !== 'ENOENT') {
+        console.error(`[COLLECT] Error reading ${configPath}:`, e.message);
+      }
     }
   }
 
