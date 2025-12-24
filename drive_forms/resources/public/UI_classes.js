@@ -1189,6 +1189,62 @@ class Form extends UIObject {
             });
         });
     }
+
+    // Resize the form to fit its content. Options: { padW, padH, minWidth, minHeight }
+    setSizeToContent(options) {
+        options = options || {};
+        const padW = (typeof options.padW === 'number') ? options.padW : 20;
+        const padH = (typeof options.padH === 'number') ? options.padH : 20;
+        const minWidth = (typeof options.minWidth === 'number') ? options.minWidth : 120;
+        const minHeight = (typeof options.minHeight === 'number') ? options.minHeight : 80;
+
+        if (!this.element || !this.contentArea) return;
+
+        // Temporarily unset width on contentArea to measure intrinsic width if possible
+        const prevWidth = this.contentArea.style.width || '';
+        try {
+            this.contentArea.style.width = 'auto';
+        } catch (e) {
+            // ignore
+        }
+
+        // Measure content size
+        const contentWidth = Math.max(this.contentArea.scrollWidth || 0, this.contentArea.clientWidth || 0);
+        const contentHeight = this.contentArea.scrollHeight || 0;
+
+        // Restore previous width style
+        try {
+            this.contentArea.style.width = prevWidth;
+        } catch (e) {
+            // ignore
+        }
+
+        const titleH = this.titleBar ? this.titleBar.offsetHeight || 0 : 0;
+
+        const targetWidth = Math.max(minWidth, Math.ceil(contentWidth + padW));
+        const targetHeight = Math.max(minHeight, Math.ceil(titleH + contentHeight + padH));
+
+        this.setWidth(targetWidth);
+        this.setHeight(targetHeight);
+
+        if (this.element) {
+            this.element.style.width = this.width + 'px';
+            this.element.style.height = this.height + 'px';
+        }
+
+        // Update contentArea height to fill remaining space
+        if (this.contentArea && this.titleBar) {
+            try {
+                this.contentArea.style.height = 'calc(100% - ' + (this.titleBar.offsetHeight) + 'px)';
+            } catch (e) {
+                this.contentArea.style.height = (this.height - titleH) + 'px';
+            }
+        }
+
+        // Reposition if anchored
+        if (this.anchorToWindow) this.updatePositionOnResize();
+        if (this.proportionalLayout) this.updateProportionalLayout();
+    }
 }
 
 // Static properties for form management
@@ -2433,4 +2489,53 @@ function showAlert(message, onOk) {
 // Expose to global scope
 if (typeof window !== 'undefined') {
     window.showAlert = showAlert;
+}
+
+function loadResource(src, type = 'script', callback) {
+    let el;
+    if (type === 'script') {
+        el = document.createElement('script');
+        el.src = src;
+        el.onload = callback || function(){};
+    } else if (type === 'style' || type === 'css') {
+        el = document.createElement('link');
+        el.rel = 'stylesheet';
+        el.href = src;
+        el.onload = callback || function(){};
+    } else {
+        throw new Error('Unsupported resource type: ' + type);
+    }
+    document.head.appendChild(el);
+}
+
+function loadHTMLContent(src, callback) {
+    const fetchText = () => {
+        if (window.fetch) {
+            return fetch(src).then(res => {
+                if (!res.ok) throw new Error('Failed to load ' + src + ' (' + res.status + ')');
+                return res.text();
+            });
+        }
+        return new Promise((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            xhr.open('GET', src, true);
+            xhr.onreadystatechange = function () {
+                if (xhr.readyState === 4) {
+                    if (xhr.status >= 200 && xhr.status < 300) resolve(xhr.responseText);
+                    else reject(new Error('Failed to load ' + src + ' (' + xhr.status + ')'));
+                }
+            };
+            xhr.onerror = function () {
+                reject(new Error('Network error while loading ' + src));
+            };
+            xhr.send();
+        });
+    };
+
+    if (typeof callback === 'function') {
+        fetchText().then(text => callback(null, text)).catch(err => callback(err));
+        return;
+    }
+
+    return fetchText();
 }
