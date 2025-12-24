@@ -213,6 +213,70 @@ async function createAll() {
   const mergedModelsDef = mergeModelDefinitions(allModelsDef);
   console.log(`[MIGRATION] Total models after merge: ${mergedModelsDef.length}`);
 
+  // Build dependency graph based on fields.references to determine create order
+  function computeCreateOrder(modelsDefs) {
+    const nameByTable = new Map(); // tableName -> def
+    for (const def of modelsDefs) {
+      nameByTable.set(def.tableName, def);
+    }
+
+    // Build adjacency: from parent -> set(children)
+    const adj = new Map();
+    const indeg = new Map();
+
+    for (const def of modelsDefs) {
+      const table = def.tableName;
+      if (!adj.has(table)) adj.set(table, new Set());
+      if (!indeg.has(table)) indeg.set(table, 0);
+    }
+
+    for (const def of modelsDefs) {
+      const table = def.tableName;
+      for (const [field, opts] of Object.entries(def.fields || {})) {
+        if (opts && opts.references && opts.references.model) {
+          let referenced = opts.references.model;
+          // referenced may be tableName or model name - try to resolve
+          if (!nameByTable.has(referenced)) {
+            const found = modelsDefs.find(d => d.name === referenced);
+            if (found) referenced = found.tableName;
+          }
+          if (nameByTable.has(referenced)) {
+            // edge: referenced -> table (parent -> child)
+            adj.get(referenced).add(table);
+            indeg.set(table, (indeg.get(table) || 0) + 1);
+          }
+        }
+      }
+    }
+
+    // Kahn's algorithm
+    const queue = [];
+    for (const [t, d] of indeg.entries()) {
+      if (d === 0) queue.push(t);
+    }
+
+    const order = [];
+    while (queue.length) {
+      const t = queue.shift();
+      order.push(t);
+      const children = adj.get(t) || new Set();
+      for (const c of children) {
+        indeg.set(c, indeg.get(c) - 1);
+        if (indeg.get(c) === 0) queue.push(c);
+      }
+    }
+
+    if (order.length !== modelsDefs.length) {
+      console.warn('[MIGRATION] Warning: cyclic or unresolved FK dependencies detected. Using default model order.');
+      return modelsDefs.map(d => d.tableName);
+    }
+
+    return order;
+  }
+
+  const createOrderTableNames = computeCreateOrder(mergedModelsDef);
+  const createOrderDefs = createOrderTableNames.map(tn => mergedModelsDef.find(d => d.tableName === tn)).filter(Boolean);
+
   // 3. Initialize Sequelize Models
   const models = {};
   for (const def of mergedModelsDef) {
@@ -301,7 +365,7 @@ async function createAll() {
       // C. Recreate/Sync ALL Tables 
       // Sync ALL models to ensure cascading drops are healed (FKs restored)
       console.log(`[MIGRATION] Re-syncing all tables structure...`);
-      for (const def of mergedModelsDef) {
+      for (const def of createOrderDefs) {
         if (isSqlite) {
           await models[def.name].sync();
           await syncUniqueConstraints(sequelize, null, def.tableName, def.fields);
@@ -322,7 +386,12 @@ async function createAll() {
 
       console.log('[MIGRATION] Restoring all data from backups...');
 
-      for (const item of tablesToMigrate) {
+      // Restore in dependency order (parents first) to minimise FK conflicts
+      const tablesToMigrateMap = new Map();
+      for (const item of tablesToMigrate) tablesToMigrateMap.set(item.def.tableName, item);
+      const orderedMigrateItems = createOrderTableNames.map(tn => tablesToMigrateMap.get(tn)).filter(Boolean);
+
+      for (const item of orderedMigrateItems) {
         const { def, currentSchema } = item;
         const tempTableName = `${def.tableName}_temp_backup`;
         const desiredSchema = def.fields;
@@ -444,7 +513,7 @@ async function createAll() {
 
     } else {
       console.log('[MIGRATION] No schema changes requiring migration. Ensuring all tables exist...');
-      for (const def of mergedModelsDef) {
+      for (const def of createOrderDefs) {
         await models[def.name].sync({ transaction });
       }
 
@@ -630,7 +699,7 @@ async function createAll() {
     }
 
     // 7. Reset sequences for all tables after default values
-    for (const def of mergedModelsDef) {
+    for (const def of createOrderDefs) {
       const pkField = Object.keys(def.fields).find(key => def.fields[key].primaryKey && def.fields[key].autoIncrement);
       if (!pkField) continue;
       const tableName = def.tableName;

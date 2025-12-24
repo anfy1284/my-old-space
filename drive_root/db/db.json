@@ -69,6 +69,11 @@
                     "type": "BOOLEAN",
                     "allowNull": false,
                     "defaultValue": false
+                },
+                "language": {
+                    "type": "STRING",
+                    "allowNull": false,
+                    "defaultValue": "eng"
                 }
             },
             "options": {
