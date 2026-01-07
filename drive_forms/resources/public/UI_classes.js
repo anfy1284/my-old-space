@@ -422,8 +422,8 @@ class Form extends UIObject {
 
             // Auto-center if x and y are 0 (default)
             if (this.x === 0 && this.y === 0 && this.width > 0 && this.height > 0) {
-                 this.x = (window.innerWidth - this.width) / 2;
-                 this.y = (window.innerHeight - this.height) / 2;
+                this.x = (window.innerWidth - this.width) / 2;
+                this.y = (window.innerHeight - this.height) / 2;
             }
 
             this.element = document.createElement('div');
@@ -2496,12 +2496,12 @@ function loadResource(src, type = 'script', callback) {
     if (type === 'script') {
         el = document.createElement('script');
         el.src = src;
-        el.onload = callback || function(){};
+        el.onload = callback || function () { };
     } else if (type === 'style' || type === 'css') {
         el = document.createElement('link');
         el.rel = 'stylesheet';
         el.href = src;
-        el.onload = callback || function(){};
+        el.onload = callback || function () { };
     } else {
         throw new Error('Unsupported resource type: ' + type);
     }
@@ -2538,4 +2538,1194 @@ function loadHTMLContent(src, callback) {
     }
 
     return fetchText();
+}
+
+// CheckBox class for boolean values
+class CheckBox extends UIObject {
+    constructor(parentElement = null) {
+        super();
+        this.checked = false;
+        this.readOnly = false;
+        this.label = '';
+        this.parentElement = parentElement;
+    }
+
+    setChecked(value) {
+        this.checked = !!value;
+        if (this.element) {
+            const checkbox = this.element.querySelector('input[type="checkbox"]');
+            if (checkbox) checkbox.checked = this.checked;
+        }
+    }
+
+    getChecked() {
+        if (this.element) {
+            const checkbox = this.element.querySelector('input[type="checkbox"]');
+            if (checkbox) return checkbox.checked;
+        }
+        return this.checked;
+    }
+
+    setReadOnly(value) {
+        this.readOnly = value;
+        if (this.element) {
+            const checkbox = this.element.querySelector('input[type="checkbox"]');
+            if (checkbox) checkbox.disabled = value;
+        }
+    }
+
+    setLabel(text) {
+        this.label = text;
+        if (this.element) {
+            const labelSpan = this.element.querySelector('.checkbox-label-text');
+            if (labelSpan) labelSpan.textContent = text;
+        }
+    }
+
+    Draw(container) {
+        if (!this.element) {
+            // Create label container
+            this.element = document.createElement('label');
+            this.element.style.display = 'inline-flex';
+            this.element.style.alignItems = 'center';
+            this.element.style.cursor = this.readOnly ? 'default' : 'pointer';
+            this.element.style.userSelect = 'none';
+            this.element.style.fontFamily = 'MS Sans Serif, sans-serif';
+            this.element.style.fontSize = '11px';
+
+            // Positioning
+            if (!this.parentElement) {
+                this.element.style.position = 'absolute';
+                this.element.style.left = this.x + 'px';
+                this.element.style.top = this.y + 'px';
+                this.element.style.zIndex = this.z;
+            }
+
+            // Create checkbox input
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.checked = this.checked;
+            checkbox.disabled = this.readOnly;
+            checkbox.style.marginRight = '4px';
+            checkbox.style.width = '13px';
+            checkbox.style.height = '13px';
+
+            // Win98 checkbox styling
+            checkbox.style.accentColor = '#000080'; // Blue checkmark color
+
+            // Create label text span
+            const labelSpan = document.createElement('span');
+            labelSpan.className = 'checkbox-label-text';
+            labelSpan.textContent = this.label;
+
+            // Add elements
+            this.element.appendChild(checkbox);
+            if (this.label) {
+                this.element.appendChild(labelSpan);
+            }
+
+            // Event listeners
+            checkbox.addEventListener('change', (e) => {
+                this.checked = e.target.checked;
+            });
+
+            this.element.addEventListener('click', (e) => {
+                this.onClick(e);
+            });
+        }
+
+        if (container) {
+            container.appendChild(this.element);
+        }
+
+        return this.element;
+    }
+}
+
+// DatePicker class for DATE and TIMESTAMP types
+class DatePicker extends UIObject {
+    constructor(parentElement = null) {
+        super();
+        this.value = null;  // Date object or null
+        this.showTime = false;  // true for TIMESTAMP
+        this.readOnly = false;
+        this.parentElement = parentElement;
+        this.format = 'DD.MM.YYYY';  // European format
+        this.calendarPopup = null;
+    }
+
+    setValue(date) {
+        this.value = date;
+        if (this.element) {
+            const input = this.element.querySelector('input[type="text"]');
+            if (input) {
+                input.value = this.formatDate(date);
+            }
+        }
+    }
+
+    getValue() {
+        return this.value;
+    }
+
+    setShowTime(value) {
+        this.showTime = value;
+        this.format = value ? 'DD.MM.YYYY HH:mm' : 'DD.MM.YYYY';
+        if (this.element && this.value) {
+            const input = this.element.querySelector('input[type="text"]');
+            if (input) {
+                input.value = this.formatDate(this.value);
+            }
+        }
+    }
+
+    setReadOnly(value) {
+        this.readOnly = value;
+        if (this.element) {
+            const input = this.element.querySelector('input[type="text"]');
+            const button = this.element.querySelector('button');
+            if (input) input.disabled = value;
+            if (button) button.disabled = value;
+        }
+    }
+
+    formatDate(date) {
+        if (!date) return '';
+        if (!(date instanceof Date)) {
+            date = new Date(date);
+        }
+        if (isNaN(date.getTime())) return '';
+
+        const dd = String(date.getDate()).padStart(2, '0');
+        const mm = String(date.getMonth() + 1).padStart(2, '0');
+        const yyyy = date.getFullYear();
+
+        if (this.showTime) {
+            const hh = String(date.getHours()).padStart(2, '0');
+            const min = String(date.getMinutes()).padStart(2, '0');
+            return `${dd}.${mm}.${yyyy} ${hh}:${min}`;
+        }
+
+        return `${dd}.${mm}.${yyyy}`;
+    }
+
+    parseDate(text) {
+        if (!text || text.trim() === '') return null;
+
+        // Parse DD.MM.YYYY or DD.MM.YYYY HH:mm
+        const parts = text.trim().split(' ');
+        const datePart = parts[0];
+        const timePart = parts[1];
+
+        const dateMatch = datePart.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
+        if (!dateMatch) return null;
+
+        const day = parseInt(dateMatch[1], 10);
+        const month = parseInt(dateMatch[2], 10) - 1; // 0-based
+        const year = parseInt(dateMatch[3], 10);
+
+        let hour = 0, minute = 0;
+        if (timePart) {
+            const timeMatch = timePart.match(/^(\d{1,2}):(\d{1,2})$/);
+            if (timeMatch) {
+                hour = parseInt(timeMatch[1], 10);
+                minute = parseInt(timeMatch[2], 10);
+            }
+        }
+
+        const date = new Date(year, month, day, hour, minute);
+        return isNaN(date.getTime()) ? null : date;
+    }
+
+    openCalendar() {
+        if (this.readOnly || this.calendarPopup) return;
+
+        // Create calendar popup form
+        const calendar = new Form();
+        calendar.setTitle('Выбор даты');
+        calendar.setWidth(280);
+        calendar.setHeight(this.showTime ? 270 : 240);
+        calendar.setResizable(false);
+
+        // Position near the date picker
+        const rect = this.element.getBoundingClientRect();
+        calendar.setX(rect.left);
+        calendar.setY(rect.bottom + 5);
+
+        const contentArea = calendar.getContentArea();
+
+        // Current month/year for display
+        const now = this.value || new Date();
+        let currentMonth = now.getMonth();
+        let currentYear = now.getFullYear();
+
+        // Header with navigation
+        const renderCalendar = () => {
+            // Clear content
+            contentArea.innerHTML = '';
+
+            // Month/Year navigation
+            const header = document.createElement('div');
+            header.style.display = 'flex';
+            header.style.justifyContent = 'space-between';
+            header.style.alignItems = 'center';
+            header.style.marginBottom = '10px';
+            header.style.padding = '5px';
+
+            const prevBtn = new Button();
+            prevBtn.setCaption('<<');
+            prevBtn.setWidth(30);
+            prevBtn.setHeight(20);
+            prevBtn.onClick = () => {
+                currentMonth--;
+                if (currentMonth < 0) {
+                    currentMonth = 11;
+                    currentYear--;
+                }
+                renderCalendar();
+            };
+
+            const monthLabel = new Label();
+            const monthNames = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь',
+                'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
+            monthLabel.setText(`${monthNames[currentMonth]} ${currentYear}`);
+            monthLabel.setFontWeight('bold');
+
+            const nextBtn = new Button();
+            nextBtn.setCaption('>>');
+            nextBtn.setWidth(30);
+            nextBtn.setHeight(20);
+            nextBtn.onClick = () => {
+                currentMonth++;
+                if (currentMonth > 11) {
+                    currentMonth = 0;
+                    currentYear++;
+                }
+                renderCalendar();
+            };
+
+            const headerContainer = document.createElement('div');
+            headerContainer.style.display = 'flex';
+            headerContainer.style.justifyContent = 'space-between';
+            headerContainer.style.marginBottom = '10px';
+
+            prevBtn.Draw(headerContainer);
+            monthLabel.Draw(headerContainer);
+            nextBtn.Draw(headerContainer);
+            contentArea.appendChild(headerContainer);
+
+            // Days of week
+            const daysRow = document.createElement('div');
+            daysRow.style.display = 'grid';
+            daysRow.style.gridTemplateColumns = 'repeat(7, 1fr)';
+            daysRow.style.gap = '2px';
+            daysRow.style.marginBottom = '5px';
+
+            const dayNames = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
+            for (const dayName of dayNames) {
+                const dayLabel = document.createElement('div');
+                dayLabel.textContent = dayName;
+                dayLabel.style.textAlign = 'center';
+                dayLabel.style.fontWeight = 'bold';
+                dayLabel.style.fontSize = '10px';
+                dayLabel.style.padding = '2px';
+                daysRow.appendChild(dayLabel);
+            }
+            contentArea.appendChild(daysRow);
+
+            // Days grid
+            const daysGrid = document.createElement('div');
+            daysGrid.style.display = 'grid';
+            daysGrid.style.gridTemplateColumns = 'repeat(7, 1fr)';
+            daysGrid.style.gap = '2px';
+
+            // Calculate first day of month (Monday = 0)
+            const firstDay = new Date(currentYear, currentMonth, 1);
+            let firstWeekday = firstDay.getDay() - 1; // Convert to Monday = 0
+            if (firstWeekday < 0) firstWeekday = 6;
+
+            // Days in month
+            const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
+
+            // Add empty cells for days before month start
+            for (let i = 0; i < firstWeekday; i++) {
+                const emptyCell = document.createElement('div');
+                daysGrid.appendChild(emptyCell);
+            }
+
+            // Add day buttons
+            for (let day = 1; day <= daysInMonth; day++) {
+                const dayBtn = document.createElement('button');
+                dayBtn.textContent = day;
+                dayBtn.style.padding = '4px';
+                dayBtn.style.cursor = 'pointer';
+                dayBtn.style.fontSize = '10px';
+                dayBtn.style.backgroundColor = '#c0c0c0';
+                dayBtn.style.border = '1px outset #dfdfdf';
+
+                const dayDate = new Date(currentYear, currentMonth, day);
+                if (this.value && dayDate.toDateString() === this.value.toDateString()) {
+                    dayBtn.style.backgroundColor = '#000080';
+                    dayBtn.style.color = '#ffffff';
+                }
+
+                dayBtn.addEventListener('click', () => {
+                    let selectedDate = new Date(currentYear, currentMonth, day);
+                    if (this.showTime && this.value) {
+                        selectedDate.setHours(this.value.getHours());
+                        selectedDate.setMinutes(this.value.getMinutes());
+                    }
+                    this.setValue(selectedDate);
+                    calendar.element.remove();
+                    this.calendarPopup = null;
+                });
+
+                daysGrid.appendChild(dayBtn);
+            }
+
+            contentArea.appendChild(daysGrid);
+
+            // Today button
+            const todayBtn = new Button();
+            todayBtn.setCaption('Сегодня');
+            todayBtn.setWidth(80);
+            todayBtn.setHeight(22);
+            todayBtn.setX(100);
+            todayBtn.setY(this.showTime ? 220 : 190);
+            todayBtn.onClick = () => {
+                this.setValue(new Date());
+                calendar.element.remove();
+                this.calendarPopup = null;
+            };
+            todayBtn.Draw(contentArea);
+        };
+
+        renderCalendar();
+
+        calendar.Draw(document.body);
+        calendar.activate();
+        this.calendarPopup = calendar;
+    }
+
+    Draw(container) {
+        if (!this.element) {
+            this.element = document.createElement('div');
+            this.element.style.display = 'inline-flex';
+            this.element.style.alignItems = 'center';
+            this.element.style.gap = '2px';
+
+            // Positioning
+            if (!this.parentElement) {
+                this.element.style.position = 'absolute';
+                this.element.style.left = this.x + 'px';
+                this.element.style.top = this.y + 'px';
+                this.element.style.zIndex = this.z;
+            }
+
+            // Text input
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.value = this.formatDate(this.value);
+            input.disabled = this.readOnly;
+            input.style.width = this.showTime ? '120px' : '80px';
+            input.style.height = '20px';
+            input.style.padding = '2px 4px';
+            input.style.fontFamily = 'MS Sans Serif, sans-serif';
+            input.style.fontSize = '11px';
+            input.style.backgroundColor = '#ffffff';
+            input.style.borderTop = '2px solid #808080';
+            input.style.borderLeft = '2px solid #808080';
+            input.style.borderRight = '2px solid #ffffff';
+            input.style.borderBottom = '2px solid #ffffff';
+            input.style.outline = 'none';
+            input.style.boxSizing = 'border-box';
+
+            // Calendar button
+            const button = document.createElement('button');
+            button.textContent = '📅';
+            button.disabled = this.readOnly;
+            button.style.width = '24px';
+            button.style.height = '20px';
+            button.style.padding = '0';
+            button.style.cursor = this.readOnly ? 'default' : 'pointer';
+            button.style.backgroundColor = '#c0c0c0';
+            button.style.borderTop = '2px solid #ffffff';
+            button.style.borderLeft = '2px solid #ffffff';
+            button.style.borderRight = '2px solid #808080';
+            button.style.borderBottom = '2px solid #808080';
+            button.style.fontSize = '12px';
+            button.style.boxSizing = 'border-box';
+
+            // Events
+            input.addEventListener('blur', (e) => {
+                const parsed = this.parseDate(e.target.value);
+                if (parsed) {
+                    this.setValue(parsed);
+                } else if (e.target.value.trim() === '') {
+                    this.setValue(null);
+                } else {
+                    // Invalid format, restore previous value
+                    e.target.value = this.formatDate(this.value);
+                }
+            });
+
+            button.addEventListener('click', () => {
+                this.openCalendar();
+            });
+
+            this.element.appendChild(input);
+            this.element.appendChild(button);
+        }
+
+        if (container) {
+            container.appendChild(this.element);
+        }
+
+        return this.element;
+    }
+}
+
+// DynamicTable class for displaying tabular data with virtual scrolling
+class DynamicTable extends UIObject {
+    constructor(options = {}) {
+        super();
+        
+        // Options
+        this.appName = options.appName || '';
+        this.tableName = options.tableName || '';
+        this.rowHeight = options.rowHeight || 25;
+        this.bufferRows = 10; // Client-side rendering buffer (server limits actual data)
+        this.multiSelect = options.multiSelect || false;
+        this.initialSort = options.initialSort || [];
+        this.initialFilter = options.initialFilter || [];
+        this.onRowClick = options.onRowClick || null;
+        this.onRowDoubleClick = options.onRowDoubleClick || null;
+        this.onSelectionChanged = options.onSelectionChanged || null;
+        
+        // State
+        this.totalRows = 0;
+        this.fields = [];
+        this.dataCache = {}; // globalIndex -> rowData
+        this.currentSort = this.initialSort;
+        this.currentFilters = this.initialFilter;
+        this.visibleRows = 20;
+        this.firstVisibleRow = 0;
+        this.selectedRows = new Set();
+        this.lastSelectedIndex = null;
+        this.isLoading = false;
+        
+        // DOM elements
+        this.tableContainer = null;
+        this.headerContainer = null;
+        this.bodyContainer = null;
+        this.scrollContainer = null;
+        this.tableElement = null;
+        this.loadingOverlay = null;
+        this.eventSource = null; // SSE connection
+        
+        // Resize state
+        this.resizeState = {
+            isResizing: false,
+            columnIndex: null,
+            startX: 0,
+            startWidth: 0
+        };
+        
+        // Keyboard navigation
+        this.currentRowIndex = null;
+    }
+    
+    async Draw(container) {
+        if (!this.element) {
+            this.element = document.createElement('div');
+            this.element.style.position = 'relative';
+            this.element.style.width = '100%';
+            this.element.style.height = '100%';
+            this.element.style.overflow = 'hidden';
+            this.element.style.backgroundColor = '#c0c0c0';
+            this.element.style.borderTop = '2px solid #808080';
+            this.element.style.borderLeft = '2px solid #808080';
+            this.element.style.borderRight = '2px solid #ffffff';
+            this.element.style.borderBottom = '2px solid #ffffff';
+            this.element.style.fontFamily = 'MS Sans Serif, sans-serif';
+            this.element.style.fontSize = '11px';
+            this.element.tabIndex = 0; // Make focusable
+            this.element.style.outline = 'none';
+            
+            // Header container
+            this.headerContainer = document.createElement('div');
+            this.headerContainer.style.position = 'relative';
+            this.headerContainer.style.width = '100%';
+            this.headerContainer.style.backgroundColor = '#c0c0c0';
+            this.headerContainer.style.borderBottom = '2px solid #808080';
+            this.element.appendChild(this.headerContainer);
+            
+            // Body container with scrolling
+            this.bodyContainer = document.createElement('div');
+            this.bodyContainer.style.position = 'relative';
+            this.bodyContainer.style.width = '100%';
+            this.bodyContainer.style.height = 'calc(100% - 32px)'; // Subtract header height
+            this.bodyContainer.style.overflow = 'auto';
+            this.element.appendChild(this.bodyContainer);
+            
+            // Load initial data
+            await this.refresh();
+            
+            // Setup keyboard navigation
+            this.setupKeyboardNavigation();
+            
+            // Setup SSE (optional, can be disabled for MVP)
+            // this.connectSSE();
+        }
+        
+        if (container) {
+            container.appendChild(this.element);
+        }
+        
+        return this.element;
+    }
+    
+    async refresh() {
+        this.showLoadingIndicator();
+        try {
+            await this.loadData(this.firstVisibleRow);
+        } catch (error) {
+            console.error('[DynamicTable] Refresh error:', error);
+            if (typeof showAlert === 'function') {
+                showAlert('Ошибка обновления данных: ' + error.message);
+            }
+        } finally {
+            this.hideLoadingIndicator();
+        }
+    }
+    
+    async loadData(firstRow) {
+        if (this.isLoading) return;
+        this.isLoading = true;
+        
+        try {
+            const data = await callServerMethod(this.appName, 'getDynamicTableData', {
+                tableName: this.tableName,
+                firstRow: firstRow,
+                visibleRows: this.visibleRows,
+                sort: this.currentSort,
+                filters: this.currentFilters
+            });
+            
+            this.totalRows = data.totalRows;
+            this.fields = data.fields;
+            
+            // Update cache
+            data.data.forEach((row, index) => {
+                const globalIndex = data.range.from + index;
+                this.dataCache[globalIndex] = { ...row, loaded: true, __index: globalIndex };
+            });
+            
+            // Render table
+            this.renderTable();
+            
+        } catch (error) {
+            throw error;
+        } finally {
+            this.isLoading = false;
+        }
+    }
+    
+    renderTable() {
+        // Render header
+        this.renderHeader();
+        
+        // Render body
+        this.renderBody();
+    }
+    
+    renderHeader() {
+        this.headerContainer.innerHTML = '';
+        
+        const table = document.createElement('table');
+        table.style.width = '100%';
+        table.style.borderCollapse = 'collapse';
+        table.style.tableLayout = 'fixed';
+        
+        const thead = document.createElement('thead');
+        const headerRow = document.createElement('tr');
+        
+        this.fields.forEach((field, index) => {
+            const th = document.createElement('th');
+            th.style.width = field.width + 'px';
+            th.style.padding = '4px 8px';
+            th.style.backgroundColor = '#c0c0c0';
+            th.style.borderTop = '2px solid #ffffff';
+            th.style.borderLeft = '2px solid #ffffff';
+            th.style.borderRight = '2px solid #808080';
+            th.style.borderBottom = '2px solid #808080';
+            th.style.fontWeight = 'bold';
+            th.style.textAlign = 'left';
+            th.style.cursor = 'pointer';
+            th.style.userSelect = 'none';
+            th.style.position = 'relative';
+            th.style.whiteSpace = 'nowrap';
+            th.style.overflow = 'hidden';
+            th.style.textOverflow = 'ellipsis';
+            th.textContent = field.caption;
+            
+            // Sort indicator
+            const sortItem = this.currentSort.find(s => s.field === field.name);
+            if (sortItem) {
+                th.textContent += sortItem.order === 'asc' ? ' ▲' : ' ▼';
+            }
+            
+            // Click to sort
+            th.addEventListener('click', (e) => {
+                if (!this.resizeState.isResizing) {
+                    this.toggleSort(field.name);
+                }
+            });
+            
+            // Resize handle
+            const resizeHandle = document.createElement('div');
+            resizeHandle.style.position = 'absolute';
+            resizeHandle.style.top = '0';
+            resizeHandle.style.right = '0';
+            resizeHandle.style.width = '5px';
+            resizeHandle.style.height = '100%';
+            resizeHandle.style.cursor = 'col-resize';
+            resizeHandle.style.zIndex = '10';
+            
+            resizeHandle.addEventListener('mousedown', (e) => {
+                e.stopPropagation();
+                this.startResize(index, e.clientX, field.width);
+            });
+            
+            th.appendChild(resizeHandle);
+            headerRow.appendChild(th);
+        });
+        
+        thead.appendChild(headerRow);
+        table.appendChild(thead);
+        this.headerContainer.appendChild(table);
+    }
+    
+    renderBody() {
+        // Save current scroll position
+        const savedScrollTop = this.bodyContainer.scrollTop || 0;
+        
+        this.bodyContainer.innerHTML = '';
+        
+        // Create scroll container with full height
+        const scrollContainer = document.createElement('div');
+        scrollContainer.style.position = 'relative';
+        scrollContainer.style.height = (this.totalRows * this.rowHeight) + 'px';
+        scrollContainer.style.width = '100%';
+        
+        // Create visible table
+        const table = document.createElement('table');
+        table.style.width = '100%';
+        table.style.borderCollapse = 'collapse';
+        table.style.tableLayout = 'fixed';
+        table.style.position = 'absolute';
+        table.style.top = '0';
+        
+        const tbody = document.createElement('tbody');
+        
+        // Calculate visible range based on saved scroll position
+        const scrollTop = savedScrollTop;
+        const firstVisible = Math.floor(scrollTop / this.rowHeight);
+        const visibleRowCount = Math.ceil(this.bodyContainer.clientHeight / this.rowHeight);
+        const lastVisible = firstVisible + visibleRowCount;
+        
+        // Add buffer rows for smooth scrolling
+        const renderFirst = Math.max(0, firstVisible - this.bufferRows);
+        const renderLast = Math.min(this.totalRows, lastVisible + this.bufferRows);
+        
+        // Save for scroll optimization
+        this.lastRenderedFirstRow = firstVisible;
+        
+        // Position table at first rendered row (including buffer)
+        table.style.top = (renderFirst * this.rowHeight) + 'px';
+        
+        // Render visible rows + buffer
+        for (let i = renderFirst; i < renderLast; i++) {
+            const rowData = this.dataCache[i] || { loaded: false, __index: i };
+            const tr = this.renderRow(rowData, i);
+            tbody.appendChild(tr);
+        }
+        
+        table.appendChild(tbody);
+        scrollContainer.appendChild(table);
+        this.bodyContainer.appendChild(scrollContainer);
+        
+        // Restore scroll position after DOM update
+        this.bodyContainer.scrollTop = savedScrollTop;
+        
+        // Setup scroll handler
+        this.bodyContainer.addEventListener('scroll', () => {
+            this.onScroll();
+        });
+    }
+    
+    renderRow(rowData, rowIndex) {
+        const tr = document.createElement('tr');
+        tr.dataset.rowIndex = rowIndex;
+        tr.style.height = this.rowHeight + 'px';
+        
+        // Zebra striping
+        tr.style.backgroundColor = rowIndex % 2 === 0 ? '#ffffff' : '#f0f0f0';
+        
+        // Selection highlight
+        if (this.selectedRows.has(rowIndex)) {
+            tr.style.backgroundColor = '#000080';
+            tr.style.color = '#ffffff';
+        }
+        
+        // Render cells
+        this.fields.forEach(field => {
+            const td = document.createElement('td');
+            td.style.padding = '4px 8px';
+            td.style.borderRight = '1px solid #c0c0c0';
+            td.style.whiteSpace = 'nowrap';
+            td.style.overflow = 'hidden';
+            td.style.textOverflow = 'ellipsis';
+            td.style.width = field.width + 'px';
+            
+            if (!rowData.loaded) {
+                td.style.opacity = '0.3';
+                td.textContent = '...';
+            } else {
+                // Get value
+                let value = rowData[field.name];
+                
+                // For foreign keys, use display value
+                if (field.foreignKey && rowData[`__${field.name}_display`] !== undefined) {
+                    value = rowData[`__${field.name}_display`];
+                }
+                
+                // Format value by type
+                td.textContent = this.formatValue(value, field.type);
+            }
+            
+            tr.appendChild(td);
+        });
+        
+        // Click events
+        tr.addEventListener('click', (e) => {
+            this.onRowClickHandler(rowData, rowIndex, e);
+        });
+        
+        tr.addEventListener('dblclick', (e) => {
+            this.onRowDoubleClickHandler(rowData, rowIndex);
+        });
+        
+        return tr;
+    }
+    
+    formatValue(value, type) {
+        if (value === null || value === undefined) return '';
+        
+        switch (type) {
+            case 'BOOLEAN':
+                return value ? '☑' : '☐';
+            case 'DATE':
+            case 'DATEONLY':
+                if (value instanceof Date) {
+                    const dd = String(value.getDate()).padStart(2, '0');
+                    const mm = String(value.getMonth() + 1).padStart(2, '0');
+                    const yyyy = value.getFullYear();
+                    return `${dd}.${mm}.${yyyy}`;
+                }
+                // Parse from string
+                const date = new Date(value);
+                if (!isNaN(date.getTime())) {
+                    const dd = String(date.getDate()).padStart(2, '0');
+                    const mm = String(date.getMonth() + 1).padStart(2, '0');
+                    const yyyy = date.getFullYear();
+                    return `${dd}.${mm}.${yyyy}`;
+                }
+                return value.toString();
+            case 'DECIMAL':
+            case 'FLOAT':
+                return parseFloat(value).toFixed(2);
+            default:
+                return value.toString();
+        }
+    }
+    
+    onScroll() {
+        const scrollTop = this.bodyContainer.scrollTop;
+        const newFirstVisible = Math.floor(scrollTop / this.rowHeight);
+        
+        // Check if visible range changed significantly
+        const currentFirstVisible = this.lastRenderedFirstRow || 0;
+        const rowDiff = Math.abs(newFirstVisible - currentFirstVisible);
+        
+        // Only re-render if we scrolled more than 5 rows
+        if (rowDiff < 5) {
+            return;
+        }
+        
+        // Check if we need to load more data
+        const needsReload = this.needsDataReload(newFirstVisible);
+        
+        if (needsReload) {
+            this.loadData(newFirstVisible);
+        } else {
+            // Just re-render with cached data
+            this.renderBody();
+        }
+    }
+    
+    needsDataReload(firstRow) {
+        const visibleRange = Math.ceil(this.bodyContainer.clientHeight / this.rowHeight);
+        
+        // Check if data is in cache
+        for (let i = firstRow; i < firstRow + visibleRange; i++) {
+            if (i >= this.totalRows) break;
+            if (!this.dataCache[i] || !this.dataCache[i].loaded) {
+                return true;
+            }
+        }
+        
+        return false;
+    }
+    
+    onRowClickHandler(rowData, rowIndex, event) {
+        if (!rowData.loaded) {
+            if (typeof showAlert === 'function') {
+                showAlert('Данные ещё не загружены. Подождите.');
+            }
+            return;
+        }
+        
+        if (this.multiSelect && event.shiftKey && this.lastSelectedIndex !== null) {
+            // Range selection
+            const start = Math.min(this.lastSelectedIndex, rowIndex);
+            const end = Math.max(this.lastSelectedIndex, rowIndex);
+            for (let i = start; i <= end; i++) {
+                this.selectedRows.add(i);
+            }
+        } else {
+            // Single selection
+            if (!this.multiSelect) {
+                this.selectedRows.clear();
+            }
+            this.selectedRows.add(rowIndex);
+            this.lastSelectedIndex = rowIndex;
+        }
+        
+        this.currentRowIndex = rowIndex;
+        this.renderBody(); // Re-render to show selection
+        
+        if (this.onRowClick) {
+            this.onRowClick(rowData, rowIndex);
+        }
+        
+        if (this.onSelectionChanged) {
+            this.onSelectionChanged(this.getSelectedRows());
+        }
+    }
+    
+    onRowDoubleClickHandler(rowData, rowIndex) {
+        if (!rowData.loaded) {
+            if (typeof showAlert === 'function') {
+                showAlert('Данные ещё не загружены. Подождите.');
+            }
+            return;
+        }
+        
+        if (this.onRowDoubleClick) {
+            this.onRowDoubleClick(rowData, rowIndex);
+        }
+    }
+    
+    toggleSort(fieldName) {
+        const existing = this.currentSort.find(s => s.field === fieldName);
+        
+        if (existing) {
+            // Toggle order
+            existing.order = existing.order === 'asc' ? 'desc' : 'asc';
+        } else {
+            // Add new sort
+            this.currentSort = [{ field: fieldName, order: 'asc' }];
+        }
+        
+        // Reload data
+        this.clearCache();
+        this.refresh();
+    }
+    
+    setSort(sortArray) {
+        this.currentSort = sortArray;
+        this.clearCache();
+        this.refresh();
+    }
+    
+    setFilter(filterArray) {
+        this.currentFilters = filterArray;
+        this.clearCache();
+        this.refresh();
+    }
+    
+    clearCache() {
+        this.dataCache = {};
+    }
+    
+    getSelectedRows() {
+        const rows = [];
+        this.selectedRows.forEach(index => {
+            if (this.dataCache[index] && this.dataCache[index].loaded) {
+                rows.push(this.dataCache[index]);
+            }
+        });
+        return rows;
+    }
+    
+    clearSelection() {
+        this.selectedRows.clear();
+        this.lastSelectedIndex = null;
+        this.currentRowIndex = null;
+        this.renderBody();
+    }
+    
+    scrollToRow(rowIndex) {
+        const scrollTop = rowIndex * this.rowHeight;
+        this.bodyContainer.scrollTop = scrollTop;
+    }
+    
+    startResize(columnIndex, startX, startWidth) {
+        this.resizeState.isResizing = true;
+        this.resizeState.columnIndex = columnIndex;
+        this.resizeState.startX = startX;
+        this.resizeState.startWidth = startWidth;
+        
+        const mouseMoveHandler = (e) => {
+            if (this.resizeState.isResizing) {
+                const diff = e.clientX - this.resizeState.startX;
+                const newWidth = Math.max(50, this.resizeState.startWidth + diff);
+                this.fields[this.resizeState.columnIndex].width = newWidth;
+                this.renderTable();
+            }
+        };
+        
+        const mouseUpHandler = () => {
+            if (this.resizeState.isResizing) {
+                this.resizeState.isResizing = false;
+                document.removeEventListener('mousemove', mouseMoveHandler);
+                document.removeEventListener('mouseup', mouseUpHandler);
+                
+                // Save column widths
+                this.saveColumnWidths();
+            }
+        };
+        
+        document.addEventListener('mousemove', mouseMoveHandler);
+        document.addEventListener('mouseup', mouseUpHandler);
+    }
+    
+    async saveColumnWidths() {
+        try {
+            await callServerMethod(this.appName, 'saveClientState', {
+                window: 'dynamicTable',
+                component: this.tableName,
+                data: {
+                    columns: this.fields.map(f => ({ name: f.name, width: f.width }))
+                }
+            });
+        } catch (error) {
+            console.error('[DynamicTable] Error saving column widths:', error);
+        }
+    }
+    
+    setupKeyboardNavigation() {
+        this.element.addEventListener('keydown', (e) => {
+            if (this.currentRowIndex === null && this.totalRows > 0) {
+                this.currentRowIndex = 0;
+            }
+            
+            switch (e.key) {
+                case 'ArrowUp':
+                    e.preventDefault();
+                    if (this.currentRowIndex > 0) {
+                        this.navigateToRow(this.currentRowIndex - 1, e.shiftKey);
+                    }
+                    break;
+                    
+                case 'ArrowDown':
+                    e.preventDefault();
+                    if (this.currentRowIndex < this.totalRows - 1) {
+                        this.navigateToRow(this.currentRowIndex + 1, e.shiftKey);
+                    }
+                    break;
+                    
+                case 'PageUp':
+                    e.preventDefault();
+                    const pageSize = Math.floor(this.bodyContainer.clientHeight / this.rowHeight);
+                    this.navigateToRow(Math.max(0, this.currentRowIndex - pageSize), e.shiftKey);
+                    break;
+                    
+                case 'PageDown':
+                    e.preventDefault();
+                    const pageSize2 = Math.floor(this.bodyContainer.clientHeight / this.rowHeight);
+                    this.navigateToRow(Math.min(this.totalRows - 1, this.currentRowIndex + pageSize2), e.shiftKey);
+                    break;
+                    
+                case 'Home':
+                    e.preventDefault();
+                    this.navigateToRow(0, e.shiftKey);
+                    break;
+                    
+                case 'End':
+                    e.preventDefault();
+                    this.navigateToRow(this.totalRows - 1, e.shiftKey);
+                    break;
+                    
+                case 'Enter':
+                    e.preventDefault();
+                    if (this.currentRowIndex !== null) {
+                        const rowData = this.dataCache[this.currentRowIndex];
+                        if (rowData) {
+                            this.onRowDoubleClickHandler(rowData, this.currentRowIndex);
+                        }
+                    }
+                    break;
+            }
+        });
+    }
+    
+    navigateToRow(newIndex, extendSelection) {
+        if (newIndex < 0 || newIndex >= this.totalRows) return;
+        
+        if (this.multiSelect && extendSelection) {
+            // Extend selection
+            if (this.lastSelectedIndex === null) {
+                this.lastSelectedIndex = this.currentRowIndex;
+            }
+            const start = Math.min(this.lastSelectedIndex, newIndex);
+            const end = Math.max(this.lastSelectedIndex, newIndex);
+            this.selectedRows.clear();
+            for (let i = start; i <= end; i++) {
+                this.selectedRows.add(i);
+            }
+        } else {
+            // Single selection
+            this.selectedRows.clear();
+            this.selectedRows.add(newIndex);
+            this.lastSelectedIndex = newIndex;
+        }
+        
+        this.currentRowIndex = newIndex;
+        
+        // Auto-scroll to keep visible
+        const scrollTop = this.bodyContainer.scrollTop;
+        const scrollHeight = this.bodyContainer.clientHeight;
+        const rowTop = newIndex * this.rowHeight;
+        const rowBottom = rowTop + this.rowHeight;
+        
+        if (rowTop < scrollTop) {
+            this.bodyContainer.scrollTop = rowTop;
+        } else if (rowBottom > scrollTop + scrollHeight) {
+            this.bodyContainer.scrollTop = rowBottom - scrollHeight;
+        }
+        
+        // Check if we need to load data
+        if (!this.dataCache[newIndex] || !this.dataCache[newIndex].loaded) {
+            this.loadData(newIndex);
+        } else {
+            this.renderBody();
+        }
+        
+        if (this.onSelectionChanged) {
+            this.onSelectionChanged(this.getSelectedRows());
+        }
+    }
+    
+    showLoadingIndicator() {
+        if (this.loadingOverlay) return;
+        
+        const overlay = document.createElement('div');
+        overlay.style.position = 'absolute';
+        overlay.style.top = '0';
+        overlay.style.left = '0';
+        overlay.style.right = '0';
+        overlay.style.bottom = '0';
+        overlay.style.background = 'rgba(192, 192, 192, 0.7)';
+        overlay.style.display = 'flex';
+        overlay.style.alignItems = 'center';
+        overlay.style.justifyContent = 'center';
+        overlay.style.zIndex = '1000';
+        
+        const label = document.createElement('div');
+        label.textContent = 'Loading...';
+        label.style.padding = '10px 20px';
+        label.style.background = '#c0c0c0';
+        label.style.borderTop = '2px solid #ffffff';
+        label.style.borderLeft = '2px solid #ffffff';
+        label.style.borderRight = '2px solid #808080';
+        label.style.borderBottom = '2px solid #808080';
+        label.style.fontFamily = 'MS Sans Serif, sans-serif';
+        label.style.fontSize = '11px';
+        overlay.appendChild(label);
+        
+        this.element.appendChild(overlay);
+        this.loadingOverlay = overlay;
+    }
+    
+    hideLoadingIndicator() {
+        if (this.loadingOverlay) {
+            this.loadingOverlay.remove();
+            this.loadingOverlay = null;
+        }
+    }
+    
+    connectSSE() {
+        if (!this.appName || !this.tableName) return;
+        
+        const url = `/app/${this.appName}/subscribeToTable?tableName=${this.tableName}`;
+        this.eventSource = new EventSource(url);
+        
+        this.eventSource.onopen = () => {
+            console.log('[DynamicTable] SSE connected');
+        };
+        
+        this.eventSource.onmessage = (event) => {
+            try {
+                const data = JSON.parse(event.data);
+                
+                if (data.type === 'connected') {
+                    console.log('[DynamicTable] SSE: connection confirmed');
+                } else if (data.type === 'dataChanged') {
+                    console.log('[DynamicTable] Data changed:', data.action);
+                    this.clearCache();
+                    this.refresh();
+                }
+            } catch (e) {
+                console.error('[DynamicTable] SSE message parse error:', e);
+            }
+        };
+        
+        this.eventSource.onerror = (error) => {
+            console.error('[DynamicTable] SSE error, reconnecting in 3s...', error);
+            if (this.eventSource) {
+                this.eventSource.close();
+                this.eventSource = null;
+            }
+            
+            setTimeout(() => {
+                this.connectSSE();
+            }, 3000);
+        };
+    }
+    
+    destroy() {
+        if (this.eventSource) {
+            this.eventSource.close();
+            this.eventSource = null;
+        }
+        
+        if (this.element && this.element.parentElement) {
+            this.element.parentElement.removeChild(this.element);
+        }
+        
+        this.element = null;
+        this.dataCache = {};
+    }
 }

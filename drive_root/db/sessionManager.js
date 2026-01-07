@@ -55,12 +55,14 @@ async function getOrCreateSession(req, res) {
       await Session.destroy({ where: { sessionId } });
       sessionCache.delete(sessionId);
     }
-    // Generate new
+    // Generate new session WITHOUT user - user will be created via login/guest button
     sessionId = generateSessionId();
     session = await Session.create({ sessionId, userId: null, isGuest: true });
+    
     sessionCache.set(sessionId, session);
     // Set cookie
     res.setHeader('Set-Cookie', `sessionID=${sessionId}; Path=/; HttpOnly`);
+    console.log(`[sessionManager] Created new session without user: ${sessionId}`);
   }
 
   return session;

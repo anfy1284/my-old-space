@@ -3,5 +3,12 @@
   "appDir": "drive_forms",
   "appAlias": "app",
   "appIndexPage": "resources/public/index.html",
-  "appHandler": "server.js"
+  "appHandler": "server.js",
+  "dynamicTable": {
+    "maxRowsPerRequest": 50,
+    "defaultBufferRows": 10,
+    "maxBufferRows": 30,
+    "maxVisibleRows": 100,
+    "scrollRerenderThreshold": 5
+  }
 }

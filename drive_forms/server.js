@@ -77,14 +77,37 @@ function invokeAppMethod(appName, methodName, params, sessionID, callback, req, 
 	const appEntry = appsConfig.apps.find(a => a.name === appName);
 	if (!appEntry) return callback(new Error('App not found'));
 	const appsBasePath = (appsConfig.path || '/apps').replace(/^[/\\]+/, '');
-	const appServerPath = path.join(__dirname, '..', appsBasePath, appName, 'server.js');
-	if (!fs.existsSync(appServerPath)) return callback(new Error('App server.js not found'));
+	
+	// Try project root first (for user apps), then framework
+	const projectRoot = globalRoot.getProjectRoot() || process.cwd();
+	const possiblePaths = [
+		path.join(projectRoot, appsBasePath, appName, 'server.js'),
+		path.join(__dirname, '..', appsBasePath, appName, 'server.js')
+	];
+	
+	let appServerPath = null;
+	for (const tryPath of possiblePaths) {
+		if (fs.existsSync(tryPath)) {
+			appServerPath = tryPath;
+			break;
+		}
+	}
+	
+	if (!appServerPath) {
+		console.error('[invokeAppMethod] server.js not found for app:', appName);
+		console.error('[invokeAppMethod] Tried paths:', possiblePaths);
+		return callback(new Error('App server.js not found'));
+	}
+	
+	console.log('[invokeAppMethod] Loading server.js from:', appServerPath);
+	
 	let appModule;
 	try {
 		// Remove from require cache for hot-reload
 		delete require.cache[require.resolve(appServerPath)];
 		appModule = require(appServerPath);
 	} catch (e) {
+		console.error('[invokeAppMethod] Failed to load server.js:', e);
 		return callback(new Error('Failed to load app server.js: ' + e.message));
 	}
 	if (typeof appModule[methodName] !== 'function') return callback(new Error('Method not found in app'));
@@ -304,6 +327,8 @@ function handleRequest(req, res, appDir, appAlias) {
 					const match = req.headers.cookie.match(/(?:^|; )sessionID=([^;]+)/);
 					if (match) sessionID = decodeURIComponent(match[1]);
 				}
+				console.log('[drive_forms/call] Cookie header:', req.headers.cookie);
+				console.log('[drive_forms/call] Extracted sessionID:', sessionID);
 				invokeAppMethod(app, method, params || {}, sessionID, (err, result) => {
 					if (err) {
 						res.writeHead(500, { 'Content-Type': 'application/json' });

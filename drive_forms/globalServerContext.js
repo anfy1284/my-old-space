@@ -45,8 +45,12 @@ async function loadApps(user) {
 
   const appsList = Array.from(appsMap.values());
   let allCode = '';
-  // Treat anonymous 'nologged' users as 'public' for app loading
-  const effectiveRole = (accessRole === 'nologged' || accessRole == null) ? 'public' : accessRole;
+  
+  // Don't convert nologged to public - keep as is to load login app
+  const effectiveRole = accessRole || 'nologged';
+  
+  console.log('[loadApps] effectiveRole:', effectiveRole);
+  
   for (const app of appsList) {
     const baseDir = app.__appsBaseDir || path.resolve(__dirname, '..');
     const appsBasePath = app.__appsPath || 'apps';

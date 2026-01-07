@@ -47,8 +47,15 @@ const dbConfig = require('./db.json');
 const modelsDef = dbConfig.models;
 const { DEFAULT_VALUES_TABLE } = dbConfig;
 const { hashPassword } = require('./utilites');
-const { processDefaultValues } = require('../globalServerContext');
+const globalServerContext = require('../globalServerContext');
+const { processDefaultValues } = globalServerContext;
 const { normalizeType, compareSchemas, syncUniqueConstraints } = require('./migrationUtils');
+
+// Set projectRoot in globalServerContext for this process
+if (projectRoot) {
+  globalServerContext.setProjectRoot(projectRoot);
+  console.log(`[createDB] Set projectRoot in globalServerContext: ${projectRoot}`);
+}
 
 // Load config and data
 const rootConfig = require('../../server.config.json');
@@ -58,17 +65,20 @@ const defaultValues = processDefaultValues(defaultValuesData, LEVEL);
 
 /**
  * Collect models from all levels: drive_root -> drive_forms -> apps
+ * Now uses globalServerContext.collectAllModelDefs() for consistency
  */
 function collectAllModels() {
   console.log('[COLLECT] Starting model collection from all levels...');
 
-  // Start with drive_root models
-  let allModels = [...modelsDef];
+  // Use globalServerContext to collect models (includes PROJECT_ROOT apps)
+  const { models: allModels, associations } = globalServerContext.collectAllModelDefs();
+  
+  // Also collect defaultValues from levels
   let defaultValuesByLevel = { [LEVEL]: defaultValues };
 
-  console.log(`[COLLECT] Added ${modelsDef.length} models from drive_root`);
+  console.log(`[COLLECT] Collected ${allModels.length} model definitions via globalServerContext`);
 
-  // Collect from drive_forms (which will also collect from apps)
+  // Collect from drive_forms for defaultValues
   const formsCreateDBPath = path.resolve(__dirname, '../../drive_forms/db/createDB.js');
   if (fs.existsSync(formsCreateDBPath)) {
     try {
@@ -76,27 +86,16 @@ function collectAllModels() {
       if (typeof formsModule.collectModels === 'function') {
         const formsData = formsModule.collectModels();
 
-        // Add models from drive_forms and apps
-        if (Array.isArray(formsData.models)) {
-          allModels = allModels.concat(formsData.models);
-          console.log(`[COLLECT] Added ${formsData.models.length} models from drive_forms and apps`);
-        }
-
         // Merge defaultValues by level
         if (formsData.defaultValuesByLevel) {
           defaultValuesByLevel = { ...defaultValuesByLevel, ...formsData.defaultValuesByLevel };
         }
-      } else {
-        console.warn('[COLLECT] drive_forms/db/createDB.js does not export collectModels function');
       }
     } catch (e) {
-      console.error('[COLLECT] Error loading models from drive_forms:', e.message);
+      console.error('[COLLECT] Error loading defaultValues from drive_forms:', e.message);
     }
-  } else {
-    console.warn('[COLLECT] drive_forms/db/createDB.js not found');
   }
 
-  console.log(`[COLLECT] Total models collected: ${allModels.length}`);
   console.log(`[COLLECT] Levels with defaultValues: ${Object.keys(defaultValuesByLevel).join(', ')}`);
 
   return { models: allModels, defaultValuesByLevel };
@@ -180,9 +179,13 @@ function mergeModelDefinitions(allDefs) {
       mergedMap.set(def.name, JSON.parse(JSON.stringify(def)));
     } else {
       const current = mergedMap.get(def.name);
+      
+      console.log(`[MIGRATION] Merging model ${def.name}: adding ${Object.keys(def.fields || {}).length} fields to existing ${Object.keys(current.fields || {}).length} fields`);
 
       // Merge fields: later definitions overwrite/extend earlier ones
       current.fields = { ...current.fields, ...def.fields };
+      
+      console.log(`[MIGRATION] After merge ${def.name}: total ${Object.keys(current.fields || {}).length} fields`);
 
       // Merge options
       if (def.options) {
@@ -208,6 +211,7 @@ async function createAll() {
 
   // 1. Collect all models from all levels (drive_root -> drive_forms -> apps)
   const { models: allModelsDef, defaultValuesByLevel } = collectAllModels();
+  const { associations: allAssociations } = globalServerContext.collectAllModelDefs();
 
   // 2. Merge model definitions (handle models declared on multiple levels)
   const mergedModelsDef = mergeModelDefinitions(allModelsDef);
@@ -287,6 +291,31 @@ async function createAll() {
     }
     models[def.name] = sequelize.define(def.name, fields, { ...def.options, tableName: def.tableName });
   }
+  
+  // Apply associations
+  for (const assoc of allAssociations) {
+    const sourceModel = models[assoc.source];
+    const targetModel = models[assoc.target];
+    
+    if (!sourceModel || !targetModel) {
+      console.warn(`[MIGRATION] Association ${assoc.source}.${assoc.type}(${assoc.target}) - model not found`);
+      continue;
+    }
+    
+    try {
+      const options = {};
+      if (assoc.foreignKey) {
+        options.foreignKey = { name: assoc.foreignKey, field: assoc.foreignKey };
+      }
+      if (assoc.options) {
+        Object.assign(options, assoc.options);
+      }
+      sourceModel[assoc.type](targetModel, options);
+      console.log(`[MIGRATION] Applied association: ${assoc.source}.${assoc.type}(${assoc.target})`);
+    } catch (e) {
+      console.error(`[MIGRATION] Error applying association ${assoc.source}.${assoc.type}(${assoc.target}):`, e.message);
+    }
+  }
 
   // Start transaction for all migration operations (skip global transaction for SQLite to avoid file locks)
   const isSqlite = sequelize.getDialect && sequelize.getDialect() === 'sqlite';
@@ -310,6 +339,11 @@ async function createAll() {
 
       const currentSchema = tableExists;
       const desiredSchema = def.fields;
+      
+      if (tableName === 'users') {
+        console.log(`[MIGRATION] Users table - current fields:`, Object.keys(currentSchema));
+        console.log(`[MIGRATION] Users table - desired fields:`, Object.keys(desiredSchema));
+      }
 
       const cmp = await compareSchemas(currentSchema, desiredSchema, sequelize.getDialect());
 
