@@ -2995,7 +2995,7 @@ class DynamicTable extends UIObject {
         this.tableName = options.tableName || '';
         this.rowHeight = options.rowHeight || 25;
         this.bufferRows = 10; // Client-side rendering buffer (server limits actual data)
-        this.multiSelect = options.multiSelect || false;
+        this.multiSelect = options.multiSelect !== undefined ? options.multiSelect : false;
         this.initialSort = options.initialSort || [];
         this.initialFilter = options.initialFilter || [];
         this.onRowClick = options.onRowClick || null;
@@ -3013,6 +3013,7 @@ class DynamicTable extends UIObject {
         this.selectedRows = new Set();
         this.lastSelectedIndex = null;
         this.isLoading = false;
+        this.dataLoaded = false;
         
         // DOM elements
         this.tableContainer = null;
@@ -3041,7 +3042,10 @@ class DynamicTable extends UIObject {
             this.element.style.position = 'relative';
             this.element.style.width = '100%';
             this.element.style.height = '100%';
+            this.element.style.boxSizing = 'border-box'; // Include border in size calculation
             this.element.style.overflow = 'hidden';
+            this.element.style.display = 'flex';
+            this.element.style.flexDirection = 'column';
             this.element.style.backgroundColor = '#c0c0c0';
             this.element.style.borderTop = '2px solid #808080';
             this.element.style.borderLeft = '2px solid #808080';
@@ -3051,25 +3055,34 @@ class DynamicTable extends UIObject {
             this.element.style.fontSize = '11px';
             this.element.tabIndex = 0; // Make focusable
             this.element.style.outline = 'none';
+            this.element.style.userSelect = 'none'; // Disable text selection
             
             // Header container
             this.headerContainer = document.createElement('div');
             this.headerContainer.style.position = 'relative';
             this.headerContainer.style.width = '100%';
+            this.headerContainer.style.boxSizing = 'border-box'; // Include padding in width
+            this.headerContainer.style.flex = '0 0 auto'; // Don't grow, don't shrink, auto height
             this.headerContainer.style.backgroundColor = '#c0c0c0';
             this.headerContainer.style.borderBottom = '2px solid #808080';
+            this.headerContainer.style.userSelect = 'none'; // Disable text selection in headers
+            this.headerContainer.style.overflowX = 'hidden'; // Hide horizontal overflow
             this.element.appendChild(this.headerContainer);
             
             // Body container with scrolling
             this.bodyContainer = document.createElement('div');
             this.bodyContainer.style.position = 'relative';
             this.bodyContainer.style.width = '100%';
-            this.bodyContainer.style.height = 'calc(100% - 32px)'; // Subtract header height
+            this.bodyContainer.style.flex = '1 1 auto'; // Grow to fill remaining space
             this.bodyContainer.style.overflow = 'auto';
+            this.bodyContainer.style.backgroundColor = '#ffffff'; // White background
+            this.bodyContainer.style.userSelect = 'none'; // Disable text selection in body
             this.element.appendChild(this.bodyContainer);
             
-            // Load initial data
-            await this.refresh();
+            // Sync horizontal scroll between header and body
+            this.bodyContainer.addEventListener('scroll', () => {
+                this.headerContainer.scrollLeft = this.bodyContainer.scrollLeft;
+            });
             
             // Setup keyboard navigation
             this.setupKeyboardNavigation();
@@ -3080,6 +3093,12 @@ class DynamicTable extends UIObject {
         
         if (container) {
             container.appendChild(this.element);
+            
+            // Load initial data AFTER element is in DOM so clientHeight is available
+            if (!this.dataLoaded) {
+                this.dataLoaded = true;
+                await this.refresh();
+            }
         }
         
         return this.element;
@@ -3088,6 +3107,7 @@ class DynamicTable extends UIObject {
     async refresh() {
         this.showLoadingIndicator();
         try {
+            this.calculateVisibleRows();
             await this.loadData(this.firstVisibleRow);
         } catch (error) {
             console.error('[DynamicTable] Refresh error:', error);
@@ -3096,6 +3116,16 @@ class DynamicTable extends UIObject {
             }
         } finally {
             this.hideLoadingIndicator();
+        }
+    }
+    
+    calculateVisibleRows() {
+        if (this.bodyContainer && this.bodyContainer.clientHeight > 0) {
+            const containerHeight = this.bodyContainer.clientHeight;
+            this.visibleRows = Math.ceil(containerHeight / this.rowHeight) + this.bufferRows;
+        } else {
+            // Fallback if container not yet rendered
+            this.visibleRows = 30;
         }
     }
     
@@ -3137,6 +3167,21 @@ class DynamicTable extends UIObject {
         
         // Render body
         this.renderBody();
+        
+        // Adjust header for scrollbar
+        this.adjustHeaderForScrollbar();
+    }
+    
+    adjustHeaderForScrollbar() {
+        // Calculate scrollbar width
+        const scrollbarWidth = this.bodyContainer.offsetWidth - this.bodyContainer.clientWidth;
+        
+        // Add padding to header to compensate for scrollbar
+        if (scrollbarWidth > 0) {
+            this.headerContainer.style.paddingRight = scrollbarWidth + 'px';
+        } else {
+            this.headerContainer.style.paddingRight = '0';
+        }
     }
     
     renderHeader() {
@@ -3144,8 +3189,23 @@ class DynamicTable extends UIObject {
         
         const table = document.createElement('table');
         table.style.width = '100%';
-        table.style.borderCollapse = 'collapse';
+        table.style.borderCollapse = 'separate';
+        table.style.borderSpacing = '0';
         table.style.tableLayout = 'fixed';
+        
+        // Add colgroup to explicitly set column widths
+        const colgroup = document.createElement('colgroup');
+        this.fields.forEach((field, index) => {
+            const col = document.createElement('col');
+            // Last column gets remaining space, others are fixed
+            if (index === this.fields.length - 1) {
+                col.style.width = 'auto';
+            } else {
+                col.style.width = field.width + 'px';
+            }
+            colgroup.appendChild(col);
+        });
+        table.appendChild(colgroup);
         
         const thead = document.createElement('thead');
         const headerRow = document.createElement('tr');
@@ -3153,6 +3213,7 @@ class DynamicTable extends UIObject {
         this.fields.forEach((field, index) => {
             const th = document.createElement('th');
             th.style.width = field.width + 'px';
+            th.style.boxSizing = 'border-box'; // Include padding and border in width
             th.style.padding = '4px 8px';
             th.style.backgroundColor = '#c0c0c0';
             th.style.borderTop = '2px solid #ffffff';
@@ -3226,6 +3287,20 @@ class DynamicTable extends UIObject {
         table.style.position = 'absolute';
         table.style.top = '0';
         
+        // Add colgroup to explicitly set column widths
+        const colgroup = document.createElement('colgroup');
+        this.fields.forEach((field, index) => {
+            const col = document.createElement('col');
+            // Last column gets remaining space, others are fixed
+            if (index === this.fields.length - 1) {
+                col.style.width = 'auto';
+            } else {
+                col.style.width = field.width + 'px';
+            }
+            colgroup.appendChild(col);
+        });
+        table.appendChild(colgroup);
+        
         const tbody = document.createElement('tbody');
         
         // Calculate visible range based on saved scroll position
@@ -3281,12 +3356,13 @@ class DynamicTable extends UIObject {
         // Render cells
         this.fields.forEach(field => {
             const td = document.createElement('td');
+            td.style.width = field.width + 'px';
+            td.style.boxSizing = 'border-box'; // Include padding and border in width
             td.style.padding = '4px 8px';
             td.style.borderRight = '1px solid #c0c0c0';
             td.style.whiteSpace = 'nowrap';
             td.style.overflow = 'hidden';
             td.style.textOverflow = 'ellipsis';
-            td.style.width = field.width + 'px';
             
             if (!rowData.loaded) {
                 td.style.opacity = '0.3';
@@ -3397,17 +3473,24 @@ class DynamicTable extends UIObject {
         }
         
         if (this.multiSelect && event.shiftKey && this.lastSelectedIndex !== null) {
-            // Range selection
+            // Range selection with Shift
             const start = Math.min(this.lastSelectedIndex, rowIndex);
             const end = Math.max(this.lastSelectedIndex, rowIndex);
+            this.selectedRows.clear();
             for (let i = start; i <= end; i++) {
                 this.selectedRows.add(i);
             }
-        } else {
-            // Single selection
-            if (!this.multiSelect) {
-                this.selectedRows.clear();
+        } else if (this.multiSelect && event.ctrlKey) {
+            // Toggle single row selection with Ctrl
+            if (this.selectedRows.has(rowIndex)) {
+                this.selectedRows.delete(rowIndex);
+            } else {
+                this.selectedRows.add(rowIndex);
             }
+            this.lastSelectedIndex = rowIndex;
+        } else {
+            // Single selection without modifiers
+            this.selectedRows.clear();
             this.selectedRows.add(rowIndex);
             this.lastSelectedIndex = rowIndex;
         }

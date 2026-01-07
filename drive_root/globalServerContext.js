@@ -654,7 +654,7 @@ async function getDynamicTableData(options) {
         defaultBufferRows: 10
     };
     
-    let { modelName, firstRow, visibleRows, sort, filters } = options;
+    let { modelName, firstRow, visibleRows, sort, filters, fieldConfig } = options;
     
     // Apply server-side limits to prevent abuse
     visibleRows = Math.min(visibleRows || 20, config.maxVisibleRows);
@@ -666,7 +666,27 @@ async function getDynamicTableData(options) {
 
     // Get field metadata
     const t1 = Date.now();
-    const fields = await getTableMetadata(modelName);
+    let fields;
+    let allFieldsWithMeta = null;
+    
+    if (fieldConfig) {
+        // Use custom config, filter out computed fields for query
+        fields = fieldConfig.filter(f => f.source === 'field' || !f.source);
+        // Get full metadata from model to get foreign key info
+        allFieldsWithMeta = await getTableMetadata(modelName);
+        
+        // Enrich fieldConfig with foreignKey info from model metadata
+        fields = fields.map(configField => {
+            const metaField = allFieldsWithMeta.find(mf => mf.name === configField.name);
+            return {
+                ...configField,
+                foreignKey: metaField?.foreignKey || configField.foreignKey || null
+            };
+        });
+    } else {
+        // Auto-generate from model
+        fields = await getTableMetadata(modelName);
+    }
     console.log(`[PERF] getTableMetadata: ${Date.now() - t1}ms`);
 
     // Build WHERE clause from filters
@@ -726,11 +746,25 @@ async function getDynamicTableData(options) {
     const resolvedData = await resolveTableForeignKeys(modelName, data, fields);
     console.log(`[PERF] resolveTableForeignKeys: ${Date.now() - t4}ms`);
     
+    // Add computed fields if fieldConfig is provided
+    if (fieldConfig) {
+        const computedFields = fieldConfig.filter(f => f.source === 'computed' && f.compute);
+        if (computedFields.length > 0) {
+            resolvedData.forEach(row => {
+                computedFields.forEach(field => {
+                    row[field.name] = field.compute(row);
+                });
+            });
+        }
+        // Add computed field definitions to fields array
+        fields = [...fields, ...computedFields];
+    }
+    
     console.log(`[PERF] TOTAL getDynamicTableData: ${Date.now() - startTime}ms`);
 
     return {
         totalRows,
-        fields,
+        fields: fields,  // Return enriched fields with foreignKey metadata
         data: resolvedData,
         range: {
             from: requestFirstRow,
@@ -749,6 +783,8 @@ async function getDynamicTableData(options) {
 async function resolveTableForeignKeys(modelName, dataArray, fields) {
     const fkFields = fields.filter(f => f.foreignKey !== null);
 
+    console.log(`[resolveTableForeignKeys] Model: ${modelName}, FK fields:`, fkFields.map(f => f.name));
+
     if (fkFields.length === 0) {
         return dataArray;
     }
@@ -760,6 +796,8 @@ async function resolveTableForeignKeys(modelName, dataArray, fields) {
         for (const fkField of fkFields) {
             const fkValue = row[fkField.name];
 
+            console.log(`[FK] Field: ${fkField.name}, value: ${fkValue}, FK config:`, fkField.foreignKey);
+
             if (fkValue === null || fkValue === undefined) {
                 resolvedRow[`__${fkField.name}_display`] = '';
                 continue;
@@ -767,6 +805,7 @@ async function resolveTableForeignKeys(modelName, dataArray, fields) {
 
             // Find target model
             const targetModel = Object.values(modelsDB).find(m => m.tableName === fkField.foreignKey.table);
+            console.log(`[FK] Target model for table ${fkField.foreignKey.table}:`, targetModel ? 'found' : 'NOT FOUND');
             if (!targetModel) {
                 resolvedRow[`__${fkField.name}_display`] = `(unknown: ${fkValue})`;
                 continue;
@@ -775,8 +814,11 @@ async function resolveTableForeignKeys(modelName, dataArray, fields) {
             // Fetch display value
             try {
                 const targetRow = await targetModel.findByPk(fkValue, { raw: true });
+                console.log(`[FK] Found target row:`, targetRow);
                 if (targetRow) {
-                    resolvedRow[`__${fkField.name}_display`] = targetRow[fkField.foreignKey.displayField] || targetRow.id.toString();
+                    const displayValue = targetRow[fkField.foreignKey.displayField] || targetRow.id.toString();
+                    resolvedRow[`__${fkField.name}_display`] = displayValue;
+                    console.log(`[FK] Set __${fkField.name}_display = ${displayValue}`);
                 } else {
                     resolvedRow[`__${fkField.name}_display`] = `(not found: ${fkValue})`;
                 }

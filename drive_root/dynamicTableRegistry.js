@@ -13,11 +13,11 @@ if (!global._dynamicTableSseClients) {
 /**
  * Регистрация стандартных методов для работы с динамическими таблицами
  * @param {string} appName - Имя приложения
- * @param {Object} config - Конфигурация { tables: { tableName: 'ModelName' }, accessCheck: fn }
+ * @param {Object} config - Конфигурация { tables: { tableName: 'ModelName' }, tableFields: {...}, accessCheck: fn }
  * @returns {Object} - Объект с методами для экспорта из server.js
  */
 function registerDynamicTableMethods(appName, config = {}) {
-    const { tables = {}, accessCheck = null } = config;
+    const { tables = {}, tableFields = {}, accessCheck = null } = config;
     
     // Инициализация хранилища для приложения
     if (!global._dynamicTableSseClients.has(appName)) {
@@ -52,13 +52,17 @@ function registerDynamicTableMethods(appName, config = {}) {
                 throw new Error('Unknown table: ' + tableName);
             }
             
+            // Получить конфигурацию полей для таблицы (если есть)
+            const fieldConfig = tableFields[tableName] || null;
+            
             // Вызов глобальной функции
             return await globalServerContext.getDynamicTableData({
                 modelName,
                 firstRow,
                 visibleRows,
                 sort: sort || [],
-                filters: filters || []
+                filters: filters || [],
+                fieldConfig: fieldConfig
             });
         },
         
