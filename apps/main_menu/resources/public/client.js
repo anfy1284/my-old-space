@@ -141,16 +141,34 @@
             if (item.action === 'open' && item.appName) {
                 newItem.onClick = () => {
                     // Pass params if available
-                    if (item.params) {
-                        window.AppParams = window.AppParams || {};
-                        window.AppParams[item.appName] = item.params;
-                    }
-
                     const scriptUrl = `/apps/${item.appName}/resources/public/client.js`;
                     // Always reload script to create a new app instance
                     const script = document.createElement('script');
                     script.src = scriptUrl + '?t=' + new Date().getTime(); // Cache busting
+
+                    const params = item.params;
+
+                    const tryOpen = () => {
+                        try {
+                            if (window.MySpace && typeof window.MySpace.open === 'function') {
+                                window.MySpace.open(item.appName, params).catch(e => console.error(e));
+                                return true;
+                            }
+                        } catch (e) { /* ignore */ }
+                        return false;
+                    };
+
+                    script.onload = () => {
+                        if (tryOpen()) return;
+                        let attempts = 0;
+                        const iv = setInterval(() => {
+                            attempts++;
+                            if (tryOpen() || attempts >= 10) clearInterval(iv);
+                        }, 100);
+                    };
+
                     document.body.appendChild(script);
+                    
                 };
             }
             return newItem;

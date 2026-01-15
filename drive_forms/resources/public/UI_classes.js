@@ -4,6 +4,7 @@ class UIObject {
         this.element = null;
         this.parent = null;
         this.children = [];
+        this.caption = '';
         this.x = 0;
         this.y = 0;
         this.width = 0;
@@ -47,6 +48,23 @@ class UIObject {
     getHeight() { return this.height; }
     setZ(z) { this.z = z; }
     getZ() { return this.z; }
+    // Caption accessor for generic UI objects
+    setCaption(caption) {
+        this.caption = caption;
+        // Do not assume how derived classes render caption; they may override
+        try {
+            if (this.element && typeof this.element.textContent === 'string') {
+                // Only set if element appears to be a simple text container
+                // Avoid clobbering complex contents by checking if element has no children
+                if (!this.element.children || this.element.children.length === 0) {
+                    this.element.textContent = caption;
+                }
+            }
+        } catch (e) {
+            // silent
+        }
+    }
+    getCaption() { return this.caption; }
     // Optional element accessor
     getElement() { return this.element; }
     setElement(el) { this.element = el; }
@@ -196,6 +214,157 @@ class UIObject {
     onKeyPressed(event) {
         // Метод обработки нажатия клавиши
     }
+}
+
+// Base class for form input controls: provides common label/container helpers
+class FormInput extends UIObject {
+    constructor(parentElement = null, properties = {}) {
+        super();
+        this.parentElement = parentElement;
+        this.containerElement = null; // optional wrapper when placed inside a parent
+        this._labelInstance = null; // Label instance (if used)
+        this.showLabel = false;
+        // If true, place caption to the right of the control and do not append ':'
+        this.captionOnRight = false;
+        // Apply initial properties passed at construction time
+        this.setProperties(properties);
+    }
+
+    setProperties(properties = {}) {
+        if (properties) {
+            for (const key in properties) {
+                if (Object.prototype.hasOwnProperty.call(properties, key)) {
+                    try { this[key] = properties[key]; } catch (e) {}
+                }
+            }
+        }
+    }
+
+    // Create a simple container similar to TextBox's container when needed
+    ensureContainer() {
+        if (this.containerElement) return this.containerElement;
+        if (this.parentElement && typeof this.parentElement.appendChild === 'function') {
+            this.containerElement = document.createElement('div');
+            this.containerElement.style.display = 'flex';
+            this.containerElement.style.alignItems = 'center';
+            this.containerElement.style.gap = '8px';
+            this.containerElement.style.padding = '0';
+            this.containerElement.style.margin = '0';
+            this.containerElement.style.border = 'none';
+            this.containerElement.style.boxShadow = 'none';
+            this.containerElement.style.backgroundColor = 'transparent';
+            this.containerElement.style.outline = 'none';
+            this.containerElement.style.width = '100%';
+        }
+        return this.containerElement;
+    }
+
+    // Draw label into provided container (do not assume container is this.containerElement)
+    drawLabel(container) {
+        try {
+            if (!this.caption) return;
+            if (!this._labelInstance) {
+                this._labelInstance = new Label(container || this.parentElement);
+            }
+            // Use caption; append ':' only when caption is on the left (default)
+            const labelText = this.caption ? (this.caption + (this.captionOnRight ? '' : ':')) : this.caption;
+            this._labelInstance.setText(labelText);
+            this._labelInstance.Draw(container || this.parentElement);
+            if (this._labelInstance.element) {
+                this._labelInstance.element.style.whiteSpace = 'nowrap';
+                this._labelInstance.element.style.flex = '0 0 auto';
+                this._labelInstance.element.style.boxSizing = 'border-box';
+                // If caption should be on the right, ensure it appears after the control
+                if (this.captionOnRight) {
+                    try { this._labelInstance.element.style.order = '2'; } catch (e) {}
+                } else {
+                    try { this._labelInstance.element.style.order = '0'; } catch (e) {}
+                }
+            }
+        } catch (e) {
+            // silent
+        }
+    }
+
+    // Override to keep label text in sync
+    setCaption(caption) {
+        super.setCaption(caption);
+        if (this._labelInstance) {
+            try {
+                const labelText = caption ? (caption + (this.captionOnRight ? '' : ':')) : caption;
+                this._labelInstance.setText(labelText);
+            } catch (e) {}
+        }
+    }
+
+    // Base draw flow for form inputs: ensure container and label are prepared.
+    Draw(container) {
+        // If a parentElement-aware container is needed, ensure it's created
+        const host = this.ensureContainer();
+        if (host) {
+            this.containerElement = host;
+            // draw label into container if caption present
+            if (this.caption) this.drawLabel(this.containerElement);
+            // Append container to provided container if available and not already attached
+            if (container && this.containerElement && !this.containerElement.parentElement) {
+                try { container.appendChild(this.containerElement); } catch (e) {}
+            }
+        } else {
+            // No host container (control will manage its own element). If caption provided, draw into container
+            if (this.caption && container) {
+                this.drawLabel(container);
+            }
+        }
+
+        return this.containerElement || this._labelInstance || null;
+    }
+}
+
+// Minimal MySpace registrar exposed at framework (drive_forms) client level.
+// Provides `register(name, descriptor)` and `open(name, params)` for app scripts.
+if (typeof window !== 'undefined') {
+    window.MySpace = window.MySpace || (function() {
+        const apps = {};
+        const instances = {};
+        let _idCounter = 0;
+
+        function genId(name) { return name + '-' + Date.now() + '-' + (++_idCounter); }
+
+        return {
+            register(name, descriptor) {
+                apps[name] = descriptor;
+                try { if (descriptor && typeof descriptor.init === 'function') descriptor.init(); } catch (e) { console.error('MySpace.register.init error', e); }
+            },
+
+            async open(name, params) {
+                const desc = apps[name];
+                if (!desc) throw new Error('MySpace: app not registered: ' + name);
+
+                const allowMulti = !!(desc.config && desc.config.allowMultipleInstances);
+                if (!allowMulti) {
+                    // reuse existing instance for single-instance apps
+                    for (const k in instances) {
+                        if (instances[k] && instances[k].appName === name) {
+                            try { instances[k].onOpen && instances[k].onOpen(params); } catch (e) { console.error(e); }
+                            return instances[k].id;
+                        }
+                    }
+                }
+
+                if (!desc.createInstance) throw new Error('MySpace: descriptor.createInstance missing for ' + name);
+                const inst = await desc.createInstance(params || {});
+                const id = genId(name);
+                inst.id = id;
+                inst.appName = name;
+                instances[id] = inst;
+                return id;
+            },
+
+            getInstance(id) { return instances[id] || null; },
+
+            close(id) { const inst = instances[id]; if (inst) { try { inst.destroy && inst.destroy(); } catch (e) {} delete instances[id]; } }
+        };
+    })();
 }
 
 class Form extends UIObject {
@@ -1283,9 +1452,15 @@ class Button extends UIObject {
     constructor(parentElement = null) {
         super();
         this.caption = '';
+        this.icon = null; // Path to icon file
+        this.showIcon = false;
+        this.showText = true;
+        this.tooltip = ''; // Custom tooltip text
         this.x = 0;
         this.y = 0;
         this.z = 0;
+        this.tooltipTimeout = null;
+        this.tooltipElement = null;
         if (parentElement) {
             this.parentElement = parentElement;
         } else {
@@ -1296,27 +1471,122 @@ class Button extends UIObject {
     setCaption(caption) {
         this.caption = caption;
         if (this.element) {
-            this.element.textContent = caption;
+            this.updateButtonContent();
         }
     }
 
     getCaption() {
         return this.caption;
     }
+    
+    setIcon(iconPath) {
+        this.icon = iconPath;
+        this.showIcon = !!iconPath;
+        if (this.element) {
+            this.updateButtonContent();
+        }
+    }
+    
+    setTooltip(text) {
+        this.tooltip = text;
+    }
+    
+    updateButtonContent() {
+        if (!this.element) return;
+        
+        this.element.innerHTML = '';
+        
+        if (this.showIcon && this.icon) {
+            const iconImg = document.createElement('img');
+            iconImg.src = this.icon;
+            iconImg.style.width = '16px';
+            iconImg.style.height = '16px';
+            iconImg.style.verticalAlign = 'middle';
+            if (this.showText && this.caption) {
+                iconImg.style.marginRight = '4px';
+            }
+            this.element.appendChild(iconImg);
+        }
+        
+        if (this.showText && this.caption) {
+            const textSpan = document.createElement('span');
+            textSpan.textContent = this.caption;
+            textSpan.style.verticalAlign = 'middle';
+            this.element.appendChild(textSpan);
+        }
+    }
+    
+    showTooltip(event) {
+        const tooltipText = this.tooltip || this.caption;
+        if (!tooltipText) return;
+        
+        if (this.tooltipElement) {
+            this.hideTooltip();
+        }
+        
+        this.tooltipElement = document.createElement('div');
+        this.tooltipElement.textContent = tooltipText;
+        this.tooltipElement.style.position = 'fixed';
+        this.tooltipElement.style.backgroundColor = '#ffffcc';
+        this.tooltipElement.style.border = '1px solid #000';
+        this.tooltipElement.style.padding = '4px 8px';
+        this.tooltipElement.style.fontSize = '11px';
+        this.tooltipElement.style.fontFamily = 'MS Sans Serif, sans-serif';
+        this.tooltipElement.style.zIndex = '10000';
+        this.tooltipElement.style.pointerEvents = 'none';
+        this.tooltipElement.style.whiteSpace = 'nowrap';
+        
+        document.body.appendChild(this.tooltipElement);
+        
+        // Position near cursor
+        const x = event.clientX + 10;
+        const y = event.clientY + 10;
+        this.tooltipElement.style.left = x + 'px';
+        this.tooltipElement.style.top = y + 'px';
+    }
+    
+    hideTooltip() {
+        if (this.tooltipElement) {
+            this.tooltipElement.remove();
+            this.tooltipElement = null;
+        }
+        if (this.tooltipTimeout) {
+            clearTimeout(this.tooltipTimeout);
+            this.tooltipTimeout = null;
+        }
+    }
 
     Draw(container) {
         if (!this.element) {
             this.element = document.createElement('button');
-            this.element.textContent = this.caption;
+            
+            // Update button content (icon and/or text)
+            this.updateButtonContent();
 
+            // Set size - if showText is false (icon only), make button square
+            if (!this.showText && this.showIcon) {
+                // Icon-only button should be square
+                if (this.height) {
+                    this.element.style.width = this.height + 'px';
+                    this.element.style.height = this.height + 'px';
+                } else if (this.width) {
+                    this.element.style.width = this.width + 'px';
+                    this.element.style.height = this.width + 'px';
+                }
+            } else {
+                // Normal button with text
+                if (this.width) this.element.style.width = this.width + 'px';
+                if (this.height) this.element.style.height = this.height + 'px';
+            }
+            
             // If parentElement is not set, use absolute positioning
             if (!this.parentElement) {
                 this.element.style.position = 'absolute';
                 this.element.style.left = this.x + 'px';
                 this.element.style.top = this.y + 'px';
-                this.element.style.width = this.width + 'px';
-                this.element.style.height = this.height + 'px';
                 this.element.style.zIndex = this.z;
+            } else {
+                this.element.style.position = 'relative';
             }
 
             // Retro button style (colors from client_config)
@@ -1333,6 +1603,9 @@ class Button extends UIObject {
             this.element.style.cursor = 'default';
             this.element.style.outline = 'none';
             this.element.style.boxSizing = 'border-box';
+            this.element.style.display = 'inline-flex';
+            this.element.style.alignItems = 'center';
+            this.element.style.justifyContent = 'center';
 
             // Load config and update colors if needed
             UIObject.loadClientConfig().then(() => {
@@ -1377,6 +1650,24 @@ class Button extends UIObject {
             this.element.addEventListener('mouseover', (e) => {
                 this.onHover(e);
             });
+            
+            // Tooltip handlers
+            this.element.addEventListener('mouseenter', (e) => {
+                this.tooltipTimeout = setTimeout(() => {
+                    this.showTooltip(e);
+                }, 500);
+            });
+            
+            this.element.addEventListener('mouseleave', () => {
+                this.hideTooltip();
+            });
+            
+            this.element.addEventListener('mousemove', (e) => {
+                if (this.tooltipElement) {
+                    this.tooltipElement.style.left = (e.clientX + 10) + 'px';
+                    this.tooltipElement.style.top = (e.clientY + 10) + 'px';
+                }
+            });
         }
 
         if (container) {
@@ -1387,15 +1678,33 @@ class Button extends UIObject {
     }
 }
 
-class TextBox extends UIObject {
+class TextBox extends FormInput {
 
-    constructor(parentElement = null) {
-        super();
-        this.text = '';
-        this.placeholder = '';
-        this.readOnly = false;
-        this.maxLength = null;
-        this.parentElement = parentElement;
+    constructor(parentElement = null, properties = {}) {
+        super(parentElement, properties);
+        if (typeof this.text === 'undefined' || this.text === null) this.text = '';
+        if (typeof this.placeholder === 'undefined' || this.placeholder === null) this.placeholder = '';
+        if (typeof this.readOnly === 'undefined' || this.readOnly === null) this.readOnly = false;
+        if (typeof this.maxLength === 'undefined' || this.maxLength === null) this.maxLength = null;
+        this.showCaption = !!this.caption;
+        // Optional behaviors
+        this.digitsOnly = !!this.digitsOnly; // when true, allow only digits to be entered
+        this.isPassword = !!this.isPassword; // when true, render as password (masked input)
+        // Defaults for numeric behavior: when digitsOnly is true, enable floats and negatives by default
+        if (this.digitsOnly) {
+            if (typeof this.allowFloat === 'undefined') this.allowFloat = true;
+            if (typeof this.allowNegative === 'undefined') this.allowNegative = true;
+            else { this.allowFloat = !!this.allowFloat; this.allowNegative = !!this.allowNegative; }
+            // by default allow any number of decimal places (0 means unlimited)
+            if (typeof this.decimalPlaces === 'undefined') this.decimalPlaces = 0;
+        } else {
+            this.allowFloat = !!this.allowFloat; // when true, allow a single decimal separator
+            this.allowNegative = !!this.allowNegative; // when true, allow a leading minus sign
+            this.decimalPlaces = this.decimalPlaces ? (this.decimalPlaces | 0) : 0;
+        }
+        // containerElement and label are handled by FormInput helpers
+        this.containerElement = null;
+        this.label = null;
     }
 
     setText(text) {
@@ -1432,9 +1741,12 @@ class TextBox extends UIObject {
     }
 
     setMaxLength(maxLength) {
-        this.maxLength = maxLength;
-        if (this.element && maxLength) {
-            this.element.maxLength = maxLength;
+        // zero or falsy means unlimited
+        this.maxLength = (typeof maxLength === 'number') ? (maxLength | 0) : (maxLength ? parseInt(maxLength, 10) : 0);
+        if (this.element && this.maxLength > 0 && !this.digitsOnly) {
+            this.element.maxLength = this.maxLength;
+        } else if (this.element && this.maxLength === 0) {
+            try { this.element.removeAttribute('maxLength'); } catch (_) {}
         }
     }
 
@@ -1442,32 +1754,104 @@ class TextBox extends UIObject {
         return this.maxLength;
     }
 
+    setCaption(caption) {
+        // Update logical caption and visual label if present
+        try { super.setCaption(caption); } catch (e) {}
+        this.showCaption = !!caption;
+        if (this.label) {
+            this.label.setText(caption ? (caption + ':') : caption);
+        }
+    }
+
     Draw(container) {
+        // Call base to prepare container/label
+        super.Draw(container);
+
         if (!this.element) {
             this.element = document.createElement('input');
-            this.element.type = 'text';
+            // Password support: if requested, use password type
+            this.element.type = this.isPassword ? 'password' : 'text';
             this.element.value = this.text;
             this.element.placeholder = this.placeholder;
             this.element.readOnly = this.readOnly;
+            // If we have a host container, use it; otherwise element will be appended to container below
+            if (this.containerElement) {
+                // If absolute positioning is desired when no parentElement is set on the control,
+                // keep behaviour of setting position on the containerElement only when control was created
+                // via ensureContainer (which implies a parentElement exists). For consistency, don't
+                // override positioning here.
+            }
+
+            // Configure input to participate in flex layout and fill remaining space
+            this.element.style.position = this.element.style.position || 'relative';
+            this.element.style.flex = '1 1 auto';
+            this.element.style.width = 'auto';
+            this.element.style.height = this.element.style.height || 'auto';
+
+            // Append input into containerElement if present, otherwise into provided container
+            try {
+                if (this.containerElement) this.containerElement.appendChild(this.element);
+                else if (container) container.appendChild(this.element);
+            } catch (e) {}
+
+            // Adaptive layout: if container is wide enough, place label left and input right (row).
+            // If narrow, stack label above input (column).
+            const updateLayout = () => {
+                try {
+                    const cw = (this.containerElement && this.containerElement.clientWidth) || (container && container.clientWidth) || this.width || 0;
+                    const lblW = (this.label && this.label.element) ? (this.label.element.scrollWidth || this.label.element.offsetWidth || 0) : 0;
+                    const gap = parseInt(this.containerElement.style.gap) || 8;
+                    const minInput = Math.min(120, Math.max(60, Math.floor(cw * 0.4)));
+
+                    if (cw > 0 && (lblW + gap + minInput) <= cw) {
+                        this.containerElement.style.flexDirection = 'row';
+                        if (this.label && this.label.element) {
+                            this.label.element.style.flex = '0 0 auto';
+                            this.label.element.style.width = 'auto';
+                        }
+                        this.element.style.flex = '1 1 auto';
+                        this.element.style.width = 'auto';
+                    } else {
+                        this.containerElement.style.flexDirection = 'column';
+                        if (this.label && this.label.element) {
+                            this.label.element.style.flex = '0 0 100%';
+                            this.label.element.style.width = '100%';
+                        }
+                        this.element.style.flex = '0 0 100%';
+                        this.element.style.width = '100%';
+                    }
+                } catch (e) {}
+            };
+
+            // Initial layout
+            setTimeout(updateLayout, 0);
+
+            // Observe size changes
+            try {
+                if (typeof ResizeObserver !== 'undefined') {
+                    if (this._ro) try { this._ro.disconnect(); } catch (e) {}
+                    this._ro = new ResizeObserver(updateLayout);
+                    this._ro.observe(this.containerElement);
+                } else {
+                    // fallback
+                    const winHandler = () => updateLayout();
+                    if (this._winHandler) window.removeEventListener('resize', this._winHandler);
+                    this._winHandler = winHandler;
+                    window.addEventListener('resize', winHandler);
+                }
+            } catch (e) {}
 
             // Add unique id to eliminate browser warning
             this.element.id = 'textbox_' + Math.random().toString(36).substr(2, 9);
             this.element.name = this.element.id;
 
-            if (this.maxLength) {
-                this.element.maxLength = this.maxLength;
+            if (this.maxLength && !this.digitsOnly) {
+                try { this.element.maxLength = this.maxLength; } catch (_) {}
+            } else if (this.digitsOnly) {
+                try { this.element.removeAttribute && this.element.removeAttribute('maxLength'); } catch (_) {}
             }
 
-            // Positioning
-            if (!this.parentElement) {
-                this.element.style.position = 'absolute';
-                this.element.style.left = this.x + 'px';
-                this.element.style.top = this.y + 'px';
-                this.element.style.zIndex = this.z;
-            }
-
-            this.element.style.width = this.width + 'px';
-            this.element.style.height = this.height + 'px';
+            // label already drawn above when input was prepared
 
             // Retro textbox style: white background, themed borders from client_config
             const tbBase = UIObject.getClientConfigValue('defaultColor', '#c0c0c0');
@@ -1498,7 +1882,61 @@ class TextBox extends UIObject {
 
             // Events
             this.element.addEventListener('input', (e) => {
-                this.text = e.target.value;
+                try {
+                    if (this.digitsOnly) {
+                        let v = (e.target.value || '');
+                        let sign = '';
+                        if (this.allowNegative && v.startsWith('-')) {
+                            sign = '-';
+                            v = v.slice(1);
+                        }
+                        // normalize comma to dot
+                        v = v.replace(/,/g, '.');
+                        if (this.allowFloat) {
+                            // remove anything except digits and dot
+                            v = v.replace(/[^0-9.]/g, '');
+                            // collapse multiple dots to a single dot (keep first)
+                            const parts = v.split('.');
+                            if (parts.length > 1) v = parts.shift() + '.' + parts.join('');
+                            // enforce decimalPlaces if set (>0)
+                            if (this.decimalPlaces && this.decimalPlaces > 0) {
+                                const idx = v.indexOf('.');
+                                if (idx !== -1) {
+                                    const intPart = v.slice(0, idx);
+                                    let frac = v.slice(idx + 1);
+                                    if (frac.length > this.decimalPlaces) frac = frac.slice(0, this.decimalPlaces);
+                                    v = intPart + '.' + frac;
+                                }
+                            }
+                        } else {
+                            v = v.replace(/\D+/g, '');
+                        }
+                        // enforce maxLength on digits (dot not counted)
+                        const cleanedDigits = (sign + v).replace(/[^0-9]/g, '');
+                        let cleaned = sign + v;
+                        if (this.maxLength && this.maxLength > 0 && cleanedDigits.length > this.maxLength) {
+                            // remove trailing digits until within limit
+                            let needed = cleanedDigits.length - this.maxLength;
+                            // iterate from end and remove digit characters
+                            let arr = v.split('');
+                            for (let i = arr.length - 1; i >= 0 && needed > 0; i--) {
+                                if (/[0-9]/.test(arr[i])) { arr.splice(i, 1); needed--; }
+                            }
+                            v = arr.join('');
+                            cleaned = sign + v;
+                        }
+                        if (cleaned !== e.target.value) {
+                            const pos = e.target.selectionStart || 0;
+                            e.target.value = cleaned;
+                            try { e.target.setSelectionRange(Math.max(0, pos - 1), Math.max(0, pos - 1)); } catch (_) {}
+                        }
+                        this.text = cleaned;
+                    } else {
+                        this.text = e.target.value;
+                    }
+                } catch (ex) {
+                    this.text = e.target.value;
+                }
             });
 
             this.element.addEventListener('click', (e) => {
@@ -1510,8 +1948,148 @@ class TextBox extends UIObject {
             });
 
             this.element.addEventListener('keydown', (e) => {
+                if (this.digitsOnly) {
+                    // allow control combinations
+                    if (e.ctrlKey || e.metaKey || e.altKey) return;
+                    const k = e.key;
+                    // allow digits (but may be blocked later if maxLength/decimalPlaces exceeded)
+                    if (/^\d$/.test(k)) {
+                        // enforce digit-count limit if configured
+                        if (this.maxLength && this.maxLength > 0) {
+                            try {
+                                const el = e.target;
+                                const selStart = typeof el.selectionStart === 'number' ? el.selectionStart : 0;
+                                const selEnd = typeof el.selectionEnd === 'number' ? el.selectionEnd : selStart;
+                                const cur = el.value || '';
+                                const newVal = cur.slice(0, selStart) + k + cur.slice(selEnd);
+                                const digits = newVal.replace(/[^0-9]/g, '');
+                                if (digits.length > this.maxLength) { e.preventDefault(); return; }
+                            } catch (_) {}
+                        }
+                        // enforce decimalPlaces if inserting into fractional part
+                        if (this.allowFloat && this.decimalPlaces && this.decimalPlaces > 0) {
+                            try {
+                                const el = e.target;
+                                const selStart = typeof el.selectionStart === 'number' ? el.selectionStart : 0;
+                                const cur = el.value || '';
+                                const dot = cur.indexOf('.');
+                                if (dot !== -1 && selStart > dot) {
+                                    const frac = cur.slice(dot + 1);
+                                    const selEnd = typeof el.selectionEnd === 'number' ? el.selectionEnd : selStart;
+                                    const replacedLen = Math.max(0, Math.min(selEnd, cur.length) - Math.min(selStart, cur.length));
+                                    const fracLenAfter = frac.length - Math.max(0, Math.min(replacedLen, frac.length)) + 1; // +1 for new digit
+                                    if (fracLenAfter > this.decimalPlaces) { e.preventDefault(); return; }
+                                }
+                            } catch (_) {}
+                        }
+                        return;
+                    }
+                    // allow navigation and editing keys
+                    const allowed = ['Backspace','Tab','Enter','Escape','Delete','ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home','End'];
+                    if (allowed.indexOf(k) !== -1) return;
+                    // allow decimal separator if floats allowed
+                    if ((k === '.' || k === ',') && this.allowFloat) return;
+                    // toggle minus sign when pressed anywhere if negatives allowed
+                    if ((k === '-' || k === '−') && this.allowNegative) {
+                        try {
+                            e.preventDefault();
+                            const el = e.target;
+                            const cur = el.value || '';
+                            const selStart = typeof el.selectionStart === 'number' ? el.selectionStart : 0;
+                            const selEnd = typeof el.selectionEnd === 'number' ? el.selectionEnd : selStart;
+                            if (cur.startsWith('-')) {
+                                // remove leading minus
+                                const newVal = cur.slice(1);
+                                el.value = newVal;
+                                // adjust caret/selection
+                                try {
+                                    const ns = Math.max(0, selStart - 1);
+                                    const ne = Math.max(0, selEnd - 1);
+                                    el.setSelectionRange(ns, ne);
+                                } catch (_) {}
+                            } else {
+                                // add leading minus
+                                const newVal = '-' + cur;
+                                el.value = newVal;
+                                try {
+                                    const ns = selStart + 1;
+                                    const ne = selEnd + 1;
+                                    el.setSelectionRange(ns, ne);
+                                } catch (_) {}
+                            }
+                        } catch (_) {}
+                        return;
+                    }
+                    // otherwise block
+                    e.preventDefault();
+                    return;
+                }
                 this.onKeyPressed(e);
             });
+
+            // Sanitize pasted input when digitsOnly is enabled
+            this.element.addEventListener('paste', (e) => {
+                if (!this.digitsOnly) return;
+                try {
+                    e.preventDefault();
+                    const data = (e.clipboardData || window.clipboardData).getData('text') || '';
+                    let v = data || '';
+                    let sign = '';
+                    if (this.allowNegative && v.startsWith('-')) {
+                        sign = '-';
+                        v = v.slice(1);
+                    }
+                    v = v.replace(/,/g, '.');
+                    if (this.allowFloat) {
+                        v = v.replace(/[^0-9.]/g, '');
+                        const parts = v.split('.');
+                        if (parts.length > 1) v = parts.shift() + '.' + parts.join('');
+                        // enforce decimalPlaces
+                        if (this.decimalPlaces && this.decimalPlaces > 0) {
+                            const idx = v.indexOf('.');
+                            if (idx !== -1) {
+                                const intPart = v.slice(0, idx);
+                                let frac = v.slice(idx + 1);
+                                if (frac.length > this.decimalPlaces) frac = frac.slice(0, this.decimalPlaces);
+                                v = intPart + '.' + frac;
+                            }
+                        }
+                    } else {
+                        v = v.replace(/\D+/g, '');
+                    }
+                    // enforce maxLength on digits
+                    if (this.maxLength && this.maxLength > 0) {
+                        let digits = (sign + v).replace(/[^0-9]/g, '');
+                        if (digits.length > this.maxLength) {
+                            // trim trailing digits
+                            let needed = digits.length - this.maxLength;
+                            let arr = v.split('');
+                            for (let i = arr.length - 1; i >= 0 && needed > 0; i--) {
+                                if (/[0-9]/.test(arr[i])) { arr.splice(i, 1); needed--; }
+                            }
+                            v = arr.join('');
+                        }
+                    }
+                    const cleaned = sign + v;
+                    if (cleaned.length) document.execCommand('insertText', false, cleaned);
+                } catch (_) {}
+            });
+
+            // Hint to mobile keyboards
+            if (this.digitsOnly) {
+                try { this.element.inputMode = this.allowFloat ? 'decimal' : 'numeric'; } catch (_) {}
+                try {
+                    if (this.allowFloat) {
+                        this.element.pattern = this.allowNegative ? '-?[0-9]*\.?[0-9]*' : '[0-9]*\.?[0-9]*';
+                    } else {
+                        this.element.pattern = this.allowNegative ? '-?[0-9]*' : '[0-9]*';
+                    }
+                } catch (_) {}
+            }
+
+            // Ensure placeholder and readonly are applied after setup
+            try { if (typeof this.placeholder !== 'undefined') this.element.placeholder = this.placeholder; } catch (_) {}
+            try { if (typeof this.readOnly !== 'undefined') this.element.readOnly = !!this.readOnly; } catch (_) {}
 
             this.element.addEventListener('focus', (e) => {
                 this.element.style.borderTop = '2px solid #000080';
@@ -1522,6 +2100,129 @@ class TextBox extends UIObject {
                 this.element.style.borderTop = '2px solid #808080';
                 this.element.style.borderLeft = '2px solid #808080';
             });
+
+            // Finalize attribute application and log diagnostics to help debug property propagation
+            try {
+                // Ensure placeholder and readonly are applied
+                if (typeof this.placeholder !== 'undefined') {
+                    try { this.element.placeholder = this.placeholder; } catch (_) {}
+                }
+                try { this.element.readOnly = !!this.readOnly; } catch (_) {}
+
+                // Apply maxLength only for non-numeric textboxes; for numeric we enforce digit-count separately
+                try {
+                    if (!this.digitsOnly) {
+                        if (this.maxLength && this.maxLength > 0) this.element.maxLength = this.maxLength;
+                        else this.element.removeAttribute && this.element.removeAttribute('maxLength');
+                    } else {
+                        // ensure no maxLength attribute remains on numeric inputs
+                        try { this.element.removeAttribute && this.element.removeAttribute('maxLength'); } catch (_) {}
+                    }
+                } catch (_) {}
+
+                // Diagnostic log
+                try { console.debug && console.debug('TextBox init', { id: this.element.id, digitsOnly: this.digitsOnly, placeholder: this.placeholder, readOnly: this.readOnly, maxLength: this.maxLength, decimalPlaces: this.decimalPlaces, allowFloat: this.allowFloat, allowNegative: this.allowNegative }); } catch (_) {}
+            } catch (_) {}
+        }
+
+        // Attach diagnostic dataset so DevTools shows passed properties on the element
+        try {
+            if (this.element) {
+                const props = {
+                    digitsOnly: !!this.digitsOnly,
+                    isPassword: !!this.isPassword,
+                    placeholder: this.placeholder || '',
+                    readOnly: !!this.readOnly,
+                    maxLength: this.maxLength || 0,
+                    decimalPlaces: this.decimalPlaces || 0,
+                    allowFloat: !!this.allowFloat,
+                    allowNegative: !!this.allowNegative
+                };
+                try { this.element.dataset.props = JSON.stringify(props); } catch (_) {}
+                try { if (this.placeholder !== undefined && this.placeholder !== null) this.element.setAttribute('placeholder', String(this.placeholder)); } catch (_) {}
+                try { if (this.readOnly) this.element.setAttribute('readonly', 'readonly'); else this.element.removeAttribute && this.element.removeAttribute('readonly'); } catch (_) {}
+            }
+        } catch (_) {}
+
+        if (container) {
+            // Always append the containerElement (not the raw input) so label + input stay together
+            container.appendChild(this.containerElement);
+        }
+
+        return this.element;
+    }
+}
+
+class Group extends UIObject {
+    constructor(parentElement = null) {
+        super();
+        this.title = '';
+        this.caption = '';
+        this.parentElement = parentElement;
+    }
+
+    setTitle(title) {
+        this.title = title;
+        if (this.element) {
+            this.element.querySelector('legend').textContent = title;
+        }
+    }
+
+    setCaption(caption) {
+        this.caption = caption;
+        if (this.element) {
+            const lg = this.element.querySelector('legend');
+            if (lg) {
+                lg.textContent = caption;
+            }
+        }
+    }
+
+    getCaption() {
+        return this.caption;
+    }
+
+    getTitle() {
+        return this.title;
+    }
+
+    Draw(container) {
+        if (!this.element) {
+            this.element = document.createElement('fieldset');
+            this.element.className = 'ui-group';
+            try { this.element.classList.add('ui-fieldset'); } catch (e) {}
+            const legend = document.createElement('legend');
+            // Use caption (if provided) as legend text so it visually interrupts the border
+            legend.textContent = this.caption || this.title;
+            this.element.appendChild(legend);
+
+            const orientation = this.orientation || 'horizontal';
+            // Use CSS classes for layout; JS keeps positioning only
+            if (orientation === 'vertical' || orientation === 'column') {
+                this.element.classList.add('vertical');
+            } else {
+                this.element.classList.add('horizontal');
+            }
+
+            // Positioning
+            if (!this.parentElement) {
+                this.element.style.position = 'absolute';
+                this.element.style.left = this.x + 'px';
+                this.element.style.top = this.y + 'px';
+                this.element.style.width = this.width + 'px';
+                this.element.style.height = this.height + 'px';
+                this.element.style.zIndex = this.z;
+            } else {
+                // When Group is placed inside a parent, make it stretch horizontally
+                this.element.style.position = this.element.style.position || 'relative';
+                this.element.style.width = '100%';
+                // Keep provided height if explicitly set
+                if (this.height) this.element.style.height = this.height + 'px';
+                this.element.style.boxSizing = this.element.style.boxSizing || 'border-box';
+            }
+
+            // box-sizing/padding handled via CSS
+
         }
 
         if (container) {
@@ -1529,7 +2230,8 @@ class TextBox extends UIObject {
         }
 
         return this.element;
-    }
+    }       
+
 }
 
 class Label extends UIObject {
@@ -1624,6 +2326,7 @@ class Toolbar extends UIObject {
         this.parentElement = parentElement;
         this.items = [];
         this.height = 28; // Default height for toolbar
+        this.compact = false; // Default: with spacing (not compact)
     }
 
     addItem(item) {
@@ -1641,16 +2344,22 @@ class Toolbar extends UIObject {
             this.element = document.createElement('div');
             this.element.style.display = 'flex';
             this.element.style.alignItems = 'center';
-            this.element.style.padding = '2px';
-            this.element.style.gap = '2px';
             this.element.style.boxSizing = 'border-box';
 
-            // Win98 toolbar style - FLATTENED as requested
-            // Keeping it transparent or inheriting parent color? 
-            // User requested "remove volume", so transparent is safest or same as window bg.
-            // Usually rebar/coolbar is transparent.
-            this.element.style.backgroundColor = 'transparent';
-            this.element.style.border = 'none'; // Remove borders
+            // Apply compact or normal spacing
+            if (this.compact) {
+                // Compact mode: no spacing, buttons stick together
+                this.element.style.padding = '0';
+                this.element.style.gap = '0';
+                this.element.style.backgroundColor = '#c0c0c0';
+                this.element.style.borderBottom = '1px solid #808080';
+            } else {
+                // Normal mode: with spacing
+                this.element.style.padding = '5px';
+                this.element.style.gap = '5px';
+                this.element.style.backgroundColor = '#c0c0c0';
+                this.element.style.borderBottom = '1px solid #808080';
+            }
 
             if (!this.parentElement) {
                 this.element.style.position = 'absolute';
@@ -1663,13 +2372,37 @@ class Toolbar extends UIObject {
                 this.element.style.width = '100%';
                 this.element.style.height = this.height + 'px';
                 this.element.style.position = 'relative';
+                this.element.style.flex = '0 0 auto';
             }
 
             // Draw items
-            this.items.forEach(item => {
+            this.items.forEach((item, index) => {
+                // Set parentElement for items so they use relative positioning
+                if (!item.parentElement) {
+                    item.parentElement = this.element;
+                }
                 item.Draw(this.element);
+                
+                // In compact mode, adjust button borders to make them stick together
+                if (this.compact && item instanceof Button && item.element) {
+                    item.element.style.margin = '0';
+                    item.element.style.borderRadius = '0';
+                    
+                    // First button: remove right border
+                    if (index === 0) {
+                        item.element.style.borderRight = 'none';
+                    }
+                    // Middle buttons: remove left and right borders
+                    else if (index < this.items.length - 1) {
+                        item.element.style.borderLeft = 'none';
+                        item.element.style.borderRight = 'none';
+                    }
+                    // Last button: remove left border
+                    else {
+                        item.element.style.borderLeft = 'none';
+                    }
+                }
             });
-            // Skip loading config color to keep it transparent/flat as requested
         }
         if (container) container.appendChild(this.element);
         return this.element;
@@ -1829,14 +2562,17 @@ class ToolbarSeparator extends UIObject {
     }
 }
 
-class Checkbox extends UIObject {
-    constructor(parentElement = null) {
-        super();
+class Checkbox extends FormInput {
+    constructor(parentElement = null, properties = {}) {
+        super(parentElement);
         this.parentElement = parentElement;
         this.checked = false;
         this.text = '';
         this.box = null;
         this.textSpan = null;
+
+        this.setProperties(properties);
+
     }
     setChecked(checked) {
         this.checked = checked;
@@ -1853,8 +2589,10 @@ class Checkbox extends UIObject {
         }
     }
     Draw(container) {
+        // Prepare container/label
+        super.Draw(container);
+
         if (!this.element) {
-            this.element = document.createElement('div');
             this.element.style.display = 'flex';
             this.element.style.alignItems = 'center';
             this.element.style.cursor = 'default';
@@ -1882,7 +2620,10 @@ class Checkbox extends UIObject {
             this.textSpan.textContent = this.text;
             this.textSpan.style.fontFamily = 'MS Sans Serif, sans-serif';
             this.textSpan.style.fontSize = '11px';
-            this.element.appendChild(this.textSpan);
+            // If caption is provided we've drawn a dedicated Label; skip internal label to avoid duplication
+            if (!this.caption) {
+                this.element.appendChild(this.textSpan);
+            }
 
             this.element.onclick = () => {
                 this.setChecked(!this.checked);
@@ -1898,7 +2639,11 @@ class Checkbox extends UIObject {
                 this.element.style.zIndex = this.z;
             }
         }
-        if (container) container.appendChild(this.element);
+
+        try {
+            if (this.containerElement) this.containerElement.appendChild(this.element);
+            else if (container) container.appendChild(this.element);
+        } catch (e) {}
         return this.element;
     }
 }
@@ -2229,10 +2974,9 @@ if (typeof window !== 'undefined') {
 }
 
 
-class ComboBox extends UIObject {
-    constructor(parentElement = null) {
-        super();
-        this.parentElement = parentElement;
+class ComboBox extends FormInput {
+    constructor(parentElement = null, properties = {}) {
+        super(parentElement, properties);
         this.items = []; // Array of strings or objects {label, value}
         this.selectedIndex = -1;
         this.text = '';
@@ -2369,6 +3113,9 @@ class ComboBox extends UIObject {
     }
 
     Draw(container) {
+        // Prepare container/label
+        super.Draw(container);
+
         if (!this.element) {
             this.element = document.createElement('div');
             this.element.style.display = 'flex';
@@ -2397,6 +3144,9 @@ class ComboBox extends UIObject {
             // Text input part
             this.inputElement = document.createElement('input');
             this.inputElement.type = 'text';
+            // Ensure unique id/name for form autofill and diagnostics
+            try { this.inputElement.id = this.inputElement.id || 'select_' + Math.random().toString(36).substr(2, 9); } catch (_) {}
+            try { this.inputElement.name = this.inputElement.name || this.inputElement.id; } catch (_) {}
             this.inputElement.readOnly = true; // Typically read-only for simple dropdown
             this.inputElement.value = this.text;
             this.inputElement.style.flex = '1';
@@ -2476,7 +3226,10 @@ class ComboBox extends UIObject {
             };
         }
 
-        if (container) container.appendChild(this.element);
+        try {
+            if (this.containerElement) this.containerElement.appendChild(this.element);
+            else if (container) container.appendChild(this.element);
+        } catch (e) {}
         return this.element;
     }
 }
@@ -2541,9 +3294,9 @@ function loadHTMLContent(src, callback) {
 }
 
 // CheckBox class for boolean values
-class CheckBox extends UIObject {
-    constructor(parentElement = null) {
-        super();
+class CheckBox extends FormInput {
+    constructor(parentElement = null, properties = {}) {
+        super(parentElement, properties);
         this.checked = false;
         this.readOnly = false;
         this.label = '';
@@ -2583,6 +3336,9 @@ class CheckBox extends UIObject {
     }
 
     Draw(container) {
+        // Prepare container and label
+        super.Draw(container);
+
         if (!this.element) {
             // Create label container
             this.element = document.createElement('label');
@@ -2604,6 +3360,8 @@ class CheckBox extends UIObject {
             // Create checkbox input
             const checkbox = document.createElement('input');
             checkbox.type = 'checkbox';
+            try { checkbox.id = checkbox.id || 'checkbox_' + Math.random().toString(36).substr(2,9); } catch (_) {}
+            try { checkbox.name = checkbox.name || checkbox.id; } catch (_) {}
             checkbox.checked = this.checked;
             checkbox.disabled = this.readOnly;
             checkbox.style.marginRight = '4px';
@@ -2616,11 +3374,10 @@ class CheckBox extends UIObject {
             // Create label text span
             const labelSpan = document.createElement('span');
             labelSpan.className = 'checkbox-label-text';
-            labelSpan.textContent = this.label;
 
             // Add elements
             this.element.appendChild(checkbox);
-            if (this.label) {
+            if ((this.label && this.label.length) || (this.caption && this.caption.length)) {
                 this.element.appendChild(labelSpan);
             }
 
@@ -2634,18 +3391,19 @@ class CheckBox extends UIObject {
             });
         }
 
-        if (container) {
-            container.appendChild(this.element);
-        }
+        try {
+            if (this.containerElement) this.containerElement.appendChild(this.element);
+            else if (container) container.appendChild(this.element);
+        } catch (e) {}
 
         return this.element;
     }
 }
 
 // DatePicker class for DATE and TIMESTAMP types
-class DatePicker extends UIObject {
-    constructor(parentElement = null) {
-        super();
+class DatePicker extends FormInput {
+    constructor(parentElement = null, properties = {}) {
+        super(parentElement, properties);
         this.value = null;  // Date object or null
         this.showTime = false;  // true for TIMESTAMP
         this.readOnly = false;
@@ -2908,6 +3666,9 @@ class DatePicker extends UIObject {
     }
 
     Draw(container) {
+        // Prepare container/label
+        super.Draw(container);
+
         if (!this.element) {
             this.element = document.createElement('div');
             this.element.style.display = 'inline-flex';
@@ -2925,6 +3686,8 @@ class DatePicker extends UIObject {
             // Text input
             const input = document.createElement('input');
             input.type = 'text';
+            try { input.id = input.id || 'date_' + Math.random().toString(36).substr(2,9); } catch (_) {}
+            try { input.name = input.name || input.id; } catch (_) {}
             input.value = this.formatDate(this.value);
             input.disabled = this.readOnly;
             input.style.width = this.showTime ? '120px' : '80px';
@@ -2977,9 +3740,10 @@ class DatePicker extends UIObject {
             this.element.appendChild(button);
         }
 
-        if (container) {
-            container.appendChild(this.element);
-        }
+        try {
+            if (this.containerElement) this.containerElement.appendChild(this.element);
+            else if (container) container.appendChild(this.element);
+        } catch (e) {}
 
         return this.element;
     }
@@ -2996,6 +3760,8 @@ class DynamicTable extends UIObject {
         this.rowHeight = options.rowHeight || 25;
         this.bufferRows = 10; // Client-side rendering buffer (server limits actual data)
         this.multiSelect = options.multiSelect !== undefined ? options.multiSelect : false;
+        this.editable = options.editable !== undefined ? options.editable : false;
+        this.showToolbar = options.showToolbar !== undefined ? options.showToolbar : this.editable;
         this.initialSort = options.initialSort || [];
         this.initialFilter = options.initialFilter || [];
         this.onRowClick = options.onRowClick || null;
@@ -3014,8 +3780,11 @@ class DynamicTable extends UIObject {
         this.lastSelectedIndex = null;
         this.isLoading = false;
         this.dataLoaded = false;
+        this.editSessionId = null; // Edit session ID from server
+        this.editedCells = new Map(); // Track edited cells: key = 'rowId_fieldName', value = newValue
         
         // DOM elements
+        this.toolbarContainer = null;
         this.tableContainer = null;
         this.headerContainer = null;
         this.bodyContainer = null;
@@ -3023,6 +3792,7 @@ class DynamicTable extends UIObject {
         this.tableElement = null;
         this.loadingOverlay = null;
         this.eventSource = null; // SSE connection
+        this.currentEditCell = null; // Currently editing cell
         
         // Resize state
         this.resizeState = {
@@ -3056,6 +3826,48 @@ class DynamicTable extends UIObject {
             this.element.tabIndex = 0; // Make focusable
             this.element.style.outline = 'none';
             this.element.style.userSelect = 'none'; // Disable text selection
+            
+            // Toolbar (if enabled) - FIRST, before header
+            if (this.showToolbar) {
+                const toolbar = new Toolbar(this.element);
+                toolbar.compact = true; // Compact mode: no spacing between buttons
+                toolbar.height = 28;
+                
+                // Standard table buttons
+                if (this.editable) {
+                    const addBtn = new Button();
+                    addBtn.setCaption('Добавить');
+                    addBtn.setIcon('/app/res/public/fontawesome-free-7.1.0-web/svgs/solid/plus.svg');
+                    addBtn.showIcon = true;
+                    addBtn.showText = false;
+                    addBtn.setTooltip('Добавить новую запись');
+                    addBtn.setWidth(100);
+                    addBtn.setHeight(28);
+                    addBtn.onClick = () => {
+                        console.log('[DynamicTable] Add button clicked');
+                    };
+                    toolbar.addItem(addBtn);
+                    
+                    const delBtn = new Button();
+                    delBtn.setCaption('Удалить');
+                    delBtn.setIcon('/app/res/public/fontawesome-free-7.1.0-web/svgs/solid/trash-can.svg');
+                    delBtn.showIcon = true;
+                    delBtn.showText = false;
+                    delBtn.setTooltip('Удалить выбранные записи');
+                    delBtn.setWidth(100);
+                    delBtn.setHeight(28);
+                    delBtn.onClick = () => {
+                        const selected = this.getSelectedRows();
+                        if (selected.length === 0) {
+                            showAlert('Выберите строки для удаления');
+                            return;
+                        }
+                    };
+                    toolbar.addItem(delBtn);
+                }
+                
+                toolbar.Draw(this.element);
+            }
             
             // Header container
             this.headerContainer = document.createElement('div');
@@ -3144,6 +3956,7 @@ class DynamicTable extends UIObject {
             
             this.totalRows = data.totalRows;
             this.fields = data.fields;
+            this.editSessionId = data.editSessionId; // Save edit session ID
             
             // Update cache
             data.data.forEach((row, index) => {
@@ -3354,7 +4167,7 @@ class DynamicTable extends UIObject {
         }
         
         // Render cells
-        this.fields.forEach(field => {
+        this.fields.forEach((field, fieldIndex) => {
             const td = document.createElement('td');
             td.style.width = field.width + 'px';
             td.style.boxSizing = 'border-box'; // Include padding and border in width
@@ -3378,6 +4191,29 @@ class DynamicTable extends UIObject {
                 
                 // Format value by type
                 td.textContent = this.formatValue(value, field.type);
+                
+                // Check if edited
+                const cellKey = `${rowData.id}_${field.name}`;
+                if (this.editedCells.has(cellKey)) {
+                    td.style.backgroundColor = '#ffffcc'; // Mark edited cells
+                }
+                
+                // Make cell editable if allowed
+                if (this.editable && field.editable && !field.foreignKey) {
+                    td.style.cursor = 'text';
+                    td.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        // Select the row first
+                        if (!this.selectedRows.has(rowIndex)) {
+                            this.selectedRows.clear();
+                            this.selectedRows.add(rowIndex);
+                            this.lastSelectedIndex = rowIndex;
+                            this.currentRowIndex = rowIndex;
+                            this.renderBody();
+                        }
+                        this.startCellEdit(td, rowData, field, rowIndex);
+                    });
+                }
             }
             
             tr.appendChild(td);
@@ -3574,10 +4410,137 @@ class DynamicTable extends UIObject {
         this.bodyContainer.scrollTop = scrollTop;
     }
     
+    startCellEdit(td, rowData, field, rowIndex) {
+        if (!this.editable || !field.editable || field.foreignKey) {
+            return;
+        }
+        
+        // Close previous edit if exists
+        if (this.currentEditCell) {
+            this.finishCellEdit(false);
+        }
+        
+        const currentValue = rowData[field.name];
+        const input = document.createElement('input');
+        input.type = 'text';
+        try { input.id = input.id || 'celledit_' + Math.random().toString(36).substr(2,9); } catch (_) {}
+        try { input.name = input.name || input.id; } catch (_) {}
+        input.value = this.formatValue(currentValue, field.type);
+        input.style.width = '100%';
+        input.style.boxSizing = 'border-box';
+        input.style.border = '1px solid #0000ff';
+        input.style.padding = '2px';
+        input.style.fontFamily = 'Tahoma, Arial, sans-serif';
+        input.style.fontSize = '11px';
+        // Preserve selection colors for input in selected row
+        if (this.selectedRows.has(rowIndex)) {
+            input.style.backgroundColor = '#000080';
+            input.style.color = '#ffffff';
+        }
+        
+        this.currentEditCell = {
+            td: td,
+            input: input,
+            rowData: rowData,
+            field: field,
+            originalValue: currentValue,
+            rowIndex: rowIndex
+        };
+        
+        td.textContent = '';
+        td.appendChild(input);
+        input.focus();
+        input.select();
+        
+        // Handle Enter - save
+        input.addEventListener('keydown', async (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                await this.finishCellEdit(true);
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                this.finishCellEdit(false);
+            }
+        });
+        
+        // Handle blur - save
+        input.addEventListener('blur', async () => {
+            await this.finishCellEdit(true);
+        });
+    }
+    
+    async finishCellEdit(save) {
+        if (!this.currentEditCell) return;
+        
+        const { td, input, rowData, field, originalValue } = this.currentEditCell;
+        const newValue = input.value;
+        
+        // Restore text content
+        td.textContent = save ? newValue : this.formatValue(originalValue, field.type);
+        
+        if (save && newValue !== this.formatValue(originalValue, field.type)) {
+            // Send to server
+            try {
+                await callServerMethod(this.appName, 'recordTableEdit', {
+                    editSessionId: this.editSessionId,
+                    rowId: rowData.id,
+                    fieldName: field.name,
+                    newValue: newValue
+                });
+                
+                // Mark as edited
+                const cellKey = `${rowData.id}_${field.name}`;
+                this.editedCells.set(cellKey, newValue);
+                td.style.backgroundColor = '#ffffcc';
+                
+                // Update cache
+                rowData[field.name] = newValue;
+                
+            } catch (e) {
+                showAlert('Ошибка сохранения: ' + e.message);
+                td.textContent = this.formatValue(originalValue, field.type);
+            }
+        }
+        
+        this.currentEditCell = null;
+    }
+    
+    async saveChanges() {
+        if (!this.editSessionId) {
+            showAlert('Нет активной сессии редактирования');
+            return;
+        }
+        
+        if (this.editedCells.size === 0) {
+            showAlert('Нет изменений для сохранения');
+            return;
+        }
+        
+        try {
+            const result = await callServerMethod(this.appName, 'commitTableEdits', {
+                editSessionId: this.editSessionId
+            });
+            
+            if (result.success) {
+                // Clear edited marks
+                this.editedCells.clear();
+                
+                // Reload table with new session ID
+                this.editSessionId = result.newEditSessionId;
+                await this.refresh();
+                
+                showAlert(`Изменения сохранены: ${result.updatedRows} строк`);
+            }
+        } catch (e) {
+            showAlert('Ошибка применения изменений: ' + e.message);
+        }
+    }
+    
     startResize(columnIndex, startX, startWidth) {
         this.resizeState.isResizing = true;
         this.resizeState.columnIndex = columnIndex;
         this.resizeState.startX = startX;
+
         this.resizeState.startWidth = startWidth;
         
         const mouseMoveHandler = (e) => {

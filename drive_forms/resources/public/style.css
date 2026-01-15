@@ -10,3 +10,158 @@ html, body {
   background-repeat: no-repeat;
   background-attachment: fixed;
 }
+
+/* Color palette variables for easy theming */
+:root {
+  --color-light: #ffffff;
+  --color-mid: #c0c0c0;
+  --color-dark: #404040;
+  --color-text: #000000;
+}
+
+/* Win95/Win98 style form group container */
+
+/* Group (fieldset) styled like Win95/98 */
+.ui-group {
+  box-sizing: border-box;
+  padding: 8px;
+  margin: 8px 0;
+  background: var(--color-mid);
+  /* Draw framing using two pseudo-elements: light frame and a dark frame shifted -1px,-1px */
+  border: none;
+  box-shadow: none;
+  color: var(--color-text);
+  font-family: MS Sans Serif, Tahoma, Arial, sans-serif;
+  font-size: 11px;
+  display: flex; /* default: horizontal layout */
+  flex-direction: row;
+  /*align-items: center;*/
+  align-items: flex-start;
+  gap: 10px;
+  position: relative;
+  overflow: visible; /* allow shifted dark frame to be visible without clipping */
+}
+
+/* Horizontal explicit class (optional) */
+.ui-group.horizontal {
+  flex-direction: row;
+  /*align-items: center;*/
+  align-items: flex-start;
+  gap: 10px;
+}
+
+/* Vertical / column layout */
+.ui-group.vertical,
+.ui-group.column {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+}
+
+.ui-group legend {
+  font-family: MS Sans Serif, Tahoma, Arial, sans-serif;
+  font-size: 11px;
+  padding: 0 6px;
+  background: var(--color-mid); /* hide border behind legend */
+  color: var(--color-text);
+  position: absolute; /* position relative to .ui-group */
+  top: 0; /* align legend center to the top border */
+  left: 8px;
+  transform: translateY(-50%); /* center text vertically on the top border line */
+  display: inline-block;
+  white-space: nowrap;
+  line-height: 1;
+  z-index: 3; /* above the pseudo-border layers */
+}
+
+
+/* Pseudo-elements to draw the two frames: light frame at exact bounds, dark frame offset -1px,-1px */
+.ui-group::before,
+.ui-group::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  pointer-events: none;
+}
+
+.ui-group::before {
+  /* light frame exactly around element */
+  border: 1px solid var(--color-light);
+  z-index: 1;
+}
+
+.ui-group::after {
+  /* dark frame same size, shifted up-left by 1px */
+  border: 1px solid var(--color-dark);
+  /* dark frame shifted up-left by 1px without changing size */
+  transform: translate(-1px, -1px);
+  z-index: 2;
+}
+
+/* Nested groups inherit same framing */
+
+
+/* Additional UI component styles (moved from UI_classes.js) */
+.ui-form {
+  position: absolute;
+  box-sizing: border-box;
+  outline: none;
+  background-color: var(--color-mid);
+  border-top: 2px solid var(--color-light);
+  border-left: 2px solid var(--color-light);
+  border-right: 2px solid #808080;
+  border-bottom: 2px solid #808080;
+}
+
+.ui-form-titlebar {
+  background-color: #808080;
+  color: #ffffff;
+  font-weight: bold;
+  font-size: 14px;
+  padding: 2px 2px;
+  cursor: default;
+  user-select: none;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.ui-form-title { padding-left: 4px; }
+
+.ui-form-buttons { display:flex; gap:2px; flex-shrink:0; margin-left:auto; }
+
+.ui-title-button { width:18px; height:18px; padding:0; margin:0; display:flex; align-items:center; justify-content:center; line-height:18px; box-sizing:border-box; background:transparent; border:none; outline:none; cursor:default; }
+
+.ui-form-content { position:relative; width:100%; overflow:auto; box-sizing:border-box; }
+
+.ui-button { background-color: var(--color-mid); border-top:2px solid var(--color-light); border-left:2px solid var(--color-light); border-right:2px solid #808080; border-bottom:2px solid #808080; font-family: MS Sans Serif, sans-serif; font-size:11px; cursor:default; outline:none; box-sizing:border-box; display:inline-flex; align-items:center; justify-content:center; }
+
+.ui-textbox { background-color:#ffffff; border-top:2px solid #808080; border-left:2px solid #808080; border-right:2px solid #ffffff; border-bottom:2px solid #ffffff; font-family: MS Sans Serif, sans-serif; font-size:11px; padding:2px 4px; outline:none; box-sizing:border-box; }
+
+.ui-label { display:inline-block; box-sizing:border-box; font-size:11px; font-family: MS Sans Serif, sans-serif; color:var(--color-text); }
+
+.ui-toolbar { display:flex; align-items:center; box-sizing:border-box; background-color: var(--color-mid); border-bottom:1px solid #808080; }
+.ui-toolbar.compact { padding:0; gap:0; }
+.ui-toolbar:not(.compact) { padding:5px; gap:5px; }
+
+.ui-toolbar-button { display:flex; align-items:center; justify-content:center; box-sizing:border-box; cursor:default; border:1px solid transparent; padding:0 4px; user-select:none; min-width:24px; height:22px; }
+
+.ui-toolbar-separator { width:2px; height:18px; margin-left:2px; margin-right:2px; border-left:1px solid #808080; border-right:1px solid #ffffff; }
+
+.ui-checkbox { display:flex; align-items:center; cursor:default; user-select:none; }
+.ui-checkbox > div { width:13px; height:13px; background-color:#ffffff; border-top:1px solid #808080; border-left:1px solid #808080; border-right:1px solid #ffffff; border-bottom:1px solid #ffffff; box-shadow: inset 1px 1px 0px #000000, 1px 1px 0px #ffffff; display:flex; align-items:center; justify-content:center; font-size:10px; margin-right:6px; color:#000000; }
+
+.ui-radiobutton { display:flex; align-items:center; cursor:default; user-select:none; }
+.ui-radiobutton .circle { width:12px; height:12px; border-radius:50%; background-color:#ffffff; border-top:1px solid #808080; border-left:1px solid #808080; border-right:1px solid #ffffff; border-bottom:1px solid #ffffff; box-shadow: inset 1px 1px 0px #000000, 1px 1px 0px #ffffff; display:flex; align-items:center; justify-content:center; margin-right:6px; }
+
+.ui-radiogroup { position:absolute; }
+
+.ui-combobox { display:flex; align-items:center; box-sizing:border-box; }
+
+.ui-fieldset { box-sizing: border-box; }
+
+

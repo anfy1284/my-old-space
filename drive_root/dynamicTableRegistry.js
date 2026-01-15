@@ -62,7 +62,8 @@ function registerDynamicTableMethods(appName, config = {}) {
                 visibleRows,
                 sort: sort || [],
                 filters: filters || [],
-                fieldConfig: fieldConfig
+                fieldConfig: fieldConfig,
+                userId: user.id  // Pass userId for edit session
             });
         },
         
@@ -173,6 +174,36 @@ function registerDynamicTableMethods(appName, config = {}) {
             
             // Очистка мёртвых подключений
             deadClients.forEach(client => tableClients.delete(client));
+        },
+        
+        /**
+         * Запись одного изменения ячейки
+         */
+        async recordTableEdit(params, sessionID) {
+            const { editSessionId, rowId, fieldName, newValue } = params;
+            
+            // Получение пользователя (для проверки прав)
+            const user = await globalServerContext.getUserBySessionID(sessionID);
+            if (!user) {
+                throw new Error('User not authorized');
+            }
+            
+            return await globalServerContext.recordTableEdit(editSessionId, rowId, fieldName, newValue);
+        },
+        
+        /**
+         * Применить все изменения из сессии в БД
+         */
+        async commitTableEdits(params, sessionID) {
+            const { editSessionId } = params;
+            
+            // Получение пользователя
+            const user = await globalServerContext.getUserBySessionID(sessionID);
+            if (!user) {
+                throw new Error('User not authorized');
+            }
+            
+            return await globalServerContext.commitTableEdits(editSessionId);
         }
     };
 }

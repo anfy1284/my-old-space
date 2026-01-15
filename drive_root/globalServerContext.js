@@ -4,9 +4,14 @@ const { Sequelize, DataTypes, Op } = require('sequelize');
 const sequelize = require('./db/sequelize_instance');
 const eventBus = require('./eventBus');
 const util = require('util');
+const crypto = require('crypto');
 
 // Store project root path (set by framework.start)
 let projectRoot = null;
+
+// Store for edit sessions: Map<editSessionId, { userId, tableName, changes }>
+// changes is Map<rowId, Map<fieldName, newValue>>
+const editSessions = new Map();
 
 // Cache for model definitions (avoid re-reading files on each request)
 // Store in global to survive require.cache deletion during hot-reload
@@ -639,7 +644,7 @@ async function getTableMetadata(modelName) {
 
 /**
  * Get table data with server-side paging, sorting, filtering
- * @param {Object} options - { modelName, firstRow, visibleRows, sort[], filters[] }
+ * @param {Object} options - { modelName, firstRow, visibleRows, sort[], filters[], fieldConfig, userId }
  * @returns {Promise<Object>} - { totalRows, fields, data, range }
  */
 async function getDynamicTableData(options) {
@@ -654,7 +659,7 @@ async function getDynamicTableData(options) {
         defaultBufferRows: 10
     };
     
-    let { modelName, firstRow, visibleRows, sort, filters, fieldConfig } = options;
+    let { modelName, firstRow, visibleRows, sort, filters, fieldConfig, userId } = options;
     
     // Apply server-side limits to prevent abuse
     visibleRows = Math.min(visibleRows || 20, config.maxVisibleRows);
@@ -762,10 +767,19 @@ async function getDynamicTableData(options) {
     
     console.log(`[PERF] TOTAL getDynamicTableData: ${Date.now() - startTime}ms`);
 
+    // Generate edit session ID for editable tables
+    const editSessionId = crypto.randomBytes(16).toString('hex');
+    editSessions.set(editSessionId, {
+        userId: userId,
+        tableName: modelName,
+        changes: new Map()
+    });
+
     return {
         totalRows,
         fields: fields,  // Return enriched fields with foreignKey metadata
         data: resolvedData,
+        editSessionId: editSessionId,
         range: {
             from: requestFirstRow,
             to: requestFirstRow + resolvedData.length - 1
@@ -835,6 +849,111 @@ async function resolveTableForeignKeys(modelName, dataArray, fields) {
 }
 
 /**
+ * Record a single cell edit in edit session
+ * @param {string} editSessionId - Edit session ID
+ * @param {number} rowId - Row ID (primary key)
+ * @param {string} fieldName - Field name
+ * @param {any} newValue - New value
+ * @returns {object} - Success status
+ */
+async function recordTableEdit(editSessionId, rowId, fieldName, newValue) {
+    const session = editSessions.get(editSessionId);
+    if (!session) {
+        throw new Error('Invalid or expired edit session');
+    }
+
+    // Get or create changes map for this row
+    if (!session.changes.has(rowId)) {
+        session.changes.set(rowId, new Map());
+    }
+    
+    const rowChanges = session.changes.get(rowId);
+    rowChanges.set(fieldName, newValue);
+
+    console.log(`[recordTableEdit] Session ${editSessionId}, Row ${rowId}, Field ${fieldName} = ${newValue}`);
+    console.log(`[recordTableEdit] Total changes in session: ${session.changes.size} rows`);
+
+    return { success: true, changesCount: session.changes.size };
+}
+
+/**
+ * Commit all edits from session to database
+ * @param {string} editSessionId - Edit session ID
+ * @returns {object} - { success, newEditSessionId, errors }
+ */
+async function commitTableEdits(editSessionId) {
+    const session = editSessions.get(editSessionId);
+    if (!session) {
+        throw new Error('Invalid or expired edit session');
+    }
+
+    if (session.changes.size === 0) {
+        return { success: true, message: 'No changes to commit' };
+    }
+
+    const model = modelsDB[session.tableName];
+    if (!model) {
+        throw new Error(`Model ${session.tableName} not found`);
+    }
+
+    const errors = [];
+    let successCount = 0;
+
+    // Use transaction
+    const transaction = await sequelize.transaction();
+
+    try {
+        for (const [rowId, fieldChanges] of session.changes.entries()) {
+            try {
+                const updateData = {};
+                for (const [fieldName, value] of fieldChanges.entries()) {
+                    updateData[fieldName] = value;
+                }
+
+                await model.update(updateData, {
+                    where: { id: rowId },
+                    transaction
+                });
+
+                successCount++;
+            } catch (e) {
+                errors.push({ rowId, error: e.message });
+            }
+        }
+
+        if (errors.length > 0) {
+            await transaction.rollback();
+            throw new Error(`Failed to update ${errors.length} rows: ${errors.map(e => e.error).join(', ')}`);
+        }
+
+        await transaction.commit();
+
+        // Clear old session
+        editSessions.delete(editSessionId);
+
+        // Generate new edit session ID
+        const newEditSessionId = crypto.randomBytes(16).toString('hex');
+        editSessions.set(newEditSessionId, {
+            userId: session.userId,
+            tableName: session.tableName,
+            changes: new Map()
+        });
+
+        console.log(`[commitTableEdits] Committed ${successCount} rows, new session: ${newEditSessionId}`);
+
+        return {
+            success: true,
+            updatedRows: successCount,
+            newEditSessionId: newEditSessionId
+        };
+
+    } catch (e) {
+        await transaction.rollback();
+        throw e;
+    }
+}
+
+/**
  * Save client state (stub for future implementation)
  * @param {Object} user - User object
  * @param {Object} stateData - State data to save
@@ -850,4 +969,5 @@ async function saveClientState(user, stateData) {
 module.exports.getTableMetadata = getTableMetadata;
 module.exports.getDynamicTableData = getDynamicTableData;
 module.exports.resolveTableForeignKeys = resolveTableForeignKeys;
-module.exports.saveClientState = saveClientState;
+module.exports.recordTableEdit = recordTableEdit;
+module.exports.commitTableEdits = commitTableEdits;
