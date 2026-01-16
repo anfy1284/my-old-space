@@ -1705,12 +1705,29 @@ class TextBox extends FormInput {
         // containerElement and label are handled by FormInput helpers
         this.containerElement = null;
         this.label = null;
+        // List mode: when enabled, a small button appears to open a prepared list
+        if (typeof this.listMode === 'undefined' || this.listMode === null) this.listMode = false;
+        // listItems: array of objects { value: any, caption: string }
+        if (!Array.isArray(this.listItems)) this.listItems = (properties && properties.listItems) ? properties.listItems : [];
+        this._listBtn = null;
+        this._listPopup = null;
+        this._listOpen = false;
     }
 
     setText(text) {
-        this.text = text;
+        this.text = (text === null || text === undefined) ? '' : String(text);
         if (this.element) {
-            this.element.value = text;
+            try {
+                if (this.listMode && Array.isArray(this.listItems)) {
+                    const found = this.listItems.find(it => { try { return String(it && it.value) === String(this.text); } catch (_) { return false; } });
+                    const display = (found && (typeof found.caption !== 'undefined' && found.caption !== null)) ? String(found.caption) : this.text;
+                    this.element.value = display;
+                } else {
+                    this.element.value = this.text;
+                }
+            } catch (e) {
+                try { this.element.value = this.text; } catch (_) {}
+            }
         }
     }
 
@@ -1771,7 +1788,8 @@ class TextBox extends FormInput {
             this.element = document.createElement('input');
             // Password support: if requested, use password type
             this.element.type = this.isPassword ? 'password' : 'text';
-            this.element.value = this.text;
+            // Initialize displayed text via setText so listMode can show caption
+            try { this.setText(this.text); } catch (_) { try { this.element.value = this.text; } catch (_) {} }
             this.element.placeholder = this.placeholder;
             this.element.readOnly = this.readOnly;
             // If we have a host container, use it; otherwise element will be appended to container below
@@ -1782,17 +1800,56 @@ class TextBox extends FormInput {
                 // override positioning here.
             }
 
+            this.inputContainer = document.createElement('div');
+            this.inputContainer.style.display = 'flex';
+            this.inputContainer.style.flexDirection = 'row';
+            this.inputContainer.style.alignItems = 'center';
+            this.inputContainer.style.width = '100%';
+            this.inputContainer.style.boxSizing = 'border-box';
+            // Retro border for the input container to match the input itself
+            try {
+                const tbBase = UIObject.getClientConfigValue('defaultColor', '#c0c0c0');
+                const tbLight = UIObject.brightenColor(tbBase, 60);
+                const tbDark = UIObject.brightenColor(tbBase, -60);
+                this.inputContainer.style.backgroundColor = '#ffffff';
+                this.inputContainer.style.borderTop = `2px solid ${tbDark}`;
+                this.inputContainer.style.borderLeft = `2px solid ${tbDark}`;
+                this.inputContainer.style.borderRight = `2px solid ${tbLight}`;
+                this.inputContainer.style.borderBottom = `2px solid ${tbLight}`;
+                this.inputContainer.style.boxSizing = 'border-box';
+
+                UIObject.loadClientConfig().then(() => {
+                    try {
+                        const base = UIObject.getClientConfigValue('defaultColor', tbBase);
+                        const light = UIObject.brightenColor(base, 60);
+                        const dark = UIObject.brightenColor(base, -60);
+                        this.inputContainer.style.borderTop = `2px solid ${dark}`;
+                        this.inputContainer.style.borderLeft = `2px solid ${dark}`;
+                        this.inputContainer.style.borderRight = `2px solid ${light}`;
+                        this.inputContainer.style.borderBottom = `2px solid ${light}`;
+                    } catch (e) {}
+                }).catch(()=>{});
+            } catch (e) {}
+
             // Configure input to participate in flex layout and fill remaining space
             this.element.style.position = this.element.style.position || 'relative';
             this.element.style.flex = '1 1 auto';
             this.element.style.width = 'auto';
             this.element.style.height = this.element.style.height || 'auto';
 
+            /*
             // Append input into containerElement if present, otherwise into provided container
             try {
                 if (this.containerElement) this.containerElement.appendChild(this.element);
                 else if (container) container.appendChild(this.element);
             } catch (e) {}
+            */
+            try {
+                if (this.containerElement) this.containerElement.appendChild(this.inputContainer);
+                else if (container) container.appendChild(this.inputContainer);
+            } catch (e) {}
+            this.inputContainer.appendChild(this.element);
+
 
             // Adaptive layout: if container is wide enough, place label left and input right (row).
             // If narrow, stack label above input (column).
@@ -1858,10 +1915,13 @@ class TextBox extends FormInput {
             const tbLight = UIObject.brightenColor(tbBase, 60);
             const tbDark = UIObject.brightenColor(tbBase, -60);
             this.element.style.backgroundColor = '#ffffff';
-            this.element.style.borderTop = `2px solid ${tbDark}`;
-            this.element.style.borderLeft = `2px solid ${tbDark}`;
-            this.element.style.borderRight = `2px solid ${tbLight}`;
-            this.element.style.borderBottom = `2px solid ${tbLight}`;
+            this.element.style.border = 'none';
+            // Border for the raw input is intentionally commented out —
+            // visual border is applied to the input container (`inputContainer`).
+            // this.element.style.borderTop = `2px solid ${tbDark}`;
+            // this.element.style.borderLeft = `2px solid ${tbDark}`;
+            // this.element.style.borderRight = `2px solid ${tbLight}`;
+            // this.element.style.borderBottom = `2px solid ${tbLight}`;
             this.element.style.fontFamily = 'MS Sans Serif, sans-serif';
             this.element.style.fontSize = '11px';
             this.element.style.padding = '2px 4px';
@@ -1874,11 +1934,316 @@ class TextBox extends FormInput {
                 const light = UIObject.brightenColor(base, 60);
                 const dark = UIObject.brightenColor(base, -60);
                 this.element.style.backgroundColor = '#ffffff';
-                this.element.style.borderTop = `2px solid ${dark}`;
-                this.element.style.borderLeft = `2px solid ${dark}`;
-                this.element.style.borderRight = `2px solid ${light}`;
-                this.element.style.borderBottom = `2px solid ${light}`;
+                // Keep input borders controlled by the container; skip updating element borders
+                // this.element.style.borderTop = `2px solid ${dark}`;
+                // this.element.style.borderLeft = `2px solid ${dark}`;
+                // this.element.style.borderRight = `2px solid ${light}`;
+                // this.element.style.borderBottom = `2px solid ${light}`;
             });
+
+            // If listMode is enabled, add a small Win95-style button at right to open prepared list
+            try {
+                // remove stale button/popup if present and mode disabled
+                if (!this.listMode && this._listBtn) {
+                    try { this._listBtn.remove(); } catch (_) {}
+                    this._listBtn = null;
+                    try { this._closeList && this._closeList(); } catch (_) {}
+                }
+
+                if (this.listMode) {
+                    // create button if missing
+                    if (!this._listBtn) {
+                        const btn = document.createElement('button');
+                        btn.type = 'button';
+                        btn.tabIndex = -1;
+                        // Create glyph in a child span and visually scale it so the
+                        // symbol appears larger without affecting layout (transforms
+                        // don't change document flow size).
+                        const glyph = document.createElement('span');
+                        glyph.textContent = '▾';
+                        glyph.style.display = 'inline-block';
+                        glyph.style.fontFamily = 'MS Sans Serif, sans-serif';
+                        glyph.style.fontSize = '11px';
+                        glyph.style.lineHeight = '1';
+                        glyph.style.transform = 'scale(1.25)';
+                        glyph.style.transformOrigin = 'center';
+                        glyph.style.pointerEvents = 'none';
+                        // Button sizing stays small so layout (height) doesn't change
+                        // make button slightly narrower while preserving height
+                        btn.style.flex = '0 0 18px';
+                        btn.style.height = '100%';
+                        btn.style.minWidth = '18px';
+                        btn.style.display = 'inline-flex';
+                        btn.style.alignItems = 'center';
+                        btn.style.justifyContent = 'center';
+                        btn.style.margin = '0';
+                        btn.style.padding = '0';
+                        btn.style.fontFamily = 'MS Sans Serif, sans-serif';
+                        btn.style.fontSize = '11px';
+                        // Use default cursor (avoid pointer/hand) to keep native text cursor on input
+                        btn.style.cursor = 'default';
+                        btn.style.boxSizing = 'border-box';
+                        btn.style.overflow = 'visible';
+                        btn.appendChild(glyph);
+                        // Win95-style raised button (use tbDark/tbLight derived colors)
+                        const base = UIObject.getClientConfigValue('defaultColor', '#c0c0c0');
+                        const light = UIObject.brightenColor(base, 60);
+                        const dark = UIObject.brightenColor(base, -60);
+                        btn.style.borderTop = `2px solid ${light}`;
+                        btn.style.borderLeft = `2px solid ${light}`;
+                        btn.style.borderRight = `2px solid ${dark}`;
+                        btn.style.borderBottom = `2px solid ${dark}`;
+
+                        // handlers
+                        btn.addEventListener('click', (ev) => {
+                            try { ev.stopPropagation(); } catch (_) {}
+                            try { this._toggleList && this._toggleList(); } catch (_) {}
+                        });
+
+                        this._listBtn = btn;
+                        /*
+                        try {
+                            if (this.containerElement) this.containerElement.appendChild(this._listBtn);
+                            else if (container) container.appendChild(this._listBtn);
+                        } catch (_) {}
+                         */
+                        this.inputContainer.appendChild(this._listBtn);
+                    }
+
+                    // implement open/close/toggle helpers on the instance
+                    if (!this._openList) {
+                        this._openList = () => {
+                            try {
+                                if (this._listOpen) return;
+                                // build popup
+                                const popup = document.createElement('div');
+                                popup.className = 'textbox-list-popup';
+                                popup.style.position = 'absolute';
+                                popup.style.backgroundColor = '#ffffff';
+                                const base = UIObject.getClientConfigValue('defaultColor', '#c0c0c0');
+                                const light = UIObject.brightenColor(base, 60);
+                                const dark = UIObject.brightenColor(base, -60);
+                                // No visible frame for dropdown popup
+                                popup.style.border = 'none';
+                                popup.style.fontFamily = 'MS Sans Serif, sans-serif';
+                                popup.style.fontSize = '11px';
+                                popup.style.zIndex = '99999';
+                                popup.style.boxSizing = 'border-box';
+                                // restore default inner padding
+                                popup.style.padding = '2px';
+                                // soft shadow instead of visible frame
+                                popup.style.boxShadow = '0 4px 10px rgba(0,0,0,0.25)';
+                                popup.style.minWidth = (this.containerElement ? this.containerElement.clientWidth : (container ? container.clientWidth : 120)) + 'px';
+
+                                // populate items
+                                const items = Array.isArray(this.listItems) ? this.listItems : [];
+                                for (let i = 0; i < items.length; i++) {
+                                    const it = items[i] || {};
+                                    const row = document.createElement('div');
+                                    row.style.padding = '3px 6px';
+                                    row.style.cursor = 'pointer';
+                                    row.style.userSelect = 'none';
+                                    row.textContent = (typeof it.caption !== 'undefined' && it.caption !== null) ? String(it.caption) : String(it.value);
+                                    row.addEventListener('mouseenter', () => { row.style.backgroundColor = '#b0b0b0'; });
+                                    row.addEventListener('mouseleave', () => { row.style.backgroundColor = ''; });
+                                    row.addEventListener('click', (e) => {
+                                        try {
+                                            // set underlying value; setText will display caption when available
+                                            this.setText(it.value);
+                                            // notify any listeners (so clients can pick up the new value)
+                                            try { if (this.element) this.element.dispatchEvent(new Event('input', { bubbles: true })); } catch (_) {}
+                                        } catch (_) {}
+                                        try { this._closeList && this._closeList(); } catch (_) {}
+                                    });
+                                    popup.appendChild(row);
+                                }
+
+                                // Rows will be made focusable and the matching row will be focused
+                                // after the popup is attached to the document to ensure focus() works.
+
+                                // position popup under the container
+                                const rect = (this.containerElement || container).getBoundingClientRect();
+                                popup.style.left = (rect.left + (window.pageXOffset || document.documentElement.scrollLeft)) + 'px';
+                                popup.style.top = (rect.bottom + (window.pageYOffset || document.documentElement.scrollTop)) + 'px';
+
+                                document.body.appendChild(popup);
+                                this._listPopup = popup;
+                                this._listOpen = true;
+
+                                // After popup is in DOM, make rows focusable and focus the
+                                // one matching current value (or first). Doing this after
+                                // append ensures document.activeElement will reflect the
+                                // focused row so arrow-key navigation works correctly.
+                                try {
+                                    const rowsEls = Array.from(popup.children || []);
+                                    // clear previous visuals/flags
+                                    rowsEls.forEach(r => { try { r.tabIndex = -1; r.style.backgroundColor = ''; r.removeAttribute && r.removeAttribute('data-selected'); } catch (_) {} });
+                                    let selIndex = -1;
+                                    try {
+                                        const curVal = (typeof this.text !== 'undefined' && this.text !== null) ? String(this.text) : String(this.element && this.element.value || '');
+                                        for (let i = 0; i < items.length; i++) {
+                                            const it = items[i] || {};
+                                            if (String(it.value) === curVal || String(it.caption) === curVal) { selIndex = i; break; }
+                                        }
+                                    } catch (_) {}
+                                    if (selIndex === -1 && rowsEls.length > 0) selIndex = 0;
+                                    if (selIndex >= 0 && rowsEls[selIndex]) {
+                                        try { rowsEls[selIndex].tabIndex = 0; rowsEls[selIndex].focus(); rowsEls[selIndex].style.backgroundColor = '#b0b0b0'; rowsEls[selIndex].setAttribute && rowsEls[selIndex].setAttribute('data-selected', '1'); } catch (_) {}
+                                    }
+                                } catch (_) {}
+
+                                // keyboard navigation: arrows move, Enter/Space select, Esc close
+                                try {
+                                    this._listKeyHandler = (ev) => {
+                                        try {
+                                            const k = ev.key;
+                                            const rows = Array.from(popup.children || []);
+                                            if (!rows.length) return;
+                                            const active = document.activeElement;
+                                            let idx = rows.indexOf(active);
+                                            // fallback: if activeElement isn't part of rows (idx == -1),
+                                            // find the row that has the highlight/data-selected flag
+                                            if (idx === -1) {
+                                                idx = rows.findIndex(r => {
+                                                    try { return (r.getAttribute && r.getAttribute('data-selected') === '1') || (r.style && r.style.backgroundColor === '#b0b0b0'); } catch(_) { return false; }
+                                                });
+                                            }
+
+                                            if (k === 'ArrowDown') {
+                                                ev.preventDefault();
+                                                let next = (idx >= 0 && idx < rows.length - 1) ? rows[idx + 1] : rows[0];
+                                                try {
+                                                    rows.forEach(r => { try { r.style.backgroundColor = ''; r.removeAttribute && r.removeAttribute('data-selected'); r.tabIndex = -1; } catch(_){} });
+                                                    next.tabIndex = 0; next.focus(); next.style.backgroundColor = '#b0b0b0'; next.setAttribute && next.setAttribute('data-selected', '1');
+                                                } catch(_){ }
+                                            } else if (k === 'ArrowUp') {
+                                                ev.preventDefault();
+                                                let prev = (idx > 0) ? rows[idx - 1] : rows[rows.length - 1];
+                                                try {
+                                                    rows.forEach(r => { try { r.style.backgroundColor = ''; r.removeAttribute && r.removeAttribute('data-selected'); r.tabIndex = -1; } catch(_){} });
+                                                    prev.tabIndex = 0; prev.focus(); prev.style.backgroundColor = '#b0b0b0'; prev.setAttribute && prev.setAttribute('data-selected', '1');
+                                                } catch(_){ }
+                                            } else if (k === 'Enter' || k === ' ') {
+                                                ev.preventDefault();
+                                                try { if (active && popup.contains(active)) active.click(); } catch(_){}
+                                            } else if (k === 'Escape') {
+                                                ev.preventDefault();
+                                                try { this._closeList && this._closeList(); } catch(_){}
+                                            }
+                                        } catch (_) {}
+                                    };
+                                    // Attach key handler on document (capture) so we reliably
+                                    // intercept Arrow keys and prevent the underlying form
+                                    // from scrolling when popup is open.
+                                    document.addEventListener('keydown', this._listKeyHandler, true);
+                                } catch (_) {}
+
+                                // click outside closes
+                                this._listDocHandler = (ev) => {
+                                    try {
+                                        if (!popup.contains(ev.target) && this._listBtn && !this._listBtn.contains(ev.target)) {
+                                            this._closeList && this._closeList();
+                                        }
+                                    } catch (_) {}
+                                };
+                                document.addEventListener('click', this._listDocHandler);
+
+                                // Close the popup when the page/layout changes in ways
+                                // that can detach the popup from its input (scroll/resize/move)
+                                this._listScrollHandler = (ev) => {
+                                    try {
+                                        // If the interaction started inside the popup, list button, or input, don't close.
+                                        if (ev && ev.target) {
+                                            try {
+                                                const t = ev.target;
+                                                if (this._listPopup && this._listPopup.contains(t)) return;
+                                                if (this._listBtn && this._listBtn.contains(t)) return;
+                                                if (this.element && (this.element === t || (this.inputContainer && this.inputContainer.contains(t)))) return;
+                                            } catch(_) {}
+                                        }
+                                        this._closeList && this._closeList();
+                                    } catch(_) {}
+                                };
+                                try {
+                                    window.addEventListener('scroll', this._listScrollHandler, true);
+                                } catch(_) {}
+                                try {
+                                    window.addEventListener('resize', this._listScrollHandler);
+                                } catch(_) {}
+                                try {
+                                    window.addEventListener('orientationchange', this._listScrollHandler);
+                                } catch(_) {}
+                                try {
+                                    // capture wheel events so scrolling via mouse wheel closes popup
+                                    window.addEventListener('wheel', this._listScrollHandler, true);
+                                } catch(_) {}
+                                try {
+                                    // detect start of pointer/drag interactions (scrollbar drag, touch, etc.)
+                                    window.addEventListener('pointerdown', this._listScrollHandler, true);
+                                } catch(_) {}
+                                try {
+                                    window.addEventListener('mousedown', this._listScrollHandler, true);
+                                } catch(_) {}
+                                try {
+                                    window.addEventListener('touchstart', this._listScrollHandler, { capture: true, passive: true });
+                                } catch(_) {}
+
+                                // Observe DOM changes on the container (or body as fallback)
+                                try {
+                                    const observeTarget = (this.containerElement || container) || document.body;
+                                    if (typeof MutationObserver !== 'undefined') {
+                                        this._listMutationObserver = new MutationObserver((mutations) => {
+                                            try { this._closeList && this._closeList(); } catch(_) {}
+                                        });
+                                        try {
+                                            this._listMutationObserver.observe(observeTarget, { attributes: true, childList: true, subtree: true });
+                                        } catch(_) {
+                                            // if observing specific target fails, observe body
+                                            try { this._listMutationObserver.observe(document.body, { attributes: true, childList: true, subtree: true }); } catch(_) {}
+                                        }
+                                    }
+                                } catch(_) {}
+                            } catch (e) { }
+                        };
+
+                        this._closeList = () => {
+                            try {
+                                if (this._listPopup) {
+                                    try { 
+                                        if (this._listKeyHandler) {
+                                            try { document.removeEventListener('keydown', this._listKeyHandler, true); } catch(_){}
+                                            this._listKeyHandler = null;
+                                        }
+                                        this._listPopup.remove(); 
+                                    } catch (_) { document.body.removeChild(this._listPopup); }
+                                }
+                                this._listPopup = null;
+                                this._listOpen = false;
+                                if (this._listDocHandler) { try { document.removeEventListener('click', this._listDocHandler); } catch (_) {} }
+                                this._listDocHandler = null;
+
+                                // remove scroll/resize/wheel/orientation listeners added on open
+                                try { if (this._listScrollHandler) { try { window.removeEventListener('scroll', this._listScrollHandler, true); } catch(_){} } } catch(_){ }
+                                try { if (this._listScrollHandler) { try { window.removeEventListener('resize', this._listScrollHandler); } catch(_){} } } catch(_){ }
+                                try { if (this._listScrollHandler) { try { window.removeEventListener('orientationchange', this._listScrollHandler); } catch(_){} } } catch(_){ }
+                                try { if (this._listScrollHandler) { try { window.removeEventListener('wheel', this._listScrollHandler, true); } catch(_){} } } catch(_){ }
+                                try { if (this._listScrollHandler) { try { window.removeEventListener('pointerdown', this._listScrollHandler, true); } catch(_){} } } catch(_){ }
+                                try { if (this._listScrollHandler) { try { window.removeEventListener('mousedown', this._listScrollHandler, true); } catch(_){} } } catch(_){ }
+                                try { if (this._listScrollHandler) { try { window.removeEventListener('touchstart', this._listScrollHandler, { capture: true, passive: true }); } catch(_){} } } catch(_){ }
+                                this._listScrollHandler = null;
+
+                                // disconnect mutation observer
+                                try { if (this._listMutationObserver) { try { this._listMutationObserver.disconnect(); } catch(_){} } } catch(_){}
+                                this._listMutationObserver = null;
+                            } catch (_) {}
+                        };
+
+                        this._toggleList = () => {
+                            try { if (this._listOpen) this._closeList(); else this._openList(); } catch (_) {}
+                        };
+                    }
+                }
+            } catch (e) {}
 
             // Events
             this.element.addEventListener('input', (e) => {
@@ -1941,6 +2306,18 @@ class TextBox extends FormInput {
 
             this.element.addEventListener('click', (e) => {
                 this.onClick(e);
+                try {
+                    // Ensure the input receives focus even when readOnly so keyboard
+                    // focus behavior remains consistent and focus handlers run.
+                    try { if (this.element && typeof this.element.focus === 'function') this.element.focus(); } catch (_) {}
+
+                    if (this.listMode) {
+                        // Prevent the document-level click handler from seeing this
+                        // click and immediately closing the newly opened popup.
+                        try { e.stopPropagation(); } catch (_) {}
+                        try { if (!this._listOpen) this._openList && this._openList(); } catch (_) {}
+                    }
+                } catch (_) {}
             });
 
             this.element.addEventListener('dblclick', (e) => {
@@ -2091,14 +2468,21 @@ class TextBox extends FormInput {
             try { if (typeof this.placeholder !== 'undefined') this.element.placeholder = this.placeholder; } catch (_) {}
             try { if (typeof this.readOnly !== 'undefined') this.element.readOnly = !!this.readOnly; } catch (_) {}
 
+            // focus/blur border changes moved to container; skip on-element border edits
             this.element.addEventListener('focus', (e) => {
-                this.element.style.borderTop = '2px solid #000080';
-                this.element.style.borderLeft = '2px solid #000080';
+                try {
+                    // Open list on focus when in listMode
+                    if (this.listMode) {
+                        try { this._openList && this._openList(); } catch (_) {}
+                    }
+                } catch (_) {}
+                // this.element.style.borderTop = '2px solid #000080';
+                // this.element.style.borderLeft = '2px solid #000080';
             });
 
             this.element.addEventListener('blur', (e) => {
-                this.element.style.borderTop = '2px solid #808080';
-                this.element.style.borderLeft = '2px solid #808080';
+                // this.element.style.borderTop = '2px solid #808080';
+                // this.element.style.borderLeft = '2px solid #808080';
             });
 
             // Finalize attribute application and log diagnostics to help debug property propagation
@@ -2147,6 +2531,129 @@ class TextBox extends FormInput {
         if (container) {
             // Always append the containerElement (not the raw input) so label + input stay together
             container.appendChild(this.containerElement);
+        }
+
+        return this.element;
+    }
+}
+
+// Multiline text input: renders a <textarea> and implements the same basic
+// API as TextBox (`setText`, `getText`, `setPlaceholder`, `setReadOnly`, `setMaxLength`).
+class MultilineTextBox extends FormInput {
+    constructor(parentElement = null, properties = {}) {
+        super(parentElement, properties);
+        if (typeof this.text === 'undefined' || this.text === null) this.text = '';
+        if (typeof this.placeholder === 'undefined' || this.placeholder === null) this.placeholder = '';
+        if (typeof this.readOnly === 'undefined' || this.readOnly === null) this.readOnly = false;
+        this.rows = (typeof this.rows === 'number' && this.rows > 0) ? (this.rows | 0) : (properties.rows ? (properties.rows | 0) : 4);
+        this.wrap = this.wrap || properties.wrap || 'soft'; // soft|hard|off
+        this.maxLength = (typeof this.maxLength === 'number') ? (this.maxLength | 0) : (properties.maxLength ? (properties.maxLength | 0) : 0);
+        this.containerElement = null;
+    }
+
+    setText(text) {
+        this.text = (text === null || text === undefined) ? '' : String(text);
+        if (this.element) this.element.value = this.text;
+    }
+
+    getText() {
+        return this.element ? this.element.value : this.text;
+    }
+
+    setPlaceholder(placeholder) {
+        this.placeholder = placeholder;
+        if (this.element) this.element.placeholder = placeholder;
+    }
+
+    setReadOnly(readOnly) {
+        this.readOnly = !!readOnly;
+        if (this.element) this.element.readOnly = this.readOnly;
+    }
+
+    setRows(rows) {
+        this.rows = (typeof rows === 'number' && rows > 0) ? (rows | 0) : this.rows;
+        if (this.element) this.element.rows = this.rows;
+    }
+
+    setMaxLength(maxLength) {
+        this.maxLength = (typeof maxLength === 'number') ? (maxLength | 0) : (maxLength ? parseInt(maxLength, 10) : 0);
+        if (this.element) {
+            if (this.maxLength && this.maxLength > 0) this.element.maxLength = this.maxLength;
+            else if (this.maxLength === 0) try { this.element.removeAttribute('maxLength'); } catch (_) {}
+        }
+    }
+
+    Draw(container) {
+        // Prepare label/container
+        super.Draw(container);
+
+        if (!this.element) {
+            this.element = document.createElement('textarea');
+            this.element.value = this.text;
+            this.element.placeholder = this.placeholder;
+            this.element.readOnly = this.readOnly;
+            this.element.rows = this.rows;
+            try { this.element.wrap = this.wrap; } catch (_) {}
+
+            // Flex layout participation
+            this.element.style.position = this.element.style.position || 'relative';
+            this.element.style.flex = '1 1 auto';
+            this.element.style.width = '100%';
+            this.element.style.boxSizing = 'border-box';
+
+            // Append into container
+            try {
+                if (this.containerElement) this.containerElement.appendChild(this.element);
+                else if (container) container.appendChild(this.element);
+            } catch (e) {}
+
+            // Basic visual style similar to TextBox
+            const tbBase = UIObject.getClientConfigValue('defaultColor', '#c0c0c0');
+            const tbLight = UIObject.brightenColor(tbBase, 60);
+            const tbDark = UIObject.brightenColor(tbBase, -60);
+            this.element.style.backgroundColor = '#ffffff';
+            this.element.style.borderTop = `2px solid ${tbDark}`;
+            this.element.style.borderLeft = `2px solid ${tbDark}`;
+            this.element.style.borderRight = `2px solid ${tbLight}`;
+            this.element.style.borderBottom = `2px solid ${tbLight}`;
+            this.element.style.fontFamily = 'MS Sans Serif, sans-serif';
+            this.element.style.fontSize = '11px';
+            this.element.style.padding = '4px';
+            this.element.style.outline = 'none';
+
+            // Observe size if needed (keeps textarea full width)
+            try {
+                if (typeof ResizeObserver !== 'undefined' && this.containerElement) {
+                    if (this._ro) try { this._ro.disconnect(); } catch (e) {}
+                    this._ro = new ResizeObserver(() => {
+                        try { this.element.style.width = '100%'; } catch (_) {}
+                    });
+                    this._ro.observe(this.containerElement);
+                }
+            } catch (e) {}
+
+            // Events: input updates internal text, preserve API parity with TextBox
+            this.element.addEventListener('input', (e) => {
+                try { this.text = e.target.value; } catch (ex) { this.text = e.target.value; }
+            });
+
+            this.element.addEventListener('click', (e) => { this.onClick(e); });
+            this.element.addEventListener('dblclick', (e) => { this.onDoubleClick(e); });
+            this.element.addEventListener('keydown', (e) => { this.onKeyPressed(e); });
+
+            this.element.id = 'textarea_' + Math.random().toString(36).substr(2, 9);
+            this.element.name = this.element.id;
+
+            // Dataset props for debugging
+            try {
+                const props = { rows: this.rows, wrap: this.wrap, placeholder: this.placeholder || '', readOnly: !!this.readOnly, maxLength: this.maxLength || 0 };
+                try { this.element.dataset.props = JSON.stringify(props); } catch (_) {}
+            } catch (_) {}
+        }
+
+        if (container) {
+            // Always append the containerElement so label + control stay together
+            try { container.appendChild(this.containerElement); } catch (e) {}
         }
 
         return this.element;
