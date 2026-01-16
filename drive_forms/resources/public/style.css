@@ -165,3 +165,38 @@ html, body {
 .ui-fieldset { box-sizing: border-box; }
 
 
+/* Remove persistent 1px rounded UA border around native checkboxes (not focus styles) */
+input[type="checkbox"],
+.ui-checkbox input[type="checkbox"] {
+  border: none !important;
+  box-shadow: none !important;
+  background-clip: padding-box !important;
+  border-radius: 0 !important;
+  padding: 0 !important;
+}
+
+/* Custom visual box that replaces native checkbox border
+   Native checkbox is kept invisible (opacity:0) on top to preserve focus & keyboard interaction. */
+.custom-checkbox-box {
+  width: 13px;
+  height: 13px;
+  background-color: #ffffff;
+  border: none !important;
+  box-shadow: none !important;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  color: #000000;
+  border-radius: 0; /* ensure square corners */
+}
+
+/* Show checkmark inside visual box when native input is checked */
+.ui-checkbox input[type="checkbox"]:checked + .custom-checkbox-box::after {
+  content: '\2713'; /* checkmark */
+  font-size: 11px;
+  line-height: 1;
+}
+
+
+

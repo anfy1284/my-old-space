@@ -3069,7 +3069,7 @@ class ToolbarSeparator extends UIObject {
     }
 }
 
-class Checkbox extends FormInput {
+class LegacyCheckbox extends FormInput {
     constructor(parentElement = null, properties = {}) {
         super(parentElement);
         this.parentElement = parentElement;
@@ -3849,12 +3849,27 @@ class CheckBox extends FormInput {
         if (!this.element) {
             // Create label container
             this.element = document.createElement('label');
+            // mark as ui-checkbox so stylesheet rules target it
+            try { this.element.classList.add('ui-checkbox'); } catch (_) {}
             this.element.style.display = 'inline-flex';
             this.element.style.alignItems = 'center';
             this.element.style.cursor = this.readOnly ? 'default' : 'pointer';
             this.element.style.userSelect = 'none';
             this.element.style.fontFamily = 'MS Sans Serif, sans-serif';
             this.element.style.fontSize = '11px';
+
+            // Normalize spacing to avoid unexpected gaps inside the label
+            this.element.style.margin = '0';
+            this.element.style.padding = '0';
+            this.element.style.boxSizing = 'border-box';
+
+            /*
+            // If an explicit height is set on the label, keep width equal to that height
+            // so the checkbox label area remains square. If no explicit height, leave width unset.
+            if (this.element.style.height && this.element.style.height.trim() !== '') {
+                this.element.style.width = this.element.style.height;
+            }
+            */
 
             // Positioning
             if (!this.parentElement) {
@@ -3864,26 +3879,99 @@ class CheckBox extends FormInput {
                 this.element.style.zIndex = this.z;
             }
 
-            // Create checkbox input
+            // Create a wrapper that contains the native input (invisible) and a custom visual box
+            const wrapper = document.createElement('span');
+            wrapper.style.display = 'inline-block';
+            wrapper.style.position = 'relative';
+            wrapper.style.width = '13px';
+            wrapper.style.height = '13px';
+            wrapper.style.marginRight = '6px';
+
             const checkbox = document.createElement('input');
             checkbox.type = 'checkbox';
             try { checkbox.id = checkbox.id || 'checkbox_' + Math.random().toString(36).substr(2,9); } catch (_) {}
             try { checkbox.name = checkbox.name || checkbox.id; } catch (_) {}
             checkbox.checked = this.checked;
             checkbox.disabled = this.readOnly;
-            checkbox.style.marginRight = '4px';
+            // Position native input over custom box but keep it invisible so browser focus and keyboard work
+            checkbox.style.position = 'absolute';
+            checkbox.style.left = '0';
+            checkbox.style.top = '0';
             checkbox.style.width = '13px';
             checkbox.style.height = '13px';
+            checkbox.style.margin = '0';
+            checkbox.style.padding = '0';
+            checkbox.style.opacity = '0';
+            checkbox.style.zIndex = '2';
+            checkbox.style.cursor = this.readOnly ? 'default' : 'pointer';
 
-            // Win98 checkbox styling
-            checkbox.style.accentColor = '#000080'; // Blue checkmark color
+            // Create visual box (we'll style via CSS class .custom-checkbox-box)
+            const visualBox = document.createElement('div');
+            visualBox.className = 'custom-checkbox-box';
+            visualBox.style.position = 'absolute';
+            visualBox.style.left = '0';
+            visualBox.style.top = '0';
+            visualBox.style.width = '13px';
+            visualBox.style.height = '13px';
+            visualBox.style.zIndex = '1';
+            visualBox.setAttribute('aria-hidden', 'true');
 
             // Create label text span
             const labelSpan = document.createElement('span');
             labelSpan.className = 'checkbox-label-text';
 
-            // Add elements
-            this.element.appendChild(checkbox);
+
+            this.inputContainer = document.createElement('div');
+            this.inputContainer.style.display = 'flex';
+            this.inputContainer.style.flexDirection = 'row';
+            this.inputContainer.style.alignItems = 'center';
+            this.inputContainer.style.padding = '0';
+            // If an explicit height was set on the input container (inline style),
+            // keep width equal to that height so the control stays square.
+            // If no explicit height is present, do not set width here (leave layout to CSS/flex).
+            /*
+            if (this.inputContainer.style.height && this.inputContainer.style.height.trim() !== '') {
+                this.inputContainer.style.width = this.inputContainer.style.height;
+            }
+            */
+            this.inputContainer.style.boxSizing = 'border-box';
+            // Retro border for the input container to match the input itself
+            try {
+                const tbBase = UIObject.getClientConfigValue('defaultColor', '#c0c0c0');
+                const tbLight = UIObject.brightenColor(tbBase, 60);
+                const tbDark = UIObject.brightenColor(tbBase, -60);
+                this.inputContainer.style.backgroundColor = '#ffffff';
+                this.inputContainer.style.borderTop = `2px solid ${tbDark}`;
+                this.inputContainer.style.borderLeft = `2px solid ${tbDark}`;
+                this.inputContainer.style.borderRight = `2px solid ${tbLight}`;
+                this.inputContainer.style.borderBottom = `2px solid ${tbLight}`;
+                this.inputContainer.style.boxSizing = 'border-box';
+
+                UIObject.loadClientConfig().then(() => {
+                    try {
+                        const base = UIObject.getClientConfigValue('defaultColor', tbBase);
+                        const light = UIObject.brightenColor(base, 60);
+                        const dark = UIObject.brightenColor(base, -60);
+                        this.inputContainer.style.borderTop = `2px solid ${dark}`;
+                        this.inputContainer.style.borderLeft = `2px solid ${dark}`;
+                        this.inputContainer.style.borderRight = `2px solid ${light}`;
+                        this.inputContainer.style.borderBottom = `2px solid ${light}`;
+                    } catch (e) {}
+                }).catch(()=>{});
+            } catch (e) {}
+
+            /*
+            // Configure input to participate in flex layout and fill remaining space
+            this.element.style.position = this.element.style.position || 'relative';
+            this.element.style.flex = '1 1 auto';
+            this.element.style.width = 'auto';
+            this.element.style.height = this.element.style.height || 'auto';
+            */
+
+            // Add elements: wrapper contains native input + visual box
+            wrapper.appendChild(checkbox);
+            wrapper.appendChild(visualBox);
+            this.element.appendChild(wrapper);
             if ((this.label && this.label.length) || (this.caption && this.caption.length)) {
                 this.element.appendChild(labelSpan);
             }
@@ -3898,9 +3986,33 @@ class CheckBox extends FormInput {
             });
         }
 
+        /*
         try {
             if (this.containerElement) this.containerElement.appendChild(this.element);
             else if (container) container.appendChild(this.element);
+        } catch (e) {}
+         */
+
+        try {
+            if (this.containerElement) this.containerElement.appendChild(this.inputContainer);
+            else if (container) container.appendChild(this.inputContainer);
+        } catch (e) {}
+        this.inputContainer.appendChild(this.element);
+
+        // Prevent label from flex-growing inside the container
+        try {
+            this.element.style.flex = this.element.style.flex || '0 0 auto';
+            this.element.style.minWidth = this.element.style.minWidth || '0';
+
+            // Compute rendered height and set width to match so label is square.
+            // Only set if no explicit inline width already provided.
+            if ((!this.element.style.width || this.element.style.width.trim() === '') && typeof window !== 'undefined' && window.getComputedStyle) {
+                const cs = window.getComputedStyle(this.element);
+                const h = cs && cs.height ? parseFloat(cs.height) : 0;
+                if (h && !isNaN(h) && h > 0) {
+                    this.element.style.width = Math.ceil(h) + 'px';
+                }
+            }
         } catch (e) {}
 
         return this.element;
