@@ -309,9 +309,10 @@ input[type="checkbox"],
 
 /* Show checkmark inside visual box when native input is checked */
 .ui-checkbox input[type="checkbox"]:checked + .custom-checkbox-box::after {
-  content: '\2713'; /* checkmark */
+  content: '\2714'; /* checkmark */
   font-size: 11px;
   line-height: 1;
+  /*font-weight: bold;*/
 }
 
 
