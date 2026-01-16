@@ -596,6 +596,7 @@ class Form extends UIObject {
             }
 
             this.element = document.createElement('div');
+            this.element.classList.add('ui-form');
             this.element.style.position = 'absolute';
             this.element.style.left = this.x + 'px';
             this.element.style.top = this.y + 'px';
@@ -639,6 +640,7 @@ class Form extends UIObject {
 
             // Create title bar (initially inactive - dark gray)
             this.titleBar = document.createElement('div');
+            this.titleBar.classList.add('ui-titlebar');
             this.titleBar.style.backgroundColor = '#808080';
             this.titleBar.style.color = '#ffffff';
             this.titleBar.style.fontWeight = 'bold';
@@ -652,11 +654,13 @@ class Form extends UIObject {
 
             // Title text
             this.titleTextElement = document.createElement('span');
+            this.titleTextElement.classList.add('ui-title');
             this.titleTextElement.textContent = this.title;
             this.titleBar.appendChild(this.titleTextElement);
 
             // Buttons container
             const buttonsContainer = document.createElement('div');
+            buttonsContainer.classList.add('ui-titlebar-buttons');
             buttonsContainer.style.display = 'flex';
             buttonsContainer.style.gap = '2px';
             buttonsContainer.style.flexShrink = '0'; // Prevent button shrinking
@@ -694,6 +698,7 @@ class Form extends UIObject {
 
             // Minimize button
             const btnMinimize = document.createElement('button');
+            btnMinimize.classList.add('ui-title-button');
             Object.assign(btnMinimize.style, buttonStyle);
             const canvasMin = document.createElement('canvas');
             canvasMin.width = 12;
@@ -711,6 +716,7 @@ class Form extends UIObject {
 
             // Maximize button
             const btnMaximize = document.createElement('button');
+            btnMaximize.classList.add('ui-title-button');
             Object.assign(btnMaximize.style, buttonStyle);
             const canvasMax = document.createElement('canvas');
             canvasMax.width = 12;
@@ -737,6 +743,7 @@ class Form extends UIObject {
 
             // Close button
             const btnClose = document.createElement('button');
+            btnClose.classList.add('ui-title-button');
             Object.assign(btnClose.style, buttonStyle);
             const canvasClose = document.createElement('canvas');
             canvasClose.width = 12;
@@ -1559,6 +1566,7 @@ class Button extends UIObject {
     Draw(container) {
         if (!this.element) {
             this.element = document.createElement('button');
+            this.element.classList.add('ui-button');
             
             // Update button content (icon and/or text)
             this.updateButtonContent();
@@ -1786,6 +1794,7 @@ class TextBox extends FormInput {
 
         if (!this.element) {
             this.element = document.createElement('input');
+            this.element.classList.add('ui-input');
             // Password support: if requested, use password type
             this.element.type = this.isPassword ? 'password' : 'text';
             // Initialize displayed text via setText so listMode can show caption
@@ -1801,6 +1810,7 @@ class TextBox extends FormInput {
             }
 
             this.inputContainer = document.createElement('div');
+            this.inputContainer.classList.add('ui-input-container');
             this.inputContainer.style.display = 'flex';
             this.inputContainer.style.flexDirection = 'row';
             this.inputContainer.style.alignItems = 'center';
@@ -2801,6 +2811,7 @@ class Label extends UIObject {
     Draw(container) {
         if (!this.element) {
             this.element = document.createElement('span');
+            this.element.classList.add('ui-label');
             this.element.textContent = this.text;
             this.element.style.fontSize = this.fontSize;
             this.element.style.fontFamily = this.fontFamily;
@@ -2849,6 +2860,7 @@ class Toolbar extends UIObject {
     Draw(container) {
         if (!this.element) {
             this.element = document.createElement('div');
+            this.element.classList.add('ui-toolbar');
             this.element.style.display = 'flex';
             this.element.style.alignItems = 'center';
             this.element.style.boxSizing = 'border-box';
@@ -3768,6 +3780,16 @@ function loadResource(src, type = 'script', callback) {
     document.head.appendChild(el);
 }
 
+// Ensure bundled stylesheet is loaded for these UI components
+if (typeof window !== 'undefined') {
+    try {
+        const href = '/app/res/public/style.css';
+        if (!document.querySelector('link[href="' + href + '"]')) {
+            loadResource(href, 'style');
+        }
+    } catch (e) {}
+}
+
 function loadHTMLContent(src, callback) {
     const fetchText = () => {
         if (window.fetch) {
@@ -4428,6 +4450,7 @@ class DynamicTable extends UIObject {
     async Draw(container) {
         if (!this.element) {
             this.element = document.createElement('div');
+            this.element.classList.add('ui-dynamictable');
             this.element.style.position = 'relative';
             this.element.style.width = '100%';
             this.element.style.height = '100%';

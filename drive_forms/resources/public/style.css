@@ -1,3 +1,119 @@
+/* Centralized UI styles moved out of UI_classes.js */
+
+/* Form / window */
+.ui-form {
+  position: absolute;
+  box-sizing: border-box;
+  outline: none;
+  font-family: MS Sans Serif, sans-serif;
+  font-size: 11px;
+  -webkit-font-smoothing: antialiased;
+}
+.ui-form .ui-titlebar {
+  background-color: #808080;
+  color: #ffffff;
+  font-weight: bold;
+  font-size: 14px;
+  padding: 2px 2px;
+  cursor: default;
+  user-select: none;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.ui-form .ui-titlebar .ui-titlebar-buttons {
+  display:flex;
+  gap:2px;
+  margin-left:auto;
+  flex-shrink:0;
+}
+.ui-form .ui-titlebar button.ui-title-button {
+  width:18px;height:18px;padding:0;margin:0;display:flex;align-items:center;justify-content:center;line-height:18px;box-sizing:border-box;background:transparent;border:none;outline:none;cursor:default;
+}
+
+/* Generic buttons */
+.ui-button {
+  font-family: MS Sans Serif, sans-serif;
+  font-size: 11px;
+  cursor: default;
+  outline: none;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Input controls */
+.ui-input-container {
+  display:flex;
+  flex-direction:row;
+  align-items:center;
+  width:100%;
+  box-sizing:border-box;
+}
+.ui-input {
+  position:relative;
+  flex:1 1 auto;
+  width:auto;
+  background-color:#ffffff;
+  font-family: MS Sans Serif, sans-serif;
+  font-size:11px;
+  padding:2px 4px;
+  outline:none;
+  box-sizing:border-box;
+}
+
+.textbox-list-popup {
+  position:absolute;
+  background-color:#ffffff;
+  font-family: MS Sans Serif, sans-serif;
+  font-size:11px;
+  z-index:99999;
+  box-sizing:border-box;
+  padding:2px;
+  box-shadow:0 4px 10px rgba(0,0,0,0.25);
+}
+
+/* Labels */
+.ui-label {
+  font-family: MS Sans Serif, sans-serif;
+  font-size: 11px;
+  color: #000000;
+  display:inline-block;
+  box-sizing:border-box;
+}
+
+/* Toolbar */
+.ui-toolbar {
+  display:flex;
+  align-items:center;
+  box-sizing:border-box;
+  font-family: MS Sans Serif, sans-serif;
+  font-size:11px;
+}
+
+/* Dynamic table base */
+.ui-dynamictable {
+  position:relative;
+  width:100%;
+  height:100%;
+  box-sizing:border-box;
+  overflow:hidden;
+  display:flex;
+  flex-direction:column;
+  font-family: MS Sans Serif, sans-serif;
+  font-size:11px;
+  user-select:none;
+}
+
+/* Custom checkbox visual box */
+.custom-checkbox-box {
+  width:13px;height:13px;position:absolute;left:0;top:0;z-index:1;background:#fff;border:1px solid #808080;box-shadow:inset 1px 1px 0px rgba(0,0,0,0.3);
+}
+
+/* Misc */
+.ui-fieldset.vertical { display:flex; flex-direction:column; }
+.ui-fieldset.horizontal { display:flex; flex-direction:row; }
 html, body {
   margin: 0;
   padding: 0;
