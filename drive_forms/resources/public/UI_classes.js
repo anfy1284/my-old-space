@@ -1550,6 +1550,24 @@ class Button extends UIObject {
         const y = event.clientY + 10;
         this.tooltipElement.style.left = x + 'px';
         this.tooltipElement.style.top = y + 'px';
+
+        // Start a hover watcher to auto-hide tooltip if pointer leaves the button
+        try {
+            if (this._tooltipHoverWatcher) {
+                clearInterval(this._tooltipHoverWatcher);
+                this._tooltipHoverWatcher = null;
+            }
+            const self = this;
+            this._tooltipHoverWatcher = setInterval(() => {
+                try {
+                    if (!self.element || (typeof self.element.matches === 'function' && !self.element.matches(':hover'))) {
+                        self.hideTooltip();
+                    }
+                } catch (e) {
+                    // ignore
+                }
+            }, 200);
+        } catch (e) {}
     }
     
     hideTooltip() {
@@ -1560,6 +1578,10 @@ class Button extends UIObject {
         if (this.tooltipTimeout) {
             clearTimeout(this.tooltipTimeout);
             this.tooltipTimeout = null;
+        }
+        if (this._tooltipHoverWatcher) {
+            try { clearInterval(this._tooltipHoverWatcher); } catch (e) {}
+            this._tooltipHoverWatcher = null;
         }
     }
 
@@ -1715,11 +1737,14 @@ class TextBox extends FormInput {
         this.label = null;
         // List mode: when enabled, a small button appears to open a prepared list
         if (typeof this.listMode === 'undefined' || this.listMode === null) this.listMode = false;
+        // Optional: show a selection button ("...") to trigger a selection procedure
+        if (typeof this.showSelectionButton === 'undefined' || this.showSelectionButton === null) this.showSelectionButton = false;
         // listItems: array of objects { value: any, caption: string }
         if (!Array.isArray(this.listItems)) this.listItems = (properties && properties.listItems) ? properties.listItems : [];
         this._listBtn = null;
         this._listPopup = null;
         this._listOpen = false;
+        this._selectBtn = null;
     }
 
     setText(text) {
@@ -1859,6 +1884,41 @@ class TextBox extends FormInput {
                 else if (container) container.appendChild(this.inputContainer);
             } catch (e) {}
             this.inputContainer.appendChild(this.element);
+
+            // If requested, add selection button ("...") to the input container.
+            // It should appear to the right of the input and (if present) to the left of the dropdown list button.
+            try {
+                if (this.showSelectionButton) {
+                    if (!this._selectBtn) {
+                        const sbtn = document.createElement('button');
+                        sbtn.type = 'button';
+                        sbtn.tabIndex = -1;
+                        sbtn.textContent = '...';
+                        sbtn.style.flex = '0 0 22px';
+                        sbtn.style.height = '100%';
+                        sbtn.style.minWidth = '22px';
+                        sbtn.style.display = 'inline-flex';
+                        sbtn.style.alignItems = 'center';
+                        sbtn.style.justifyContent = 'center';
+                        sbtn.style.margin = '0';
+                        sbtn.style.padding = '0';
+                        sbtn.style.fontFamily = 'MS Sans Serif, sans-serif';
+                        sbtn.style.fontSize = '12px';
+                        sbtn.style.boxSizing = 'border-box';
+                        sbtn.style.cursor = 'default';
+                        const base = UIObject.getClientConfigValue('defaultColor', '#c0c0c0');
+                        const light = UIObject.brightenColor(base, 60);
+                        const dark = UIObject.brightenColor(base, -60);
+                        sbtn.style.borderTop = `2px solid ${light}`;
+                        sbtn.style.borderLeft = `2px solid ${light}`;
+                        sbtn.style.borderRight = `2px solid ${dark}`;
+                        sbtn.style.borderBottom = `2px solid ${dark}`;
+                        sbtn.addEventListener('click', (ev) => { try { ev.stopPropagation(); ev.preventDefault(); this.onSelectionStart(); } catch (_) {} });
+                        this._selectBtn = sbtn;
+                        this.inputContainer.appendChild(this._selectBtn);
+                    }
+                }
+            } catch (e) {}
 
 
             // Adaptive layout: if container is wide enough, place label left and input right (row).
@@ -2545,8 +2605,13 @@ class TextBox extends FormInput {
 
         return this.element;
     }
-}
 
+
+    onSelectionStart() {
+        // Empty handler - override in applications to start selection flow
+    }
+
+}
 // Multiline text input: renders a <textarea> and implements the same basic
 // API as TextBox (`setText`, `getText`, `setPlaceholder`, `setReadOnly`, `setMaxLength`).
 class MultilineTextBox extends FormInput {
@@ -3165,6 +3230,10 @@ class LegacyCheckbox extends FormInput {
         } catch (e) {}
         return this.element;
     }
+
+    onSelectionStart() {
+        // Empty handler - override in applications to start selection/lookup
+    }
 }
 
 class RadioButton extends UIObject {
@@ -3418,7 +3487,7 @@ class AlertForm extends ModalForm {
     }
 }
 
-class ConfirmForm extends ModalForm {
+class ConfirmForm1 extends ModalForm {
     constructor(message, onOk, onCancel) {
         super('Confirm', 360, 170);
         this.message = message;
@@ -3502,6 +3571,9 @@ class ComboBox extends FormInput {
         this.expanded = false;
         this.onChange = null;
         this.listElement = null; // The dropdown list container
+        // Optional selection button ("...") to trigger selection flow
+        if (typeof this.showSelectionButton === 'undefined' || this.showSelectionButton === null) this.showSelectionButton = false;
+        this._selectBtn = null;
     }
 
     setItems(items) {
@@ -3679,6 +3751,42 @@ class ComboBox extends FormInput {
             this.inputElement.style.cursor = 'default';
 
             this.element.appendChild(this.inputElement);
+
+            // Optional selection button to the left of the dropdown arrow
+            try {
+                if (this.showSelectionButton) {
+                    if (!this._selectBtn) {
+                        const sbtn = document.createElement('button');
+                        sbtn.type = 'button';
+                        sbtn.tabIndex = -1;
+                        sbtn.textContent = '...';
+                        sbtn.style.width = '22px';
+                        sbtn.style.minWidth = '22px';
+                        sbtn.style.height = '100%';
+                        sbtn.style.display = 'flex';
+                        sbtn.style.alignItems = 'center';
+                        sbtn.style.justifyContent = 'center';
+                        sbtn.style.margin = '0';
+                        sbtn.style.padding = '0';
+                        sbtn.style.boxSizing = 'border-box';
+                        sbtn.style.cursor = 'default';
+                        sbtn.style.fontFamily = 'MS Sans Serif, sans-serif';
+                        sbtn.style.fontSize = '12px';
+                        sbtn.style.fontWeight = 'bold';
+                        const base = UIObject.getClientConfigValue('defaultColor', '#c0c0c0');
+                        const light = UIObject.brightenColor(base, 60);
+                        const dark = UIObject.brightenColor(base, -60);
+                        sbtn.style.borderTop = `2px solid ${light}`;
+                        sbtn.style.borderLeft = `2px solid ${light}`;
+                        sbtn.style.borderRight = `2px solid ${dark}`;
+                        sbtn.style.borderBottom = `2px solid ${dark}`;
+                        sbtn.addEventListener('click', (ev) => { try { ev.stopPropagation(); ev.preventDefault(); this.onSelectionStart(); } catch (_) {} });
+                        // Insert now; arrow button will be appended after, so this will be to its left
+                        this.element.appendChild(sbtn);
+                        this._selectBtn = sbtn;
+                    }
+                }
+            } catch (e) {}
 
             // Arrow button
             const btn = document.createElement('button');

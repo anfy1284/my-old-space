@@ -26,6 +26,19 @@ function start(options = {}) {
     console.warn(`[Framework] WARNING: rootPath not provided in start() options!`);
   }
   
+  // Optionally start the memory_store service so it's tied to framework lifecycle
+  try {
+    const memoryStore = require('./drive_root/memory_store');
+    // start service in background (port from env MEMORY_STORE_PORT or default)
+    try { memoryStore.startServiceProcess(); console.log('[Framework] memory_store service started'); } catch (e) { console.warn('[Framework] cannot start memory_store service', e); }
+    // Ensure service is stopped on exit
+    process.on('exit', () => { try { memoryStore.stopServiceProcess(); } catch (_) {} });
+    process.on('SIGINT', () => { try { memoryStore.stopServiceProcess(); } catch (_) {} ; process.exit(0); });
+    process.on('SIGTERM', () => { try { memoryStore.stopServiceProcess(); } catch (_) {} ; process.exit(0); });
+  } catch (e) {
+    console.warn('[Framework] memory_store module not available, skipping service spawn');
+  }
+
   // Запускаем main_server.js из пакета my-old-space
   require(path.join(__dirname, 'main_server.js'));
 }
