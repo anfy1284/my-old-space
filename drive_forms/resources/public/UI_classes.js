@@ -224,6 +224,9 @@ class FormInput extends UIObject {
         this.containerElement = null; // optional wrapper when placed inside a parent
         this._labelInstance = null; // Label instance (if used)
         this.showLabel = false;
+        // Whether to show a border around the input container. Default: true.
+        // Some controls (those that use an input container) will respect this.
+        this.showBorder = true;
         // If true, place caption to the right of the control and do not append ':'
         this.captionOnRight = false;
         // Apply initial properties passed at construction time
@@ -248,14 +251,34 @@ class FormInput extends UIObject {
             this.containerElement.style.display = 'flex';
             this.containerElement.style.alignItems = 'center';
             this.containerElement.style.gap = '8px';
-            this.containerElement.style.padding = '0';
             this.containerElement.style.margin = '0';
-            this.containerElement.style.border = 'none';
-            this.containerElement.style.boxShadow = 'none';
+            // Prefer CSS classes over inline borders to avoid visual regressions.
+            // Add standard input container class so styling comes from stylesheet.
+            try { this.containerElement.classList.add('ui-input-container'); } catch (e) {}
+            // If explicitly requested to hide border, mark container with helper class
+            try { if (this.showBorder === false) this.containerElement.classList.add('ui-input-no-border'); } catch (e) {}
             this.containerElement.style.backgroundColor = 'transparent';
             this.containerElement.style.outline = 'none';
             this.containerElement.style.width = '100%';
         }
+        // Inject global CSS to hide native input borders inside containers marked as no-border
+        try {
+            if (typeof document !== 'undefined' && !document._uiInputNoBorderStyleInjected) {
+                const ss = document.createElement('style');
+                ss.type = 'text/css';
+                ss.appendChild(document.createTextNode('\n.ui-input-no-border { border: none !important; padding: 0 !important; }\n.ui-input-no-border input, .ui-input-no-border textarea, .ui-input-no-border select { border: none !important; background: transparent !important; box-shadow: none !important; outline: none !important; }\n/* Keep embedded control buttons visible and 3D inside no-border containers (e.g., table cells) */\n.ui-input-no-border .ui-input-container button, .ui-input-no-border button { background: #ffffff !important; box-shadow: none !important; }\n.ui-input-no-border .ui-input-container button, .ui-input-no-border .ui-input-container > button { border-top: 2px solid #ffffff !important; border-left: 2px solid #ffffff !important; border-right: 2px solid #808080 !important; border-bottom: 2px solid #808080 !important; padding: 0 !important; margin: 0 !important; min-width: 18px !important; height: 100% !important; display: inline-flex !important; align-items: center !important; justify-content: center !important; cursor: default !important; }\n'));
+                (document.head || document.getElementsByTagName('head')[0] || document.documentElement).appendChild(ss);
+                document._uiInputNoBorderStyleInjected = true;
+            }
+        } catch (e) {}
+
+        // If container created and showBorder is false, add helper class to hide inner input borders
+        try {
+            if (this.containerElement && this.showBorder === false) {
+                this.containerElement.classList.add('ui-input-no-border');
+            }
+        } catch (e) {}
+
         return this.containerElement;
     }
 
@@ -1841,6 +1864,9 @@ class TextBox extends FormInput {
             this.inputContainer.style.alignItems = 'center';
             this.inputContainer.style.width = '100%';
             this.inputContainer.style.boxSizing = 'border-box';
+            // Allow input container and inner input to shrink below content width
+            // so embedded buttons don't push into adjacent table cells.
+            this.inputContainer.style.minWidth = '0';
             // Retro border for the input container to match the input itself
             try {
                 const tbBase = UIObject.getClientConfigValue('defaultColor', '#c0c0c0');
@@ -1871,6 +1897,8 @@ class TextBox extends FormInput {
             this.element.style.flex = '1 1 auto';
             this.element.style.width = 'auto';
             this.element.style.height = this.element.style.height || 'auto';
+            // Ensure the raw input itself can shrink inside flex container
+            try { this.element.style.minWidth = '0'; } catch (e) {}
 
             /*
             // Append input into containerElement if present, otherwise into provided container
@@ -4114,6 +4142,26 @@ class CheckBox extends FormInput {
             this.element.addEventListener('click', (e) => {
                 this.onClick(e);
             });
+
+            // Make the whole input container clickable to toggle the checkbox
+            try {
+                this.inputContainer.style.cursor = this.readOnly ? 'default' : 'pointer';
+                this.inputContainer.addEventListener('click', (e) => {
+                    try {
+                        if (this.readOnly) return;
+                        const native = this.element.querySelector('input[type="checkbox"]');
+                        if (!native) return;
+                        // If clicked directly on the native checkbox, let the native event handle it
+                        if (e.target === native) return;
+                        // Toggle native checkbox and fire change event so listeners update state
+                        native.checked = !native.checked;
+                        const ev = new Event('change', { bubbles: true });
+                        native.dispatchEvent(ev);
+                        // Also call onClick for legacy handlers
+                        try { this.onClick(e); } catch (_) {}
+                    } catch (_) {}
+                });
+            } catch (e) {}
         }
 
         /*
@@ -4128,6 +4176,27 @@ class CheckBox extends FormInput {
             else if (container) container.appendChild(this.inputContainer);
         } catch (e) {}
         this.inputContainer.appendChild(this.element);
+
+        // Also make the outer container (form context) clickable to toggle the checkbox
+        try {
+            const nativeCb = this.element.querySelector('input[type="checkbox"]');
+            const host = this.containerElement || container;
+            if (nativeCb && host && host !== this.inputContainer) {
+                if (!host.dataset.checkboxListener) {
+                    try { host.style.cursor = nativeCb.disabled ? host.style.cursor : (this.readOnly ? 'default' : 'pointer'); } catch (_) {}
+                    host.addEventListener('click', (ev) => {
+                        try {
+                            if (ev.target === nativeCb || nativeCb.contains(ev.target)) return;
+                            if (this.readOnly || nativeCb.disabled) return;
+                            nativeCb.checked = !nativeCb.checked;
+                            nativeCb.dispatchEvent(new Event('change', { bubbles: true }));
+                            try { this.onClick(ev); } catch (_) {}
+                        } catch (_) {}
+                    });
+                    host.dataset.checkboxListener = '1';
+                }
+            }
+        } catch (e) {}
 
         // Prevent label from flex-growing inside the container
         try {
@@ -4495,6 +4564,482 @@ class DatePicker extends FormInput {
         } catch (e) {}
 
         return this.element;
+    }
+}
+
+// DynamicTable class for displaying tabular data with virtual scrolling
+// Lightweight Table class: simpler than DynamicTable. Renders all rows at once
+// and uses `appForm.renderItem` to create cell editors/viewers (one control per cell).
+class Table extends UIObject {
+    constructor(parentElement = null, properties = {}) {
+        super();
+        this.parentElement = parentElement;
+        this.columns = properties.columns || [];
+        this.dataKey = properties.dataKey || properties.data || null;
+        this.appForm = properties.appForm || null;
+        this.caption = properties.caption || '';
+        this.readOnly = properties.readOnly || false;
+        this.element = null;
+        // If visibleRows === 0 => show all rows (no fixed height). If >0 => body height = visibleRows * rowHeight
+        this.visibleRows = (typeof properties.visibleRows === 'number') ? (properties.visibleRows | 0) : 0;
+        this.rowHeight = (typeof properties.rowHeight === 'number') ? (properties.rowHeight | 0) : (properties.rowHeight ? parseInt(properties.rowHeight,10) || 25 : 25);
+        // Resize state for column resizing
+        this.resizeState = { isResizing: false, columnIndex: null, startX: 0, startWidth: 0 };
+        this.currentSort = []; // { field, order }
+    }
+
+    setCaption(c) {
+        this.caption = c;
+        try { if (this.element && this.element.querySelector) {
+            const hdr = this.element.querySelector('.table-caption');
+            if (hdr) hdr.textContent = c;
+        } } catch (e) {}
+    }
+
+    Draw(container) {
+        // If already built, just attach
+        if (!this.element) {
+            const wrapper = document.createElement('div');
+            wrapper.classList.add('ui-dynamictable');
+            wrapper.style.position = 'relative';
+            wrapper.style.width = '100%';
+            wrapper.style.height = '100%';
+            wrapper.style.boxSizing = 'border-box';
+            wrapper.style.display = 'flex';
+            wrapper.style.flexDirection = 'column';
+
+            // Header container (fixed) - styled like DynamicTable
+            const headerContainer = document.createElement('div');
+            headerContainer.style.position = 'relative';
+            headerContainer.style.width = '100%';
+            headerContainer.style.boxSizing = 'border-box';
+            headerContainer.style.flex = '0 0 auto';
+            headerContainer.style.backgroundColor = '#c0c0c0';
+            // Keep 3D look using th borders, but avoid duplicating a bottom border
+            // on the header container which would double the dark separator line.
+            headerContainer.style.borderBottom = '0';
+            headerContainer.style.userSelect = 'none';
+            headerContainer.style.overflowX = 'hidden';
+            wrapper.appendChild(headerContainer);
+
+            // Body container (scrollable)
+            const bodyContainer = document.createElement('div');
+            bodyContainer.style.overflow = 'auto';
+            bodyContainer.style.backgroundColor = '#ffffff';
+            bodyContainer.style.boxSizing = 'border-box';
+            // Borders for body only: left - dark, right - light, bottom - light, no top
+            bodyContainer.style.borderLeft = '2px solid #808080';
+            bodyContainer.style.borderRight = '2px solid #ffffff';
+            bodyContainer.style.borderBottom = '2px solid #ffffff';
+            // If visibleRows specified (>0) fix the height to visibleRows*rowHeight, otherwise allow flexible grow
+            if (this.visibleRows && this.visibleRows > 0) {
+                bodyContainer.style.flex = '0 0 auto';
+                bodyContainer.style.height = (this.visibleRows * this.rowHeight) + 'px';
+            } else {
+                bodyContainer.style.flex = '1 1 auto';
+            }
+            wrapper.appendChild(bodyContainer);
+
+            // Build header table (with resize and sort behavior)
+            const headerTable = document.createElement('table');
+            headerTable.style.width = '100%';
+            headerTable.style.borderCollapse = 'separate';
+            headerTable.style.borderSpacing = '0';
+            headerTable.style.tableLayout = 'fixed';
+            const hcolgroup = document.createElement('colgroup');
+            for (let i = 0; i < this.columns.length; i++) {
+                const col = this.columns[i] || {};
+                const c = document.createElement('col');
+                c.style.width = (col.width ? (col.width + 'px') : (100 + 'px'));
+                hcolgroup.appendChild(c);
+            }
+            headerTable.appendChild(hcolgroup);
+            const thead = document.createElement('thead');
+            const htr = document.createElement('tr');
+            for (let i = 0; i < this.columns.length; i++) {
+                const col = this.columns[i] || {};
+                const th = document.createElement('th');
+                th.style.boxSizing = 'border-box';
+                th.style.padding = '4px 8px';
+                th.style.backgroundColor = '#c0c0c0';
+                // 3D-style borders for header cells (light top/left, dark right/bottom)
+                th.style.borderTop = '2px solid #ffffff';
+                th.style.borderLeft = '2px solid #ffffff';
+                th.style.borderRight = '2px solid #808080';
+                th.style.borderBottom = '2px solid #808080';
+                th.style.fontWeight = 'bold';
+                th.style.textAlign = 'left';
+                th.style.cursor = 'pointer';
+                th.style.userSelect = 'none';
+                th.style.position = 'relative';
+                th.style.whiteSpace = 'nowrap';
+                th.style.overflow = 'hidden';
+                th.style.textOverflow = 'ellipsis';
+                th.textContent = col.caption || '';
+
+                // Click to sort (toggle asc/desc)
+                th.addEventListener('click', (e) => {
+                    if (this.resizeState.isResizing) return;
+                    const field = col.data || i;
+                    // toggle sort
+                    let existing = this.currentSort.find(s => s.field === field);
+                    if (!existing) {
+                        this.currentSort = [{ field: field, order: 'asc' }];
+                    } else if (existing.order === 'asc') {
+                        existing.order = 'desc';
+                    } else {
+                        this.currentSort = [];
+                    }
+                    // update visual indicator
+                    for (let k = 0; k < htr.children.length; k++) {
+                        const thk = htr.children[k];
+                        const colk = this.columns[k] || {};
+                        const f = colk.data || k;
+                        const si = this.currentSort.find(s => s.field === f);
+                        thk.textContent = colk.caption || '';
+                        if (si) thk.textContent += si.order === 'asc' ? ' ▲' : ' ▼';
+                    }
+                    // resort rows and rebuild body
+                    try { renderBodyRows(); } catch (e) {}
+                });
+
+                // Resize handle
+                const resizeHandle = document.createElement('div');
+                resizeHandle.style.position = 'absolute';
+                resizeHandle.style.top = '0';
+                resizeHandle.style.right = '0';
+                resizeHandle.style.width = '5px';
+                resizeHandle.style.height = '100%';
+                resizeHandle.style.cursor = 'col-resize';
+                resizeHandle.style.zIndex = '10';
+                (function(index, self) {
+                    resizeHandle.addEventListener('mousedown', (ev) => {
+                        ev.stopPropagation();
+                        self.resizeState.isResizing = true;
+                        self.resizeState.columnIndex = index;
+                        self.resizeState.startX = ev.clientX;
+                        self.resizeState.startWidth = (self.columns[index] && self.columns[index].width) ? self.columns[index].width : (self.element ? (self.element.clientWidth / self.columns.length) : 100);
+
+                        const onMove = (me) => {
+                            const dx = me.clientX - self.resizeState.startX;
+                            const newW = Math.max(30, self.resizeState.startWidth + dx);
+                            // apply to both header and body colgroups
+                            try { hcolgroup.children[index].style.width = newW + 'px'; } catch (e) {}
+                            try { bcolgroup.children[index].style.width = newW + 'px'; } catch (e) {}
+                            try { self.columns[index].width = newW; } catch (e) {}
+                        };
+
+                        const onUp = () => {
+                            self.resizeState.isResizing = false;
+                            document.removeEventListener('mousemove', onMove);
+                            document.removeEventListener('mouseup', onUp);
+                        };
+
+                        document.addEventListener('mousemove', onMove);
+                        document.addEventListener('mouseup', onUp);
+                    });
+                })(i, this);
+
+                th.appendChild(resizeHandle);
+                htr.appendChild(th);
+            }
+            thead.appendChild(htr);
+            headerTable.appendChild(thead);
+            headerContainer.appendChild(headerTable);
+
+            // Build body table
+            const bodyTable = document.createElement('table');
+            bodyTable.style.width = '100%';
+            bodyTable.style.borderCollapse = 'collapse';
+            bodyTable.style.tableLayout = 'fixed';
+            const bcolgroup = document.createElement('colgroup');
+            for (let i = 0; i < this.columns.length; i++) {
+                const col = this.columns[i] || {};
+                const c = document.createElement('col');
+                c.style.width = (col.width ? (col.width + 'px') : (100 + 'px'));
+                bcolgroup.appendChild(c);
+            }
+            bodyTable.appendChild(bcolgroup);
+            const tbody = document.createElement('tbody');
+
+            // Retrieve rows array from appForm._dataMap[dataKey].value
+            let rows = [];
+            try {
+                if (this.appForm && this.dataKey && this.appForm._dataMap && this.appForm._dataMap[this.dataKey] && Array.isArray(this.appForm._dataMap[this.dataKey].value)) {
+                    rows = this.appForm._dataMap[this.dataKey].value;
+                }
+            } catch (e) { rows = []; }
+
+            try { console.log('[Table] Draw dataKey=', this.dataKey, 'rowsCount=', Array.isArray(rows) ? rows.length : 0); } catch (e) {}
+
+            // Helper to render tbody rows (used for initial render and after sorting)
+            const renderBodyRows = () => {
+                // Clear existing body
+                tbody.innerHTML = '';
+
+                // Work on a shallow copy for sorting
+                let workingRows = Array.isArray(rows) ? rows.slice(0) : [];
+                // Apply currentSort if any
+                if (this.currentSort && this.currentSort.length > 0) {
+                    const s = this.currentSort[0];
+                    const colIndex = this.columns.findIndex(cc => (cc.data || cc) == s.field);
+                    if (colIndex >= 0) {
+                        const colDef = this.columns[colIndex];
+                        workingRows.sort((a, b) => {
+                            const va = a && Object.prototype.hasOwnProperty.call(a, colDef.data) ? a[colDef.data] : '';
+                            const vb = b && Object.prototype.hasOwnProperty.call(b, colDef.data) ? b[colDef.data] : '';
+                            if (va == vb) return 0;
+                            if (s.order === 'asc') return (va > vb) ? 1 : -1;
+                            return (va < vb) ? 1 : -1;
+                        });
+                    }
+                }
+
+                for (let r = 0; r < workingRows.length; r++) {
+                    const row = workingRows[r] || {};
+                    const tr = document.createElement('tr');
+                    tr.style.backgroundColor = (r % 2 === 0) ? '#ffffff' : '#f0f0f0';
+                    for (let c = 0; c < this.columns.length; c++) {
+                        const col = this.columns[c] || {};
+                        const td = document.createElement('td');
+                        td.style.padding = '4px 6px';
+                        // Prevent cell content from overflowing into adjacent columns
+                        td.style.overflow = 'hidden';
+                        // Only render right border between columns, not after the last column
+                        td.style.borderRight = (c < this.columns.length - 1) ? '1px solid #c0c0c0' : '0';
+                        td.style.verticalAlign = 'top';
+
+                        const cellContainer = document.createElement('div');
+                        cellContainer.style.width = '100%';
+                        cellContainer.style.boxSizing = 'border-box';
+                        // Ensure cell container clips overflow and allows flex children to shrink
+                        cellContainer.style.overflow = 'hidden';
+                        cellContainer.style.display = 'flex';
+                        cellContainer.style.alignItems = 'center';
+                        td.appendChild(cellContainer);
+
+                        const cellKey = (this.dataKey ? (this.dataKey + '__r' + r + '__' + (col.data || c)) : ('table_' + Math.random().toString(36).slice(2)));
+
+                        try {
+                            if (this.appForm && this.appForm._dataMap) {
+                                this.appForm._dataMap[cellKey] = { name: cellKey, value: (row && Object.prototype.hasOwnProperty.call(row, col.data)) ? row[col.data] : (col.value !== undefined ? col.value : '') };
+                            }
+                        } catch (e) {}
+
+                        const cellItem = Object.assign({}, col);
+                        // Ensure cell controls do NOT show captions/labels and hide input borders in table cells
+                        cellItem.data = cellKey;
+                        cellItem.caption = '';
+                        cellItem.properties = Object.assign({}, col.properties || {}, { noCaption: true, showBorder: false });
+                        cellItem.value = this.appForm && this.appForm._dataMap && this.appForm._dataMap[cellKey] ? this.appForm._dataMap[cellKey].value : (row && row[col.data]);
+
+                        // If requested, mark the container to hide input borders
+                        try {
+                            if (cellItem.properties && cellItem.properties.showBorder === false) {
+                                try { cellContainer.classList.add('ui-input-no-border'); } catch (e) {}
+                                try { cellContainer.style.padding = '0'; } catch (e) {}
+                            }
+                        } catch (e) {}
+
+                        // Use appForm.renderItem for cell content
+                        try {
+                            if (this.appForm && typeof this.appForm.renderItem === 'function') {
+                                (async (cellItemLocal, containerLocal, rowIndex, colDef, key) => {
+                                    try { await this.appForm.renderItem(cellItemLocal, containerLocal); } catch (e) {}
+                                    try {
+                                        const el = containerLocal.querySelector('[data-field="' + key + '"]') || containerLocal.querySelector('input,textarea,select');
+                                        if (el) {
+                                            const handler = (ev) => {
+                                                try {
+                                                    let newVal = (el.type === 'checkbox') ? !!el.checked : el.value;
+                                                    if (this.appForm && this.appForm._dataMap && this.appForm._dataMap[key]) this.appForm._dataMap[key].value = newVal;
+                                                    try {
+                                                        if (this.appForm && this.appForm._dataMap && this.appForm._dataMap[this.dataKey] && Array.isArray(this.appForm._dataMap[this.dataKey].value)) {
+                                                            const parentArr = this.appForm._dataMap[this.dataKey].value;
+                                                            if (!parentArr[rowIndex]) parentArr[rowIndex] = {};
+                                                            if (colDef && colDef.data) parentArr[rowIndex][colDef.data] = newVal;
+                                                        }
+                                                    } catch (e) {}
+                                                } catch (e) {}
+                                            };
+                                            el.addEventListener('input', handler);
+                                            el.addEventListener('change', handler);
+                                        }
+                                        // If there's a native checkbox inside the rendered cell, make the whole cell container clickable
+                                        try {
+                                            const nativeCb = containerLocal.querySelector('input[type="checkbox"]');
+                                            if (nativeCb) {
+                                                // avoid adding multiple listeners on re-renders
+                                                if (!containerLocal.dataset.checkboxListener) {
+                                                    containerLocal.style.cursor = nativeCb.disabled ? 'default' : 'pointer';
+                                                    containerLocal.addEventListener('click', (ev) => {
+                                                        try {
+                                                            // let native click handle direct clicks on the checkbox itself
+                                                            if (ev.target === nativeCb) return;
+                                                            if (nativeCb.disabled) return;
+                                                            nativeCb.checked = !nativeCb.checked;
+                                                            nativeCb.dispatchEvent(new Event('change', { bubbles: true }));
+                                                        } catch (_) {}
+                                                    });
+                                                    containerLocal.dataset.checkboxListener = '1';
+                                                }
+
+                                                // Add a capturing listener so clicks on the cell are handled
+                                                // before other bubble-phase handlers from the form; mark event
+                                                // to avoid double-toggle if multiple listeners run.
+                                                if (!containerLocal.dataset.checkboxCapture) {
+                                                    containerLocal.addEventListener('click', (ev) => {
+                                                        try {
+                                                            if (ev.__checkboxHandled) return;
+                                                            if (ev.target === nativeCb || nativeCb.contains(ev.target)) return;
+                                                            if (nativeCb.disabled) return;
+                                                            nativeCb.checked = !nativeCb.checked;
+                                                            nativeCb.dispatchEvent(new Event('change', { bubbles: true }));
+                                                            ev.__checkboxHandled = true;
+                                                        } catch (_) {}
+                                                    }, true);
+                                                    containerLocal.dataset.checkboxCapture = '1';
+                                                }
+                                            }
+                                        } catch (e) {}
+                                    } catch (e) {}
+                                })(cellItem, cellContainer, r, col, cellKey);
+                            } else {
+                                const span = document.createElement('span');
+                                span.textContent = cellItem.value !== undefined && cellItem.value !== null ? String(cellItem.value) : '';
+                                cellContainer.appendChild(span);
+                            }
+                        } catch (e) {}
+
+                        tr.appendChild(td);
+                    }
+                    tbody.appendChild(tr);
+                }
+            };
+
+            // Initial render
+            renderBodyRows();
+
+            bodyTable.appendChild(tbody);
+            bodyContainer.appendChild(bodyTable);
+
+            // Sync horizontal scroll and adjust header width for vertical scrollbar
+            const adjustHeaderForScrollbar = () => {
+                try {
+                    const scrollBarWidth = bodyContainer.offsetWidth - bodyContainer.clientWidth;
+                    if (scrollBarWidth > 0) {
+                        // Reduce header by scrollbar width but add a small 4px compensation
+                        headerTable.style.width = 'calc(100% - ' + scrollBarWidth + 'px + 4px)';
+                    } else {
+                        headerTable.style.width = '100%';
+                    }
+                } catch (e) {}
+            };
+
+            bodyContainer.addEventListener('scroll', () => {
+                headerContainer.scrollLeft = bodyContainer.scrollLeft;
+                adjustHeaderForScrollbar();
+            });
+            // Also adjust on window resize and once now
+            try { window.addEventListener('resize', adjustHeaderForScrollbar); } catch (e) {}
+            try { 
+                // Call after layout to ensure scrollbar presence is measured correctly
+                if (window.requestAnimationFrame) {
+                    window.requestAnimationFrame(adjustHeaderForScrollbar);
+                }
+                setTimeout(adjustHeaderForScrollbar, 0);
+            } catch (e) {}
+
+            // Save references
+            this.element = wrapper;
+            this.headerContainer = headerContainer;
+            this.bodyContainer = bodyContainer;
+            this.tableElement = bodyTable;
+        }
+
+        if (container && this.element && !this.element.parentElement) {
+            try { container.appendChild(this.element); } catch (e) {}
+        }
+
+        return this.element;
+    }
+}
+
+// Tabs control: simple tabbed panels that render layouts via appForm.renderLayout
+class Tabs extends UIObject {
+    constructor(parentElement = null, properties = {}) {
+        super();
+        this.parentElement = parentElement;
+        this.tabs = Array.isArray(properties.tabs) ? properties.tabs : (properties.tabItems || []);
+        this.appForm = properties.appForm || properties.app || null;
+        this.caption = properties.caption || '';
+        this.element = null;
+        this._header = null;
+        this._content = null;
+    }
+
+    setCaption(c) {
+        this.caption = c;
+        try { if (this.element) {
+            const cap = this.element.querySelector && this.element.querySelector('.tabs-caption');
+            if (cap) cap.textContent = c;
+        } } catch (e) {}
+    }
+
+    async _renderTab(tab) {
+        try {
+            if (!this._content) return;
+            this._content.innerHTML = '';
+            if (tab && Array.isArray(tab.layout) && this.appForm && typeof this.appForm.renderLayout === 'function') {
+                await this.appForm.renderLayout(this._content, tab.layout);
+            }
+        } catch (e) {
+            console.error('Tabs._renderTab error', e);
+        }
+    }
+
+    Draw(container) {
+        if (!this.element) {
+            const wrapper = document.createElement('div');
+            wrapper.classList.add('ui-tabs');
+            wrapper.style.boxSizing = 'border-box';
+            wrapper.style.width = '100%';
+
+            const header = document.createElement('div');
+            header.classList.add('ui-tabs-header');
+            header.style.display = 'flex';
+            header.style.gap = '6px';
+            header.style.marginBottom = '8px';
+
+            const content = document.createElement('div');
+            content.classList.add('ui-tabs-content');
+
+            wrapper.appendChild(header);
+            wrapper.appendChild(content);
+
+            this.element = wrapper;
+            this._header = header;
+            this._content = content;
+
+            // create buttons
+            try {
+                this._header.innerHTML = '';
+                this.tabs.forEach((t, idx) => {
+                    const btn = document.createElement('button');
+                    try { btn.type = 'button'; } catch (e) {}
+                    btn.textContent = t.caption || ('Tab ' + (idx + 1));
+                    btn.tabIndex = -1;
+                    btn.addEventListener('click', async () => { try { await this._renderTab(t); } catch (e) {} });
+                    this._header.appendChild(btn);
+                });
+                if (this.tabs.length > 0) this._renderTab(this.tabs[0]);
+            } catch (e) {
+                // ignore
+            }
+        }
+
+        const target = container || this.parentElement || null;
+        try { if (target && target.appendChild) target.appendChild(this.element); } catch (e) {}
     }
 }
 
@@ -5171,62 +5716,152 @@ class DynamicTable extends UIObject {
         }
         
         const currentValue = rowData[field.name];
-        const input = document.createElement('input');
-        input.type = 'text';
-        try { input.id = input.id || 'celledit_' + Math.random().toString(36).substr(2,9); } catch (_) {}
-        try { input.name = input.name || input.id; } catch (_) {}
-        input.value = this.formatValue(currentValue, field.type);
-        input.style.width = '100%';
-        input.style.boxSizing = 'border-box';
-        input.style.border = '1px solid #0000ff';
-        input.style.padding = '2px';
-        input.style.fontFamily = 'Tahoma, Arial, sans-serif';
-        input.style.fontSize = '11px';
-        // Preserve selection colors for input in selected row
-        if (this.selectedRows.has(rowIndex)) {
-            input.style.backgroundColor = '#000080';
-            input.style.color = '#ffffff';
-        }
-        
-        this.currentEditCell = {
-            td: td,
-            input: input,
-            rowData: rowData,
-            field: field,
-            originalValue: currentValue,
-            rowIndex: rowIndex
-        };
-        
-        td.textContent = '';
-        td.appendChild(input);
-        input.focus();
-        input.select();
-        
-        // Handle Enter - save
-        input.addEventListener('keydown', async (e) => {
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                await this.finishCellEdit(true);
-            } else if (e.key === 'Escape') {
-                e.preventDefault();
-                this.finishCellEdit(false);
+
+        // Create appropriate UI control from existing UI classes so it matches form controls
+        let control = null;
+        let underlyingInput = null;
+        try {
+            // Choose control by type
+            const t = (field.type || 'STRING').toUpperCase();
+            if (t === 'BOOLEAN') {
+                control = new CheckBox(td, { caption: '' });
+            } else if (t === 'DATE' || t === 'DATEONLY' || t === 'TIMESTAMP') {
+                control = new DatePicker(td, { caption: '' });
+            } else if (t === 'TEXT' || t === 'TEXTAREA' || t === 'LONGTEXT') {
+                control = new MultilineTextBox(td, { caption: '', rows: 3 });
+            } else {
+                control = new TextBox(td, { caption: '' });
             }
-        });
-        
-        // Handle blur - save
-        input.addEventListener('blur', async () => {
-            await this.finishCellEdit(true);
-        });
+
+            // Ensure caption not shown when rendered inside table cell
+            try { control.showLabel = false; } catch (e) {}
+            try { control.caption = ''; } catch (e) {}
+
+            // Render control into the td
+            td.textContent = '';
+            try { control.Draw(td); } catch (e) { console.error('[DynamicTable] control.Draw error', e); }
+
+            // Find underlying input element (input/textarea/select)
+            try {
+                if (control && control.element) {
+                    if (control.element.tagName === 'INPUT' || control.element.tagName === 'TEXTAREA' || control.element.tagName === 'SELECT') {
+                        underlyingInput = control.element;
+                    } else {
+                        underlyingInput = control.element.querySelector('input,textarea,select');
+                    }
+                }
+            } catch (e) { underlyingInput = null; }
+
+            // Initialize control value
+            try {
+                if (control instanceof CheckBox) {
+                    control.setChecked(!!currentValue);
+                } else if (control instanceof DatePicker) {
+                    control.setValue(currentValue ? new Date(currentValue) : null);
+                } else if (typeof control.setText === 'function') {
+                    control.setText(currentValue !== undefined && currentValue !== null ? String(currentValue) : '');
+                }
+            } catch (e) {}
+
+            // Style underlying input to fit cell
+            try {
+                if (underlyingInput) {
+                    underlyingInput.style.width = '100%';
+                    underlyingInput.style.boxSizing = 'border-box';
+                    underlyingInput.style.padding = '2px';
+                    underlyingInput.style.fontFamily = 'Tahoma, Arial, sans-serif';
+                    underlyingInput.style.fontSize = '11px';
+                    if (this.selectedRows.has(rowIndex)) {
+                        underlyingInput.style.backgroundColor = '#000080';
+                        underlyingInput.style.color = '#ffffff';
+                    }
+                    try { underlyingInput.focus(); } catch (e) {}
+                    try { if (underlyingInput.select) underlyingInput.select(); } catch (e) {}
+                }
+            } catch (e) {}
+
+            this.currentEditCell = {
+                td: td,
+                control: control,
+                input: underlyingInput,
+                rowData: rowData,
+                field: field,
+                originalValue: currentValue,
+                rowIndex: rowIndex
+            };
+
+            // Wire events to finish editing
+            if (underlyingInput) {
+                underlyingInput.addEventListener('keydown', async (e) => {
+                    if (e.key === 'Enter') {
+                        e.preventDefault();
+                        await this.finishCellEdit(true);
+                    } else if (e.key === 'Escape') {
+                        e.preventDefault();
+                        this.finishCellEdit(false);
+                    }
+                });
+
+                underlyingInput.addEventListener('blur', async () => {
+                    await this.finishCellEdit(true);
+                });
+            } else if (control && typeof control.getChecked === 'function') {
+                // For checkbox, listen to change on control's internal input
+                try {
+                    const cb = control.element && control.element.querySelector ? control.element.querySelector('input[type="checkbox"]') : null;
+                    if (cb) cb.addEventListener('change', async () => { await this.finishCellEdit(true); });
+                } catch (e) {}
+            }
+
+        } catch (e) {
+            // Fallback to simple input if control creation fails
+            console.error('[DynamicTable] startCellEdit control error', e);
+            const input = document.createElement('input');
+            input.type = 'text';
+            try { input.id = input.id || 'celledit_' + Math.random().toString(36).substr(2,9); } catch (_) {}
+            input.value = this.formatValue(currentValue, field.type);
+            input.style.width = '100%';
+            td.textContent = '';
+            td.appendChild(input);
+            input.focus();
+            this.currentEditCell = { td: td, input: input, rowData: rowData, field: field, originalValue: currentValue, rowIndex: rowIndex };
+            input.addEventListener('keydown', async (e) => {
+                if (e.key === 'Enter') { e.preventDefault(); await this.finishCellEdit(true); }
+                else if (e.key === 'Escape') { e.preventDefault(); this.finishCellEdit(false); }
+            });
+            input.addEventListener('blur', async () => { await this.finishCellEdit(true); });
+        }
     }
     
     async finishCellEdit(save) {
         if (!this.currentEditCell) return;
-        
-        const { td, input, rowData, field, originalValue } = this.currentEditCell;
-        const newValue = input.value;
-        
+        const { td, input, rowData, field, originalValue, control } = this.currentEditCell;
+
+        // Determine newValue from either underlying input or control instance
+        let newValue;
+        try {
+            if (input) {
+                if (input.type === 'checkbox') newValue = !!input.checked;
+                else newValue = input.value;
+            } else if (control) {
+                if (typeof control.getChecked === 'function') newValue = !!control.getChecked();
+                else if (typeof control.getValue === 'function') newValue = control.getValue();
+                else if (typeof control.getText === 'function') newValue = control.getText();
+                else {
+                    // Fallback: try to find input inside control.element
+                    const el = control.element && control.element.querySelector ? control.element.querySelector('input,textarea,select') : null;
+                    if (el) newValue = (el.type === 'checkbox') ? !!el.checked : el.value;
+                    else newValue = '';
+                }
+            } else {
+                newValue = '';
+            }
+        } catch (e) {
+            newValue = '';
+        }
+
         // Restore text content
-        td.textContent = save ? newValue : this.formatValue(originalValue, field.type);
+        td.textContent = save ? (newValue !== undefined && newValue !== null ? String(newValue) : '') : this.formatValue(originalValue, field.type);
         
         if (save && newValue !== this.formatValue(originalValue, field.type)) {
             // Send to server

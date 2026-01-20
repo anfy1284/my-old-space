@@ -63,6 +63,36 @@
   box-sizing:border-box;
 }
 
+/* Helper class: remove borders/background for input containers (used inside tables) */
+.ui-input-no-border {
+  border: none !important;
+  padding: 0 !important;
+  background: transparent !important;
+}
+.ui-input-no-border input,
+.ui-input-no-border textarea,
+.ui-input-no-border select,
+.ui-input-no-border .ui-input {
+  border: none !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  outline: none !important;
+  padding: 0 !important;
+  margin: 0 !important;
+}
+
+/* Strong override for containers that may have inline borders/styles applied by controls */
+.ui-input-no-border .ui-input-container,
+.ui-input-no-border .ui-textbox,
+.ui-input-no-border .ui-input-container * {
+  border: none !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  outline: none !important;
+  padding: 0 !important;
+  margin: 0 !important;
+}
+
 .textbox-list-popup {
   position:absolute;
   background-color:#ffffff;
