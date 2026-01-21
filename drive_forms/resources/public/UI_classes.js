@@ -4588,6 +4588,410 @@ class Table extends UIObject {
         this.currentSort = []; // { field, order }
     }
 
+    // Data helpers: encapsulate all _dataMap access for Table
+    data_getRows(dataKey) {
+        try {
+            if (this.appForm && dataKey && this.appForm._dataMap && this.appForm._dataMap[dataKey] && Array.isArray(this.appForm._dataMap[dataKey].value)) {
+                return this.appForm._dataMap[dataKey].value;
+            }
+        } catch (e) {}
+        return [];
+    }
+
+    data_ensureCellEntry(key, value) {
+        try {
+            if (!this.appForm) return;
+            if (!this.appForm._dataMap) this.appForm._dataMap = {};
+            this.appForm._dataMap[key] = { name: key, value: value };
+        } catch (e) {}
+    }
+
+    data_getValue(key, fallback) {
+        try {
+            if (this.appForm && this.appForm._dataMap && this.appForm._dataMap[key]) return this.appForm._dataMap[key].value;
+        } catch (e) {}
+        return fallback;
+    }
+
+    data_updateValue(key, newVal) {
+        try {
+            if (!this.appForm) return;
+            if (!this.appForm._dataMap) this.appForm._dataMap = {};
+            if (!this.appForm._dataMap[key]) this.appForm._dataMap[key] = { name: key, value: newVal };
+            else this.appForm._dataMap[key].value = newVal;
+        } catch (e) {}
+    }
+
+    data_updateParentArray(dataKey, rowIndex, colDef, newVal) {
+        try {
+            if (dataKey && this.appForm && this.appForm._dataMap && this.appForm._dataMap[dataKey] && Array.isArray(this.appForm._dataMap[dataKey].value)) {
+                const parentArr = this.appForm._dataMap[dataKey].value;
+                if (!parentArr[rowIndex]) parentArr[rowIndex] = {};
+                if (colDef && colDef.data) parentArr[rowIndex][colDef.data] = newVal;
+            }
+        } catch (e) {}
+    }
+
+    // --- Extractable rendering helpers ---
+    // Create header table and return { headerTable, hcolgroup, renderHeaderAdjust }
+    buildHeader(headerContainer, getBcolgroup) {
+        const headerTable = document.createElement('table');
+        try {
+            console.log('[Table.buildHeader] columns.length=', (this.columns && this.columns.length) || 0, 'tableName=', this.tableName || '');
+            try { console.log('[Table.buildHeader] captions=', (this.columns || []).map(c => (c && (c.caption || c.data)) || '').slice(0, 50)); } catch(e) {}
+        } catch (e) {}
+        headerTable.style.width = '100%';
+        headerTable.style.borderCollapse = 'separate';
+        headerTable.style.borderSpacing = '0';
+        headerTable.style.tableLayout = 'fixed';
+        const hcolgroup = document.createElement('colgroup');
+        for (let i = 0; i < this.columns.length; i++) {
+            const col = this.columns[i] || {};
+            const c = document.createElement('col');
+            c.style.width = (col.width ? (col.width + 'px') : (100 + 'px'));
+            hcolgroup.appendChild(c);
+        }
+        headerTable.appendChild(hcolgroup);
+        const thead = document.createElement('thead');
+        const htr = document.createElement('tr');
+        for (let i = 0; i < this.columns.length; i++) {
+            const col = this.columns[i] || {};
+            const th = document.createElement('th');
+            th.style.boxSizing = 'border-box';
+            th.style.padding = '4px 8px';
+            th.style.backgroundColor = '#c0c0c0';
+            th.style.borderTop = '2px solid #ffffff';
+            th.style.borderLeft = '2px solid #ffffff';
+            th.style.borderRight = '2px solid #808080';
+            th.style.borderBottom = '2px solid #808080';
+            th.style.fontWeight = 'bold';
+            th.style.textAlign = 'left';
+            th.style.cursor = 'pointer';
+            th.style.userSelect = 'none';
+            th.style.position = 'relative';
+            th.style.whiteSpace = 'nowrap';
+            th.style.overflow = 'hidden';
+            th.style.textOverflow = 'ellipsis';
+            th.textContent = col.caption || '';
+
+            th.addEventListener('click', (e) => {
+                try { console.log('[DynamicTable] header click', col && col.data ? col.data : i, 'isResizing=', this.resizeState && this.resizeState.isResizing); } catch (e) {}
+                if (this.resizeState.isResizing) return;
+                const field = col.data || i;
+                let existing = this.currentSort.find(s => s.field === field);
+                if (!existing) {
+                    this.currentSort = [{ field: field, order: 'asc' }];
+                } else if (existing.order === 'asc') {
+                    existing.order = 'desc';
+                } else {
+                    this.currentSort = [];
+                }
+                for (let k = 0; k < htr.children.length; k++) {
+                    const thk = htr.children[k];
+                    const colk = this.columns[k] || {};
+                    const f = colk.data || k;
+                    const si = this.currentSort.find(s => s.field === f);
+                    thk.textContent = colk.caption || '';
+                    if (si) thk.textContent += si.order === 'asc' ? ' ▲' : ' ▼';
+                }
+                try { if (typeof this._invokeRenderBodyRows === 'function') this._invokeRenderBodyRows(); } catch (e) {}
+            });
+
+            const resizeHandle = document.createElement('div');
+            resizeHandle.style.position = 'absolute';
+            resizeHandle.style.top = '0';
+            resizeHandle.style.right = '0';
+            resizeHandle.style.width = '5px';
+            resizeHandle.style.height = '100%';
+            resizeHandle.style.cursor = 'col-resize';
+            resizeHandle.style.zIndex = '10';
+            (function(index, self) {
+                resizeHandle.addEventListener('mousedown', (ev) => {
+                    ev.stopPropagation();
+                    self.resizeState.isResizing = true;
+                    self.resizeState.columnIndex = index;
+                    self.resizeState.startX = ev.clientX;
+                    self.resizeState.startWidth = (self.columns[index] && self.columns[index].width) ? self.columns[index].width : (self.element ? (self.element.clientWidth / self.columns.length) : 100);
+
+                    const onMove = (me) => {
+                        const dx = me.clientX - self.resizeState.startX;
+                        const newW = Math.max(30, self.resizeState.startWidth + dx);
+                        try { hcolgroup.children[index].style.width = newW + 'px'; } catch (e) {}
+                        try {
+                            const bg = getBcolgroup();
+                            if (bg && bg.children && bg.children[index]) bg.children[index].style.width = newW + 'px';
+                        } catch (e) {}
+                        try { self.columns[index].width = newW; } catch (e) {}
+                    };
+
+                    const onUp = () => {
+                        self.resizeState.isResizing = false;
+                        document.removeEventListener('mousemove', onMove);
+                        document.removeEventListener('mouseup', onUp);
+                    };
+
+                    document.addEventListener('mousemove', onMove);
+                    document.addEventListener('mouseup', onUp);
+                });
+            })(i, this);
+
+            th.appendChild(resizeHandle);
+            htr.appendChild(th);
+        }
+        thead.appendChild(htr);
+        headerTable.appendChild(thead);
+        headerContainer.appendChild(headerTable);
+
+        return { headerTable: headerTable, hcolgroup: hcolgroup };
+    }
+
+    renderCellElement(rowIndex, c, col, row) {
+        const td = document.createElement('td');
+        td.style.padding = '4px 6px';
+        td.style.overflow = 'hidden';
+        td.style.borderRight = (c < this.columns.length - 1) ? '1px solid #c0c0c0' : '0';
+        td.style.verticalAlign = 'top';
+
+        const cellContainer = document.createElement('div');
+        cellContainer.style.width = '100%';
+        cellContainer.style.boxSizing = 'border-box';
+        cellContainer.style.overflow = 'hidden';
+        cellContainer.style.display = 'flex';
+        cellContainer.style.alignItems = 'center';
+        td.appendChild(cellContainer);
+
+        const cellKey = (this.dataKey ? (this.dataKey + '__r' + rowIndex + '__' + (col.data || c)) : ('table_' + Math.random().toString(36).slice(2)));
+
+        try {
+            this.data_ensureCellEntry(cellKey, (row && Object.prototype.hasOwnProperty.call(row, col.data)) ? row[col.data] : (col.value !== undefined ? col.value : ''));
+        } catch (e) {}
+
+        const cellItem = Object.assign({}, col);
+        cellItem.data = cellKey;
+        cellItem.caption = '';
+        cellItem.properties = Object.assign({}, col.properties || {}, { noCaption: true, showBorder: false });
+        cellItem.value = this.data_getValue(cellKey, (row && row[col.data]));
+
+        // Normalize object values: preserve primitive ID/value for editing, but keep display text
+        try {
+            const rawVal = cellItem.value;
+            if (rawVal !== null && rawVal !== undefined && typeof rawVal === 'object') {
+                let display = undefined;
+                if (rawVal.display !== undefined) display = rawVal.display;
+                else if (rawVal.name !== undefined) display = rawVal.name;
+                else if (rawVal.title !== undefined) display = rawVal.title;
+                else if (rawVal.caption !== undefined) display = rawVal.caption;
+                else if (rawVal.label !== undefined) display = rawVal.label;
+                else if (rawVal.text !== undefined) display = rawVal.text;
+                else if (typeof rawVal.toString === 'function' && rawVal.toString !== Object.prototype.toString) {
+                    try { display = rawVal.toString(); } catch (e) { display = undefined; }
+                }
+                if (display === undefined) {
+                    try { display = JSON.stringify(rawVal); } catch (e) { display = String(rawVal); }
+                }
+
+                // Prefer primitive id/value for the actual cell value so editors store ID internally
+                let primitiveVal = undefined;
+                if (rawVal.value !== undefined && typeof rawVal.value !== 'object') primitiveVal = rawVal.value;
+                else if (rawVal.id !== undefined && (typeof rawVal.id === 'string' || typeof rawVal.id === 'number')) primitiveVal = rawVal.id;
+
+                if (primitiveVal !== undefined) {
+                    cellItem.value = primitiveVal;
+                } else {
+                    // No primitive id found: fallback to display so user sees something meaningful
+                    cellItem.value = display;
+                }
+
+                // Store display separately so non-editor rendering can prefer human-friendly name
+                cellItem.properties = cellItem.properties || {};
+                try { cellItem.properties.__display = display; } catch (e) {}
+            }
+        } catch (e) {}
+
+        try {
+            if (cellItem.properties && cellItem.properties.showBorder === false) {
+                try { cellContainer.classList.add('ui-input-no-border'); } catch (e) {}
+                try { cellContainer.style.padding = '0'; } catch (e) {}
+            }
+        } catch (e) {}
+
+        // Map column/field metadata to renderItem types (ensure cellItem.type is set)
+        try {
+            const rawType = col.type || col.datatype || col.kind || col.typeName || col.dataType || '';
+            const ftype = rawType ? String(rawType).trim().toLowerCase() : '';
+            const dtMap = {
+                'string': 'textbox',
+                'varchar': 'textbox',
+                'text': 'textarea',
+                'longtext': 'textarea',
+                'boolean': 'checkbox',
+                'bool': 'checkbox',
+                'int': 'number',
+                'integer': 'number',
+                'decimal': 'number',
+                'float': 'number',
+                'number': 'number',
+                'enum': 'emunList',
+                'lookup': 'emunList',
+                'date': 'textbox'
+            };
+            if (dtMap[ftype]) {
+                cellItem.type = dtMap[ftype];
+                try { console.log('[DynamicTable] mapped field -> type', col && col.data, '->', cellItem.type); } catch (e) {}
+            } else {
+                try { console.warn('[DynamicTable] Unmapped field type', { name: col && col.data, rawType: rawType, ftype: ftype, col: col }); } catch (e) {}
+            }
+
+            // propagate options/listItems
+            if ((col.options && Array.isArray(col.options)) || (col.listItems && Array.isArray(col.listItems))) {
+                if (!cellItem.properties) cellItem.properties = {};
+                cellItem.properties.listItems = col.options || col.listItems;
+            }
+
+            // Fallback heuristics if still undefined
+            if (!cellItem.type) {
+                try {
+                    if ((col.options && Array.isArray(col.options)) || (col.listItems && Array.isArray(col.listItems)) || col.lookup || col.foreignKey) {
+                        cellItem.type = 'emunList';
+                    } else if (ftype === 'yesno' || ftype === 'flag' || /^(is|has|can|allow)|(_is|_flag|active|enabled)$/i.test(col.data || '')) {
+                        cellItem.type = 'checkbox';
+                    } else if (/int|decimal|float|number|amount|qty|count/.test(ftype) || /(amount|count|qty|number)$/i.test(col.data || '')) {
+                        cellItem.type = 'number';
+                    } else if (/date|time/.test(ftype) || /(date|time)$/i.test(col.data || '')) {
+                        cellItem.type = 'textbox';
+                    } else {
+                        cellItem.type = 'textbox';
+                    }
+                    try { console.log('[DynamicTable] fallback-mapped field -> type', col && col.data, '->', cellItem.type); } catch (e) {}
+                } catch (e) { try { console.error('[DynamicTable] fallback mapping error', e); } catch (ee) {} }
+            }
+        } catch (e) { try { console.error('[DynamicTable] Error mapping column type', e); } catch (ee) {} }
+
+        try {
+            if (this.appForm && typeof this.appForm.renderItem === 'function') {
+                (async (cellItemLocal, containerLocal, rowIndexLocal, colDef, key) => {
+                    try {
+                        try { console.log('[DynamicTable] about to call renderItem with', cellItemLocal, 'field:', colDef && colDef.data); } catch (e) {}
+                        await this.appForm.renderItem(cellItemLocal, containerLocal);
+                    } catch (e) {}
+                    try {
+                        const el = containerLocal.querySelector('[data-field="' + key + '"]') || containerLocal.querySelector('input,textarea,select');
+                        if (el) {
+                            const handler = (ev) => {
+                                try {
+                                    let newVal = (el.type === 'checkbox') ? !!el.checked : el.value;
+                                    this.data_updateValue(key, newVal);
+                                    this.data_updateParentArray(this.dataKey, rowIndexLocal, colDef, newVal);
+                                } catch (e) {}
+                            };
+                            el.addEventListener('input', handler);
+                            el.addEventListener('change', handler);
+                        }
+                        try {
+                            const nativeCb = containerLocal.querySelector('input[type="checkbox"]');
+                            if (nativeCb) {
+                                if (!containerLocal.dataset.checkboxListener) {
+                                    containerLocal.style.cursor = nativeCb.disabled ? 'default' : 'pointer';
+                                    containerLocal.addEventListener('click', (ev) => {
+                                        try {
+                                            if (ev.target === nativeCb) return;
+                                            if (nativeCb.disabled) return;
+                                            nativeCb.checked = !nativeCb.checked;
+                                            nativeCb.dispatchEvent(new Event('change', { bubbles: true }));
+                                        } catch (_) {}
+                                    });
+                                    containerLocal.dataset.checkboxListener = '1';
+                                }
+                                if (!containerLocal.dataset.checkboxCapture) {
+                                    containerLocal.addEventListener('click', (ev) => {
+                                        try {
+                                            if (ev.__checkboxHandled) return;
+                                            if (ev.target === nativeCb || nativeCb.contains(ev.target)) return;
+                                            if (nativeCb.disabled) return;
+                                            nativeCb.checked = !nativeCb.checked;
+                                            nativeCb.dispatchEvent(new Event('change', { bubbles: true }));
+                                            ev.__checkboxHandled = true;
+                                        } catch (_) {}
+                                    }, true);
+                                    containerLocal.dataset.checkboxCapture = '1';
+                                }
+                            }
+                        } catch (e) {}
+                    } catch (e) {}
+                })(cellItem, cellContainer, rowIndex, col, cellKey);
+            } else {
+                const span = document.createElement('span');
+                const displayText = (cellItem.properties && cellItem.properties.__display !== undefined) ? cellItem.properties.__display : (cellItem.value !== undefined && cellItem.value !== null ? String(cellItem.value) : '');
+                span.textContent = displayText;
+                cellContainer.appendChild(span);
+            }
+        } catch (e) {}
+
+        return td;
+    }
+
+    renderRowElement(rowIndex, row) {
+        const tr = document.createElement('tr');
+        tr.style.backgroundColor = (rowIndex % 2 === 0) ? '#ffffff' : '#f0f0f0';
+        for (let c = 0; c < this.columns.length; c++) {
+            const col = this.columns[c] || {};
+            const td = this.renderCellElement(rowIndex, c, col, row);
+            tr.appendChild(td);
+        }
+        return tr;
+    }
+
+    buildBody(bodyContainer, rows) {
+        const bodyTable = document.createElement('table');
+        bodyTable.style.width = '100%';
+        bodyTable.style.borderCollapse = 'collapse';
+        bodyTable.style.tableLayout = 'fixed';
+        const bcolgroup = document.createElement('colgroup');
+        for (let i = 0; i < this.columns.length; i++) {
+            const col = this.columns[i] || {};
+            const c = document.createElement('col');
+            c.style.width = (col.width ? (col.width + 'px') : (100 + 'px'));
+            bcolgroup.appendChild(c);
+        }
+        bodyTable.appendChild(bcolgroup);
+        const tbody = document.createElement('tbody');
+
+        const renderBodyRows = () => {
+            tbody.innerHTML = '';
+            let workingRows = Array.isArray(rows) ? rows.slice(0) : [];
+            if (this.currentSort && this.currentSort.length > 0) {
+                const s = this.currentSort[0];
+                const colIndex = this.columns.findIndex(cc => (cc.data || cc) == s.field);
+                if (colIndex >= 0) {
+                    const colDef = this.columns[colIndex];
+                    workingRows.sort((a, b) => {
+                        const va = a && Object.prototype.hasOwnProperty.call(a, colDef.data) ? a[colDef.data] : '';
+                        const vb = b && Object.prototype.hasOwnProperty.call(b, colDef.data) ? b[colDef.data] : '';
+                        if (va == vb) return 0;
+                        if (s.order === 'asc') return (va > vb) ? 1 : -1;
+                        return (va < vb) ? 1 : -1;
+                    });
+                }
+            }
+
+            for (let r = 0; r < workingRows.length; r++) {
+                const row = workingRows[r] || {};
+                const tr = this.renderRowElement(r, row);
+                tbody.appendChild(tr);
+            }
+        };
+
+        // Initial render
+        renderBodyRows();
+        // expose renderer so header/sort code can invoke it
+        try { this._invokeRenderBodyRows = renderBodyRows; } catch (e) {}
+
+        bodyTable.appendChild(tbody);
+        bodyContainer.appendChild(bodyTable);
+
+        return { bodyTable: bodyTable, bcolgroup: bcolgroup, tbody: tbody, renderBodyRows: renderBodyRows };
+    }
+
     setCaption(c) {
         this.caption = c;
         try { if (this.element && this.element.querySelector) {
@@ -4640,288 +5044,23 @@ class Table extends UIObject {
             }
             wrapper.appendChild(bodyContainer);
 
-            // Build header table (with resize and sort behavior)
-            const headerTable = document.createElement('table');
-            headerTable.style.width = '100%';
-            headerTable.style.borderCollapse = 'separate';
-            headerTable.style.borderSpacing = '0';
-            headerTable.style.tableLayout = 'fixed';
-            const hcolgroup = document.createElement('colgroup');
-            for (let i = 0; i < this.columns.length; i++) {
-                const col = this.columns[i] || {};
-                const c = document.createElement('col');
-                c.style.width = (col.width ? (col.width + 'px') : (100 + 'px'));
-                hcolgroup.appendChild(c);
-            }
-            headerTable.appendChild(hcolgroup);
-            const thead = document.createElement('thead');
-            const htr = document.createElement('tr');
-            for (let i = 0; i < this.columns.length; i++) {
-                const col = this.columns[i] || {};
-                const th = document.createElement('th');
-                th.style.boxSizing = 'border-box';
-                th.style.padding = '4px 8px';
-                th.style.backgroundColor = '#c0c0c0';
-                // 3D-style borders for header cells (light top/left, dark right/bottom)
-                th.style.borderTop = '2px solid #ffffff';
-                th.style.borderLeft = '2px solid #ffffff';
-                th.style.borderRight = '2px solid #808080';
-                th.style.borderBottom = '2px solid #808080';
-                th.style.fontWeight = 'bold';
-                th.style.textAlign = 'left';
-                th.style.cursor = 'pointer';
-                th.style.userSelect = 'none';
-                th.style.position = 'relative';
-                th.style.whiteSpace = 'nowrap';
-                th.style.overflow = 'hidden';
-                th.style.textOverflow = 'ellipsis';
-                th.textContent = col.caption || '';
+            // Build header and body using extractable helpers so DynamicTable can override
+            // We'll provide a getter to allow header resize handler to access the body colgroup
+            let _bcolgroup_ref = null;
+            const headerResult = this.buildHeader(headerContainer, () => _bcolgroup_ref);
+            const headerTable = headerResult.headerTable;
+            const hcolgroup = headerResult.hcolgroup;
 
-                // Click to sort (toggle asc/desc)
-                th.addEventListener('click', (e) => {
-                    if (this.resizeState.isResizing) return;
-                    const field = col.data || i;
-                    // toggle sort
-                    let existing = this.currentSort.find(s => s.field === field);
-                    if (!existing) {
-                        this.currentSort = [{ field: field, order: 'asc' }];
-                    } else if (existing.order === 'asc') {
-                        existing.order = 'desc';
-                    } else {
-                        this.currentSort = [];
-                    }
-                    // update visual indicator
-                    for (let k = 0; k < htr.children.length; k++) {
-                        const thk = htr.children[k];
-                        const colk = this.columns[k] || {};
-                        const f = colk.data || k;
-                        const si = this.currentSort.find(s => s.field === f);
-                        thk.textContent = colk.caption || '';
-                        if (si) thk.textContent += si.order === 'asc' ? ' ▲' : ' ▼';
-                    }
-                    // resort rows and rebuild body
-                    try { renderBodyRows(); } catch (e) {}
-                });
-
-                // Resize handle
-                const resizeHandle = document.createElement('div');
-                resizeHandle.style.position = 'absolute';
-                resizeHandle.style.top = '0';
-                resizeHandle.style.right = '0';
-                resizeHandle.style.width = '5px';
-                resizeHandle.style.height = '100%';
-                resizeHandle.style.cursor = 'col-resize';
-                resizeHandle.style.zIndex = '10';
-                (function(index, self) {
-                    resizeHandle.addEventListener('mousedown', (ev) => {
-                        ev.stopPropagation();
-                        self.resizeState.isResizing = true;
-                        self.resizeState.columnIndex = index;
-                        self.resizeState.startX = ev.clientX;
-                        self.resizeState.startWidth = (self.columns[index] && self.columns[index].width) ? self.columns[index].width : (self.element ? (self.element.clientWidth / self.columns.length) : 100);
-
-                        const onMove = (me) => {
-                            const dx = me.clientX - self.resizeState.startX;
-                            const newW = Math.max(30, self.resizeState.startWidth + dx);
-                            // apply to both header and body colgroups
-                            try { hcolgroup.children[index].style.width = newW + 'px'; } catch (e) {}
-                            try { bcolgroup.children[index].style.width = newW + 'px'; } catch (e) {}
-                            try { self.columns[index].width = newW; } catch (e) {}
-                        };
-
-                        const onUp = () => {
-                            self.resizeState.isResizing = false;
-                            document.removeEventListener('mousemove', onMove);
-                            document.removeEventListener('mouseup', onUp);
-                        };
-
-                        document.addEventListener('mousemove', onMove);
-                        document.addEventListener('mouseup', onUp);
-                    });
-                })(i, this);
-
-                th.appendChild(resizeHandle);
-                htr.appendChild(th);
-            }
-            thead.appendChild(htr);
-            headerTable.appendChild(thead);
-            headerContainer.appendChild(headerTable);
-
-            // Build body table
-            const bodyTable = document.createElement('table');
-            bodyTable.style.width = '100%';
-            bodyTable.style.borderCollapse = 'collapse';
-            bodyTable.style.tableLayout = 'fixed';
-            const bcolgroup = document.createElement('colgroup');
-            for (let i = 0; i < this.columns.length; i++) {
-                const col = this.columns[i] || {};
-                const c = document.createElement('col');
-                c.style.width = (col.width ? (col.width + 'px') : (100 + 'px'));
-                bcolgroup.appendChild(c);
-            }
-            bodyTable.appendChild(bcolgroup);
-            const tbody = document.createElement('tbody');
-
-            // Retrieve rows array from appForm._dataMap[dataKey].value
+            // Retrieve rows array via data helper
             let rows = [];
-            try {
-                if (this.appForm && this.dataKey && this.appForm._dataMap && this.appForm._dataMap[this.dataKey] && Array.isArray(this.appForm._dataMap[this.dataKey].value)) {
-                    rows = this.appForm._dataMap[this.dataKey].value;
-                }
-            } catch (e) { rows = []; }
+            // DATA-API CALL: getRows
+            try { rows = this.data_getRows(this.dataKey); } catch (e) { rows = []; }
 
-            try { console.log('[Table] Draw dataKey=', this.dataKey, 'rowsCount=', Array.isArray(rows) ? rows.length : 0); } catch (e) {}
-
-            // Helper to render tbody rows (used for initial render and after sorting)
-            const renderBodyRows = () => {
-                // Clear existing body
-                tbody.innerHTML = '';
-
-                // Work on a shallow copy for sorting
-                let workingRows = Array.isArray(rows) ? rows.slice(0) : [];
-                // Apply currentSort if any
-                if (this.currentSort && this.currentSort.length > 0) {
-                    const s = this.currentSort[0];
-                    const colIndex = this.columns.findIndex(cc => (cc.data || cc) == s.field);
-                    if (colIndex >= 0) {
-                        const colDef = this.columns[colIndex];
-                        workingRows.sort((a, b) => {
-                            const va = a && Object.prototype.hasOwnProperty.call(a, colDef.data) ? a[colDef.data] : '';
-                            const vb = b && Object.prototype.hasOwnProperty.call(b, colDef.data) ? b[colDef.data] : '';
-                            if (va == vb) return 0;
-                            if (s.order === 'asc') return (va > vb) ? 1 : -1;
-                            return (va < vb) ? 1 : -1;
-                        });
-                    }
-                }
-
-                for (let r = 0; r < workingRows.length; r++) {
-                    const row = workingRows[r] || {};
-                    const tr = document.createElement('tr');
-                    tr.style.backgroundColor = (r % 2 === 0) ? '#ffffff' : '#f0f0f0';
-                    for (let c = 0; c < this.columns.length; c++) {
-                        const col = this.columns[c] || {};
-                        const td = document.createElement('td');
-                        td.style.padding = '4px 6px';
-                        // Prevent cell content from overflowing into adjacent columns
-                        td.style.overflow = 'hidden';
-                        // Only render right border between columns, not after the last column
-                        td.style.borderRight = (c < this.columns.length - 1) ? '1px solid #c0c0c0' : '0';
-                        td.style.verticalAlign = 'top';
-
-                        const cellContainer = document.createElement('div');
-                        cellContainer.style.width = '100%';
-                        cellContainer.style.boxSizing = 'border-box';
-                        // Ensure cell container clips overflow and allows flex children to shrink
-                        cellContainer.style.overflow = 'hidden';
-                        cellContainer.style.display = 'flex';
-                        cellContainer.style.alignItems = 'center';
-                        td.appendChild(cellContainer);
-
-                        const cellKey = (this.dataKey ? (this.dataKey + '__r' + r + '__' + (col.data || c)) : ('table_' + Math.random().toString(36).slice(2)));
-
-                        try {
-                            if (this.appForm && this.appForm._dataMap) {
-                                this.appForm._dataMap[cellKey] = { name: cellKey, value: (row && Object.prototype.hasOwnProperty.call(row, col.data)) ? row[col.data] : (col.value !== undefined ? col.value : '') };
-                            }
-                        } catch (e) {}
-
-                        const cellItem = Object.assign({}, col);
-                        // Ensure cell controls do NOT show captions/labels and hide input borders in table cells
-                        cellItem.data = cellKey;
-                        cellItem.caption = '';
-                        cellItem.properties = Object.assign({}, col.properties || {}, { noCaption: true, showBorder: false });
-                        cellItem.value = this.appForm && this.appForm._dataMap && this.appForm._dataMap[cellKey] ? this.appForm._dataMap[cellKey].value : (row && row[col.data]);
-
-                        // If requested, mark the container to hide input borders
-                        try {
-                            if (cellItem.properties && cellItem.properties.showBorder === false) {
-                                try { cellContainer.classList.add('ui-input-no-border'); } catch (e) {}
-                                try { cellContainer.style.padding = '0'; } catch (e) {}
-                            }
-                        } catch (e) {}
-
-                        // Use appForm.renderItem for cell content
-                        try {
-                            if (this.appForm && typeof this.appForm.renderItem === 'function') {
-                                (async (cellItemLocal, containerLocal, rowIndex, colDef, key) => {
-                                    try { await this.appForm.renderItem(cellItemLocal, containerLocal); } catch (e) {}
-                                    try {
-                                        const el = containerLocal.querySelector('[data-field="' + key + '"]') || containerLocal.querySelector('input,textarea,select');
-                                        if (el) {
-                                            const handler = (ev) => {
-                                                try {
-                                                    let newVal = (el.type === 'checkbox') ? !!el.checked : el.value;
-                                                    if (this.appForm && this.appForm._dataMap && this.appForm._dataMap[key]) this.appForm._dataMap[key].value = newVal;
-                                                    try {
-                                                        if (this.appForm && this.appForm._dataMap && this.appForm._dataMap[this.dataKey] && Array.isArray(this.appForm._dataMap[this.dataKey].value)) {
-                                                            const parentArr = this.appForm._dataMap[this.dataKey].value;
-                                                            if (!parentArr[rowIndex]) parentArr[rowIndex] = {};
-                                                            if (colDef && colDef.data) parentArr[rowIndex][colDef.data] = newVal;
-                                                        }
-                                                    } catch (e) {}
-                                                } catch (e) {}
-                                            };
-                                            el.addEventListener('input', handler);
-                                            el.addEventListener('change', handler);
-                                        }
-                                        // If there's a native checkbox inside the rendered cell, make the whole cell container clickable
-                                        try {
-                                            const nativeCb = containerLocal.querySelector('input[type="checkbox"]');
-                                            if (nativeCb) {
-                                                // avoid adding multiple listeners on re-renders
-                                                if (!containerLocal.dataset.checkboxListener) {
-                                                    containerLocal.style.cursor = nativeCb.disabled ? 'default' : 'pointer';
-                                                    containerLocal.addEventListener('click', (ev) => {
-                                                        try {
-                                                            // let native click handle direct clicks on the checkbox itself
-                                                            if (ev.target === nativeCb) return;
-                                                            if (nativeCb.disabled) return;
-                                                            nativeCb.checked = !nativeCb.checked;
-                                                            nativeCb.dispatchEvent(new Event('change', { bubbles: true }));
-                                                        } catch (_) {}
-                                                    });
-                                                    containerLocal.dataset.checkboxListener = '1';
-                                                }
-
-                                                // Add a capturing listener so clicks on the cell are handled
-                                                // before other bubble-phase handlers from the form; mark event
-                                                // to avoid double-toggle if multiple listeners run.
-                                                if (!containerLocal.dataset.checkboxCapture) {
-                                                    containerLocal.addEventListener('click', (ev) => {
-                                                        try {
-                                                            if (ev.__checkboxHandled) return;
-                                                            if (ev.target === nativeCb || nativeCb.contains(ev.target)) return;
-                                                            if (nativeCb.disabled) return;
-                                                            nativeCb.checked = !nativeCb.checked;
-                                                            nativeCb.dispatchEvent(new Event('change', { bubbles: true }));
-                                                            ev.__checkboxHandled = true;
-                                                        } catch (_) {}
-                                                    }, true);
-                                                    containerLocal.dataset.checkboxCapture = '1';
-                                                }
-                                            }
-                                        } catch (e) {}
-                                    } catch (e) {}
-                                })(cellItem, cellContainer, r, col, cellKey);
-                            } else {
-                                const span = document.createElement('span');
-                                span.textContent = cellItem.value !== undefined && cellItem.value !== null ? String(cellItem.value) : '';
-                                cellContainer.appendChild(span);
-                            }
-                        } catch (e) {}
-
-                        tr.appendChild(td);
-                    }
-                    tbody.appendChild(tr);
-                }
-            };
-
-            // Initial render
-            renderBodyRows();
-
-            bodyTable.appendChild(tbody);
-            bodyContainer.appendChild(bodyTable);
+            const bodyResult = this.buildBody(bodyContainer, rows);
+            const bodyTable = bodyResult.bodyTable;
+            const bcolgroup = bodyResult.bcolgroup;
+            const renderBodyRows = bodyResult.renderBodyRows;
+            _bcolgroup_ref = bcolgroup;
 
             // Sync horizontal scroll and adjust header width for vertical scrollbar
             const adjustHeaderForScrollbar = () => {
@@ -5044,173 +5183,55 @@ class Tabs extends UIObject {
 }
 
 // DynamicTable class for displaying tabular data with virtual scrolling
-class DynamicTable extends UIObject {
+class DynamicTable extends Table {
     constructor(options = {}) {
-        super();
-        
-        // Options
+        super(null, { columns: options.fields || options.columns || [], rowHeight: options.rowHeight, appForm: options.appForm, dataKey: options.dataKey || options.data || options.tableName });
+
         this.appName = options.appName || '';
         this.tableName = options.tableName || '';
-        this.rowHeight = options.rowHeight || 25;
-        this.bufferRows = 10; // Client-side rendering buffer (server limits actual data)
-        this.multiSelect = options.multiSelect !== undefined ? options.multiSelect : false;
-        this.editable = options.editable !== undefined ? options.editable : false;
-        this.showToolbar = options.showToolbar !== undefined ? options.showToolbar : this.editable;
-        this.initialSort = options.initialSort || [];
-        this.initialFilter = options.initialFilter || [];
-        this.onRowClick = options.onRowClick || null;
-        this.onRowDoubleClick = options.onRowDoubleClick || null;
-        this.onSelectionChanged = options.onSelectionChanged || null;
-        
-        // State
+        this.bufferRows = 10;
+
+        // Minimal state needed for server interactions
         this.totalRows = 0;
         this.fields = [];
-        this.dataCache = {}; // globalIndex -> rowData
-        this.currentSort = this.initialSort;
-        this.currentFilters = this.initialFilter;
-        this.visibleRows = 20;
-        this.firstVisibleRow = 0;
-        this.selectedRows = new Set();
-        this.lastSelectedIndex = null;
+        this.dataCache = {};
+        this.currentSort = options.initialSort || [];
+        this.currentFilters = options.initialFilter || [];
         this.isLoading = false;
         this.dataLoaded = false;
-        this.editSessionId = null; // Edit session ID from server
-        this.editedCells = new Map(); // Track edited cells: key = 'rowId_fieldName', value = newValue
-        
-        // DOM elements
-        this.toolbarContainer = null;
-        this.tableContainer = null;
-        this.headerContainer = null;
-        this.bodyContainer = null;
-        this.scrollContainer = null;
-        this.tableElement = null;
-        this.loadingOverlay = null;
-        this.eventSource = null; // SSE connection
-        this.currentEditCell = null; // Currently editing cell
-        
-        // Resize state
-        this.resizeState = {
-            isResizing: false,
-            columnIndex: null,
-            startX: 0,
-            startWidth: 0
-        };
-        
-        // Keyboard navigation
-        this.currentRowIndex = null;
+        this.visibleRows = 20;
+        this.firstVisibleRow = 0;
+        this.editSessionId = null;
+        this.eventSource = null;
     }
-    
-    async Draw(container) {
-        if (!this.element) {
-            this.element = document.createElement('div');
-            this.element.classList.add('ui-dynamictable');
-            this.element.style.position = 'relative';
-            this.element.style.width = '100%';
-            this.element.style.height = '100%';
-            this.element.style.boxSizing = 'border-box'; // Include border in size calculation
-            this.element.style.overflow = 'hidden';
-            this.element.style.display = 'flex';
-            this.element.style.flexDirection = 'column';
-            this.element.style.backgroundColor = '#c0c0c0';
-            this.element.style.borderTop = '2px solid #808080';
-            this.element.style.borderLeft = '2px solid #808080';
-            this.element.style.borderRight = '2px solid #ffffff';
-            this.element.style.borderBottom = '2px solid #ffffff';
-            this.element.style.fontFamily = 'MS Sans Serif, sans-serif';
-            this.element.style.fontSize = '11px';
-            this.element.tabIndex = 0; // Make focusable
-            this.element.style.outline = 'none';
-            this.element.style.userSelect = 'none'; // Disable text selection
-            
-            // Toolbar (if enabled) - FIRST, before header
-            if (this.showToolbar) {
-                const toolbar = new Toolbar(this.element);
-                toolbar.compact = true; // Compact mode: no spacing between buttons
-                toolbar.height = 28;
-                
-                // Standard table buttons
-                if (this.editable) {
-                    const addBtn = new Button();
-                    addBtn.setCaption('Добавить');
-                    addBtn.setIcon('/app/res/public/fontawesome-free-7.1.0-web/svgs/solid/plus.svg');
-                    addBtn.showIcon = true;
-                    addBtn.showText = false;
-                    addBtn.setTooltip('Добавить новую запись');
-                    addBtn.setWidth(100);
-                    addBtn.setHeight(28);
-                    addBtn.onClick = () => {
-                        console.log('[DynamicTable] Add button clicked');
-                    };
-                    toolbar.addItem(addBtn);
-                    
-                    const delBtn = new Button();
-                    delBtn.setCaption('Удалить');
-                    delBtn.setIcon('/app/res/public/fontawesome-free-7.1.0-web/svgs/solid/trash-can.svg');
-                    delBtn.showIcon = true;
-                    delBtn.showText = false;
-                    delBtn.setTooltip('Удалить выбранные записи');
-                    delBtn.setWidth(100);
-                    delBtn.setHeight(28);
-                    delBtn.onClick = () => {
-                        const selected = this.getSelectedRows();
-                        if (selected.length === 0) {
-                            showAlert('Выберите строки для удаления');
-                            return;
-                        }
-                    };
-                    toolbar.addItem(delBtn);
-                }
-                
-                toolbar.Draw(this.element);
+
+    // Override Draw to ensure data subscription happens before base drawing
+    Draw(container) {
+        try {
+            // Subscribe to server-side changes if not already subscribed
+            if (!this._dataSubscribed) {
+                try {
+                    // Prefer existing connectSSE implementation
+                    if (typeof this.connectSSE === 'function') this.connectSSE();
+                } catch (e) {}
+                this._dataSubscribed = true;
             }
-            
-            // Header container
-            this.headerContainer = document.createElement('div');
-            this.headerContainer.style.position = 'relative';
-            this.headerContainer.style.width = '100%';
-            this.headerContainer.style.boxSizing = 'border-box'; // Include padding in width
-            this.headerContainer.style.flex = '0 0 auto'; // Don't grow, don't shrink, auto height
-            this.headerContainer.style.backgroundColor = '#c0c0c0';
-            this.headerContainer.style.borderBottom = '2px solid #808080';
-            this.headerContainer.style.userSelect = 'none'; // Disable text selection in headers
-            this.headerContainer.style.overflowX = 'hidden'; // Hide horizontal overflow
-            this.element.appendChild(this.headerContainer);
-            
-            // Body container with scrolling
-            this.bodyContainer = document.createElement('div');
-            this.bodyContainer.style.position = 'relative';
-            this.bodyContainer.style.width = '100%';
-            this.bodyContainer.style.flex = '1 1 auto'; // Grow to fill remaining space
-            this.bodyContainer.style.overflow = 'auto';
-            this.bodyContainer.style.backgroundColor = '#ffffff'; // White background
-            this.bodyContainer.style.userSelect = 'none'; // Disable text selection in body
-            this.element.appendChild(this.bodyContainer);
-            
-            // Sync horizontal scroll between header and body
-            this.bodyContainer.addEventListener('scroll', () => {
-                this.headerContainer.scrollLeft = this.bodyContainer.scrollLeft;
-            });
-            
-            // Setup keyboard navigation
-            this.setupKeyboardNavigation();
-            
-            // Setup SSE (optional, can be disabled for MVP)
-            // this.connectSSE();
-        }
-        
-        if (container) {
-            container.appendChild(this.element);
-            
-            // Load initial data AFTER element is in DOM so clientHeight is available
-            if (!this.dataLoaded) {
-                this.dataLoaded = true;
-                await this.refresh();
+        } catch (e) {}
+
+        // Call base Draw to build UI and then trigger initial load if needed
+        const el = (function(self, cnt) {
+            try { return Table.prototype.Draw.call(self, cnt); } catch (e) { return null; }
+        })(this, container);
+
+        try {
+            if (el && !this.dataLoaded && !this.isLoading) {
+                try { this.refresh(); } catch (e) {}
             }
-        }
-        
-        return this.element;
+        } catch (e) {}
+
+        return el;
     }
-    
+
     async refresh() {
         this.showLoadingIndicator();
         try {
@@ -5225,21 +5246,52 @@ class DynamicTable extends UIObject {
             this.hideLoadingIndicator();
         }
     }
-    
+
     calculateVisibleRows() {
         if (this.bodyContainer && this.bodyContainer.clientHeight > 0) {
             const containerHeight = this.bodyContainer.clientHeight;
             this.visibleRows = Math.ceil(containerHeight / this.rowHeight) + this.bufferRows;
         } else {
-            // Fallback if container not yet rendered
             this.visibleRows = 30;
         }
     }
-    
+
+    showLoadingIndicator() {
+        if (this.loadingOverlay) return;
+        try {
+            const overlay = document.createElement('div');
+            overlay.style.position = 'absolute';
+            overlay.style.top = '0';
+            overlay.style.left = '0';
+            overlay.style.right = '0';
+            overlay.style.bottom = '0';
+            overlay.style.background = 'rgba(192, 192, 192, 0.6)';
+            overlay.style.display = 'flex';
+            overlay.style.alignItems = 'center';
+            overlay.style.justifyContent = 'center';
+            overlay.style.zIndex = '1000';
+            const label = document.createElement('div');
+            label.textContent = 'Loading...';
+            label.style.padding = '6px 12px';
+            label.style.background = '#c0c0c0';
+            overlay.appendChild(label);
+            if (this.element) this.element.appendChild(overlay);
+            this.loadingOverlay = overlay;
+        } catch (e) {}
+    }
+
+    hideLoadingIndicator() {
+        try {
+            if (this.loadingOverlay) {
+                this.loadingOverlay.remove();
+                this.loadingOverlay = null;
+            }
+        } catch (e) {}
+    }
+
     async loadData(firstRow) {
         if (this.isLoading) return;
         this.isLoading = true;
-        
         try {
             const data = await callServerMethod(this.appName, 'getDynamicTableData', {
                 tableName: this.tableName,
@@ -5248,915 +5300,273 @@ class DynamicTable extends UIObject {
                 sort: this.currentSort,
                 filters: this.currentFilters
             });
-            
-            this.totalRows = data.totalRows;
-            this.fields = data.fields;
-            this.editSessionId = data.editSessionId; // Save edit session ID
-            
-            // Update cache
-            data.data.forEach((row, index) => {
-                const globalIndex = data.range.from + index;
-                this.dataCache[globalIndex] = { ...row, loaded: true, __index: globalIndex };
+            // Expect new format only: { columns, rows, totalRows }
+            try { console.log('[DynamicTable.loadData] server response for', this.tableName, { hasData: !!data, keys: data ? Object.keys(data) : null }); } catch(e) {}
+            const columnsRaw = data && data.columns ? data.columns : [];
+            const rows = data && data.rows ? data.rows : [];
+            const total = data && data.totalRows ? data.totalRows : 0;
+
+            // Normalize columns: ensure each column is {data, caption, width?}
+            let columns = [];
+            if (Array.isArray(columnsRaw) && columnsRaw.length > 0) {
+                columns = columnsRaw.map(col => {
+                    if (typeof col === 'string') return { data: col, caption: col };
+                    if (col && typeof col === 'object') return { data: col.data || col.name || '', caption: col.caption || col.data || col.name || '', width: col.width };
+                    return { data: '', caption: '' };
+                });
+            } else {
+                // Try to infer columns from first row if server didn't provide them
+                if (rows && rows.length > 0 && typeof rows[0] === 'object') {
+                    columns = Object.keys(rows[0]).map(k => ({ data: k, caption: k }));
+                    try { console.log('[DynamicTable.loadData] inferred columns from first row:', columns.map(c=>c.data)); } catch(e) {}
+                }
+            }
+            try { console.log('[DynamicTable.loadData] normalized columns count=', columns.length, 'captions=', columns.map(c=>c.caption).slice(0,50)); } catch(e) {}
+            const rangeFrom = (data.range && (typeof data.range.from === 'number')) ? data.range.from : (typeof firstRow === 'number' ? firstRow : 0);
+
+            this.totalRows = total;
+            this.columns = columns.slice();
+            this.fields = columns.slice();
+            this.editSessionId = data.editSessionId || this.editSessionId;
+
+            // Populate dataCache using rangeFrom as base index
+            rows.forEach((row, index) => {
+                const globalIndex = rangeFrom + index;
+                this.dataCache[globalIndex] = Object.assign({}, row, { loaded: true, __index: globalIndex });
             });
-            
-            // Render table
-            this.renderTable();
-            
-        } catch (error) {
-            throw error;
+
+            // If table is already rendered, rebuild header and body to reflect new columns/rows
+            try {
+                if (this.element) {
+                    const headerContainer = this.headerContainer;
+                    const bodyContainer = this.bodyContainer;
+                    if (headerContainer) {
+                        headerContainer.innerHTML = '';
+                        this.buildHeader(headerContainer, () => {
+                            try { return bodyContainer.querySelector('colgroup'); } catch (e) { return null; }
+                        });
+                    }
+                    if (bodyContainer) {
+                        bodyContainer.innerHTML = '';
+                        this.buildBody(bodyContainer, rows);
+                    }
+                }
+            } catch (e) { console.error('[DynamicTable] rebuild after loadData failed', e); }
+
+            // Mark data as loaded to avoid duplicate initial loads
+            try { this.dataLoaded = true; } catch (e) {}
+
+            return { columns: columns, rows: rows, totalRows: total };
         } finally {
             this.isLoading = false;
         }
     }
-    
-    renderTable() {
-        // Render header
-        this.renderHeader();
-        
-        // Render body
-        this.renderBody();
-        
-        // Adjust header for scrollbar
-        this.adjustHeaderForScrollbar();
-    }
-    
-    adjustHeaderForScrollbar() {
-        // Calculate scrollbar width
-        const scrollbarWidth = this.bodyContainer.offsetWidth - this.bodyContainer.clientWidth;
-        
-        // Add padding to header to compensate for scrollbar
-        if (scrollbarWidth > 0) {
-            this.headerContainer.style.paddingRight = scrollbarWidth + 'px';
-        } else {
-            this.headerContainer.style.paddingRight = '0';
-        }
-    }
-    
-    renderHeader() {
-        this.headerContainer.innerHTML = '';
-        
-        const table = document.createElement('table');
-        table.style.width = '100%';
-        table.style.borderCollapse = 'separate';
-        table.style.borderSpacing = '0';
-        table.style.tableLayout = 'fixed';
-        
-        // Add colgroup to explicitly set column widths
-        const colgroup = document.createElement('colgroup');
-        this.fields.forEach((field, index) => {
-            const col = document.createElement('col');
-            // Last column gets remaining space, others are fixed
-            if (index === this.fields.length - 1) {
-                col.style.width = 'auto';
-            } else {
-                col.style.width = field.width + 'px';
-            }
-            colgroup.appendChild(col);
-        });
-        table.appendChild(colgroup);
-        
-        const thead = document.createElement('thead');
-        const headerRow = document.createElement('tr');
-        
-        this.fields.forEach((field, index) => {
-            const th = document.createElement('th');
-            th.style.width = field.width + 'px';
-            th.style.boxSizing = 'border-box'; // Include padding and border in width
-            th.style.padding = '4px 8px';
-            th.style.backgroundColor = '#c0c0c0';
-            th.style.borderTop = '2px solid #ffffff';
-            th.style.borderLeft = '2px solid #ffffff';
-            th.style.borderRight = '2px solid #808080';
-            th.style.borderBottom = '2px solid #808080';
-            th.style.fontWeight = 'bold';
-            th.style.textAlign = 'left';
-            th.style.cursor = 'pointer';
-            th.style.userSelect = 'none';
-            th.style.position = 'relative';
-            th.style.whiteSpace = 'nowrap';
-            th.style.overflow = 'hidden';
-            th.style.textOverflow = 'ellipsis';
-            th.textContent = field.caption;
-            
-            // Sort indicator
-            const sortItem = this.currentSort.find(s => s.field === field.name);
-            if (sortItem) {
-                th.textContent += sortItem.order === 'asc' ? ' ▲' : ' ▼';
-            }
-            
-            // Click to sort
-            th.addEventListener('click', (e) => {
-                if (!this.resizeState.isResizing) {
-                    this.toggleSort(field.name);
-                }
-            });
-            
-            // Resize handle
-            const resizeHandle = document.createElement('div');
-            resizeHandle.style.position = 'absolute';
-            resizeHandle.style.top = '0';
-            resizeHandle.style.right = '0';
-            resizeHandle.style.width = '5px';
-            resizeHandle.style.height = '100%';
-            resizeHandle.style.cursor = 'col-resize';
-            resizeHandle.style.zIndex = '10';
-            
-            resizeHandle.addEventListener('mousedown', (e) => {
-                e.stopPropagation();
-                this.startResize(index, e.clientX, field.width);
-            });
-            
-            th.appendChild(resizeHandle);
-            headerRow.appendChild(th);
-        });
-        
-        thead.appendChild(headerRow);
-        table.appendChild(thead);
-        this.headerContainer.appendChild(table);
-    }
-    
-    renderBody() {
-        // Save current scroll position
-        const savedScrollTop = this.bodyContainer.scrollTop || 0;
-        
-        this.bodyContainer.innerHTML = '';
-        
-        // Create scroll container with full height
-        const scrollContainer = document.createElement('div');
-        scrollContainer.style.position = 'relative';
-        scrollContainer.style.height = (this.totalRows * this.rowHeight) + 'px';
-        scrollContainer.style.width = '100%';
-        
-        // Create visible table
-        const table = document.createElement('table');
-        table.style.width = '100%';
-        table.style.borderCollapse = 'collapse';
-        table.style.tableLayout = 'fixed';
-        table.style.position = 'absolute';
-        table.style.top = '0';
-        
-        // Add colgroup to explicitly set column widths
-        const colgroup = document.createElement('colgroup');
-        this.fields.forEach((field, index) => {
-            const col = document.createElement('col');
-            // Last column gets remaining space, others are fixed
-            if (index === this.fields.length - 1) {
-                col.style.width = 'auto';
-            } else {
-                col.style.width = field.width + 'px';
-            }
-            colgroup.appendChild(col);
-        });
-        table.appendChild(colgroup);
-        
-        const tbody = document.createElement('tbody');
-        
-        // Calculate visible range based on saved scroll position
-        const scrollTop = savedScrollTop;
-        const firstVisible = Math.floor(scrollTop / this.rowHeight);
-        const visibleRowCount = Math.ceil(this.bodyContainer.clientHeight / this.rowHeight);
-        const lastVisible = firstVisible + visibleRowCount;
-        
-        // Add buffer rows for smooth scrolling
-        const renderFirst = Math.max(0, firstVisible - this.bufferRows);
-        const renderLast = Math.min(this.totalRows, lastVisible + this.bufferRows);
-        
-        // Save for scroll optimization
-        this.lastRenderedFirstRow = firstVisible;
-        
-        // Position table at first rendered row (including buffer)
-        table.style.top = (renderFirst * this.rowHeight) + 'px';
-        
-        // Render visible rows + buffer
-        for (let i = renderFirst; i < renderLast; i++) {
-            const rowData = this.dataCache[i] || { loaded: false, __index: i };
-            const tr = this.renderRow(rowData, i);
-            tbody.appendChild(tr);
-        }
-        
-        table.appendChild(tbody);
-        scrollContainer.appendChild(table);
-        this.bodyContainer.appendChild(scrollContainer);
-        
-        // Restore scroll position after DOM update
-        this.bodyContainer.scrollTop = savedScrollTop;
-        
-        // Setup scroll handler
-        this.bodyContainer.addEventListener('scroll', () => {
-            this.onScroll();
-        });
-    }
-    
-    renderRow(rowData, rowIndex) {
-        const tr = document.createElement('tr');
-        tr.dataset.rowIndex = rowIndex;
-        tr.style.height = this.rowHeight + 'px';
-        
-        // Zebra striping
-        tr.style.backgroundColor = rowIndex % 2 === 0 ? '#ffffff' : '#f0f0f0';
-        
-        // Selection highlight
-        if (this.selectedRows.has(rowIndex)) {
-            tr.style.backgroundColor = '#000080';
-            tr.style.color = '#ffffff';
-        }
-        
-        // Render cells
-        this.fields.forEach((field, fieldIndex) => {
-            const td = document.createElement('td');
-            td.style.width = field.width + 'px';
-            td.style.boxSizing = 'border-box'; // Include padding and border in width
-            td.style.padding = '4px 8px';
-            td.style.borderRight = '1px solid #c0c0c0';
-            td.style.whiteSpace = 'nowrap';
-            td.style.overflow = 'hidden';
-            td.style.textOverflow = 'ellipsis';
-            
-            if (!rowData.loaded) {
-                td.style.opacity = '0.3';
-                td.textContent = '...';
-            } else {
-                // Get value
-                let value = rowData[field.name];
-                
-                // For foreign keys, use display value
-                if (field.foreignKey && rowData[`__${field.name}_display`] !== undefined) {
-                    value = rowData[`__${field.name}_display`];
-                }
-                
-                // Format value by type
-                td.textContent = this.formatValue(value, field.type);
-                
-                // Check if edited
-                const cellKey = `${rowData.id}_${field.name}`;
-                if (this.editedCells.has(cellKey)) {
-                    td.style.backgroundColor = '#ffffcc'; // Mark edited cells
-                }
-                
-                // Make cell editable if allowed
-                if (this.editable && field.editable && !field.foreignKey) {
-                    td.style.cursor = 'text';
-                    td.addEventListener('click', (e) => {
-                        e.stopPropagation();
-                        // Select the row first
-                        if (!this.selectedRows.has(rowIndex)) {
-                            this.selectedRows.clear();
-                            this.selectedRows.add(rowIndex);
-                            this.lastSelectedIndex = rowIndex;
-                            this.currentRowIndex = rowIndex;
-                            this.renderBody();
-                        }
-                        this.startCellEdit(td, rowData, field, rowIndex);
-                    });
-                }
-            }
-            
-            tr.appendChild(td);
-        });
-        
-        // Click events
-        tr.addEventListener('click', (e) => {
-            this.onRowClickHandler(rowData, rowIndex, e);
-        });
-        
-        tr.addEventListener('dblclick', (e) => {
-            this.onRowDoubleClickHandler(rowData, rowIndex);
-        });
-        
-        return tr;
-    }
-    
-    formatValue(value, type) {
-        if (value === null || value === undefined) return '';
-        
-        switch (type) {
-            case 'BOOLEAN':
-                return value ? '☑' : '☐';
-            case 'DATE':
-            case 'DATEONLY':
-                if (value instanceof Date) {
-                    const dd = String(value.getDate()).padStart(2, '0');
-                    const mm = String(value.getMonth() + 1).padStart(2, '0');
-                    const yyyy = value.getFullYear();
-                    return `${dd}.${mm}.${yyyy}`;
-                }
-                // Parse from string
-                const date = new Date(value);
-                if (!isNaN(date.getTime())) {
-                    const dd = String(date.getDate()).padStart(2, '0');
-                    const mm = String(date.getMonth() + 1).padStart(2, '0');
-                    const yyyy = date.getFullYear();
-                    return `${dd}.${mm}.${yyyy}`;
-                }
-                return value.toString();
-            case 'DECIMAL':
-            case 'FLOAT':
-                return parseFloat(value).toFixed(2);
-            default:
-                return value.toString();
-        }
-    }
-    
-    onScroll() {
-        const scrollTop = this.bodyContainer.scrollTop;
-        const newFirstVisible = Math.floor(scrollTop / this.rowHeight);
-        
-        // Check if visible range changed significantly
-        const currentFirstVisible = this.lastRenderedFirstRow || 0;
-        const rowDiff = Math.abs(newFirstVisible - currentFirstVisible);
-        
-        // Only re-render if we scrolled more than 5 rows
-        if (rowDiff < 5) {
-            return;
-        }
-        
-        // Check if we need to load more data
-        const needsReload = this.needsDataReload(newFirstVisible);
-        
-        if (needsReload) {
-            this.loadData(newFirstVisible);
-        } else {
-            // Just re-render with cached data
-            this.renderBody();
-        }
-    }
-    
-    needsDataReload(firstRow) {
-        const visibleRange = Math.ceil(this.bodyContainer.clientHeight / this.rowHeight);
-        
-        // Check if data is in cache
-        for (let i = firstRow; i < firstRow + visibleRange; i++) {
-            if (i >= this.totalRows) break;
-            if (!this.dataCache[i] || !this.dataCache[i].loaded) {
-                return true;
-            }
-        }
-        
-        return false;
-    }
-    
-    onRowClickHandler(rowData, rowIndex, event) {
-        if (!rowData.loaded) {
-            if (typeof showAlert === 'function') {
-                showAlert('Данные ещё не загружены. Подождите.');
-            }
-            return;
-        }
-        
-        if (this.multiSelect && event.shiftKey && this.lastSelectedIndex !== null) {
-            // Range selection with Shift
-            const start = Math.min(this.lastSelectedIndex, rowIndex);
-            const end = Math.max(this.lastSelectedIndex, rowIndex);
-            this.selectedRows.clear();
-            for (let i = start; i <= end; i++) {
-                this.selectedRows.add(i);
-            }
-        } else if (this.multiSelect && event.ctrlKey) {
-            // Toggle single row selection with Ctrl
-            if (this.selectedRows.has(rowIndex)) {
-                this.selectedRows.delete(rowIndex);
-            } else {
-                this.selectedRows.add(rowIndex);
-            }
-            this.lastSelectedIndex = rowIndex;
-        } else {
-            // Single selection without modifiers
-            this.selectedRows.clear();
-            this.selectedRows.add(rowIndex);
-            this.lastSelectedIndex = rowIndex;
-        }
-        
-        this.currentRowIndex = rowIndex;
-        this.renderBody(); // Re-render to show selection
-        
-        if (this.onRowClick) {
-            this.onRowClick(rowData, rowIndex);
-        }
-        
-        if (this.onSelectionChanged) {
-            this.onSelectionChanged(this.getSelectedRows());
-        }
-    }
-    
-    onRowDoubleClickHandler(rowData, rowIndex) {
-        if (!rowData.loaded) {
-            if (typeof showAlert === 'function') {
-                showAlert('Данные ещё не загружены. Подождите.');
-            }
-            return;
-        }
-        
-        if (this.onRowDoubleClick) {
-            this.onRowDoubleClick(rowData, rowIndex);
-        }
-    }
-    
-    toggleSort(fieldName) {
-        const existing = this.currentSort.find(s => s.field === fieldName);
-        
-        if (existing) {
-            // Toggle order
-            existing.order = existing.order === 'asc' ? 'desc' : 'asc';
-        } else {
-            // Add new sort
-            this.currentSort = [{ field: fieldName, order: 'asc' }];
-        }
-        
-        // Reload data
-        this.clearCache();
-        this.refresh();
-    }
-    
-    setSort(sortArray) {
-        this.currentSort = sortArray;
-        this.clearCache();
-        this.refresh();
-    }
-    
-    setFilter(filterArray) {
-        this.currentFilters = filterArray;
-        this.clearCache();
-        this.refresh();
-    }
-    
-    clearCache() {
-        this.dataCache = {};
-    }
-    
-    getSelectedRows() {
-        const rows = [];
-        this.selectedRows.forEach(index => {
-            if (this.dataCache[index] && this.dataCache[index].loaded) {
-                rows.push(this.dataCache[index]);
-            }
-        });
-        return rows;
-    }
-    
-    clearSelection() {
-        this.selectedRows.clear();
-        this.lastSelectedIndex = null;
-        this.currentRowIndex = null;
-        this.renderBody();
-    }
-    
-    scrollToRow(rowIndex) {
-        const scrollTop = rowIndex * this.rowHeight;
-        this.bodyContainer.scrollTop = scrollTop;
-    }
-    
-    startCellEdit(td, rowData, field, rowIndex) {
-        if (!this.editable || !field.editable || field.foreignKey) {
-            return;
-        }
-        
-        // Close previous edit if exists
-        if (this.currentEditCell) {
-            this.finishCellEdit(false);
-        }
-        
-        const currentValue = rowData[field.name];
 
-        // Create appropriate UI control from existing UI classes so it matches form controls
-        let control = null;
-        let underlyingInput = null;
-        try {
-            // Choose control by type
-            const t = (field.type || 'STRING').toUpperCase();
-            if (t === 'BOOLEAN') {
-                control = new CheckBox(td, { caption: '' });
-            } else if (t === 'DATE' || t === 'DATEONLY' || t === 'TIMESTAMP') {
-                control = new DatePicker(td, { caption: '' });
-            } else if (t === 'TEXT' || t === 'TEXTAREA' || t === 'LONGTEXT') {
-                control = new MultilineTextBox(td, { caption: '', rows: 3 });
-            } else {
-                control = new TextBox(td, { caption: '' });
-            }
+    connectSSE() {
+        if (!this.appName || !this.tableName) return;
 
-            // Ensure caption not shown when rendered inside table cell
-            try { control.showLabel = false; } catch (e) {}
-            try { control.caption = ''; } catch (e) {}
+        const url = `/app/${this.appName}/subscribeToTable?tableName=${this.tableName}`;
+        this.eventSource = new EventSource(url);
 
-            // Render control into the td
-            td.textContent = '';
-            try { control.Draw(td); } catch (e) { console.error('[DynamicTable] control.Draw error', e); }
+        this.eventSource.onopen = () => {
+            console.log('[DynamicTable] SSE connected');
+        };
 
-            // Find underlying input element (input/textarea/select)
+        this.eventSource.onmessage = (event) => {
             try {
-                if (control && control.element) {
-                    if (control.element.tagName === 'INPUT' || control.element.tagName === 'TEXTAREA' || control.element.tagName === 'SELECT') {
-                        underlyingInput = control.element;
-                    } else {
-                        underlyingInput = control.element.querySelector('input,textarea,select');
-                    }
+                const d = JSON.parse(event.data);
+                if (d && d.type === 'dataChanged') {
+                    // Consumer can call loadData or handle update when needed
+                    this.dataCache = {};
                 }
-            } catch (e) { underlyingInput = null; }
-
-            // Initialize control value
-            try {
-                if (control instanceof CheckBox) {
-                    control.setChecked(!!currentValue);
-                } else if (control instanceof DatePicker) {
-                    control.setValue(currentValue ? new Date(currentValue) : null);
-                } else if (typeof control.setText === 'function') {
-                    control.setText(currentValue !== undefined && currentValue !== null ? String(currentValue) : '');
-                }
-            } catch (e) {}
-
-            // Style underlying input to fit cell
-            try {
-                if (underlyingInput) {
-                    underlyingInput.style.width = '100%';
-                    underlyingInput.style.boxSizing = 'border-box';
-                    underlyingInput.style.padding = '2px';
-                    underlyingInput.style.fontFamily = 'Tahoma, Arial, sans-serif';
-                    underlyingInput.style.fontSize = '11px';
-                    if (this.selectedRows.has(rowIndex)) {
-                        underlyingInput.style.backgroundColor = '#000080';
-                        underlyingInput.style.color = '#ffffff';
-                    }
-                    try { underlyingInput.focus(); } catch (e) {}
-                    try { if (underlyingInput.select) underlyingInput.select(); } catch (e) {}
-                }
-            } catch (e) {}
-
-            this.currentEditCell = {
-                td: td,
-                control: control,
-                input: underlyingInput,
-                rowData: rowData,
-                field: field,
-                originalValue: currentValue,
-                rowIndex: rowIndex
-            };
-
-            // Wire events to finish editing
-            if (underlyingInput) {
-                underlyingInput.addEventListener('keydown', async (e) => {
-                    if (e.key === 'Enter') {
-                        e.preventDefault();
-                        await this.finishCellEdit(true);
-                    } else if (e.key === 'Escape') {
-                        e.preventDefault();
-                        this.finishCellEdit(false);
-                    }
-                });
-
-                underlyingInput.addEventListener('blur', async () => {
-                    await this.finishCellEdit(true);
-                });
-            } else if (control && typeof control.getChecked === 'function') {
-                // For checkbox, listen to change on control's internal input
-                try {
-                    const cb = control.element && control.element.querySelector ? control.element.querySelector('input[type="checkbox"]') : null;
-                    if (cb) cb.addEventListener('change', async () => { await this.finishCellEdit(true); });
-                } catch (e) {}
-            }
-
-        } catch (e) {
-            // Fallback to simple input if control creation fails
-            console.error('[DynamicTable] startCellEdit control error', e);
-            const input = document.createElement('input');
-            input.type = 'text';
-            try { input.id = input.id || 'celledit_' + Math.random().toString(36).substr(2,9); } catch (_) {}
-            input.value = this.formatValue(currentValue, field.type);
-            input.style.width = '100%';
-            td.textContent = '';
-            td.appendChild(input);
-            input.focus();
-            this.currentEditCell = { td: td, input: input, rowData: rowData, field: field, originalValue: currentValue, rowIndex: rowIndex };
-            input.addEventListener('keydown', async (e) => {
-                if (e.key === 'Enter') { e.preventDefault(); await this.finishCellEdit(true); }
-                else if (e.key === 'Escape') { e.preventDefault(); this.finishCellEdit(false); }
-            });
-            input.addEventListener('blur', async () => { await this.finishCellEdit(true); });
-        }
-    }
-    
-    async finishCellEdit(save) {
-        if (!this.currentEditCell) return;
-        const { td, input, rowData, field, originalValue, control } = this.currentEditCell;
-
-        // Determine newValue from either underlying input or control instance
-        let newValue;
-        try {
-            if (input) {
-                if (input.type === 'checkbox') newValue = !!input.checked;
-                else newValue = input.value;
-            } else if (control) {
-                if (typeof control.getChecked === 'function') newValue = !!control.getChecked();
-                else if (typeof control.getValue === 'function') newValue = control.getValue();
-                else if (typeof control.getText === 'function') newValue = control.getText();
-                else {
-                    // Fallback: try to find input inside control.element
-                    const el = control.element && control.element.querySelector ? control.element.querySelector('input,textarea,select') : null;
-                    if (el) newValue = (el.type === 'checkbox') ? !!el.checked : el.value;
-                    else newValue = '';
-                }
-            } else {
-                newValue = '';
-            }
-        } catch (e) {
-            newValue = '';
-        }
-
-        // Restore text content
-        td.textContent = save ? (newValue !== undefined && newValue !== null ? String(newValue) : '') : this.formatValue(originalValue, field.type);
-        
-        if (save && newValue !== this.formatValue(originalValue, field.type)) {
-            // Send to server
-            try {
-                await callServerMethod(this.appName, 'recordTableEdit', {
-                    editSessionId: this.editSessionId,
-                    rowId: rowData.id,
-                    fieldName: field.name,
-                    newValue: newValue
-                });
-                
-                // Mark as edited
-                const cellKey = `${rowData.id}_${field.name}`;
-                this.editedCells.set(cellKey, newValue);
-                td.style.backgroundColor = '#ffffcc';
-                
-                // Update cache
-                rowData[field.name] = newValue;
-                
             } catch (e) {
-                showAlert('Ошибка сохранения: ' + e.message);
-                td.textContent = this.formatValue(originalValue, field.type);
+                console.error('[DynamicTable] SSE parse error', e);
             }
-        }
-        
-        this.currentEditCell = null;
+        };
+
+        this.eventSource.onerror = () => {
+            if (this.eventSource) { this.eventSource.close(); this.eventSource = null; }
+            setTimeout(() => this.connectSSE(), 3000);
+        };
     }
-    
-    async saveChanges() {
+
+    // ================= DATA BLOCK (extracted from old DynamicTable) =================
+    // The methods below were copied from the previous DynamicTable implementation.
+    // They perform server GET/POST operations. They are placed here for review
+    // and will NOT be invoked automatically — wiring is left to follow-up work.
+
+    async data_finishCellEdit_send(editSessionId, rowId, fieldName, newValue) {
+        // Sends single cell edit to server (was inside finishCellEdit)
+        try {
+            return await callServerMethod(this.appName, 'recordTableEdit', {
+                editSessionId: editSessionId,
+                rowId: rowId,
+                fieldName: fieldName,
+                newValue: newValue
+            });
+        } catch (e) {
+            throw e;
+        }
+    }
+
+    async data_saveChanges_commit() {
+        // Commits all pending edits (was saveChanges)
         if (!this.editSessionId) {
-            showAlert('Нет активной сессии редактирования');
-            return;
+            throw new Error('No active edit session');
         }
-        
-        if (this.editedCells.size === 0) {
-            showAlert('Нет изменений для сохранения');
-            return;
+        if (this.editedCells && this.editedCells.size === 0) {
+            return { ok: false, message: 'No edits' };
         }
-        
+
         try {
             const result = await callServerMethod(this.appName, 'commitTableEdits', {
                 editSessionId: this.editSessionId
             });
-            
-            if (result.success) {
-                // Clear edited marks
-                this.editedCells.clear();
-                
-                // Reload table with new session ID
-                this.editSessionId = result.newEditSessionId;
-                await this.refresh();
-                
-                showAlert(`Изменения сохранены: ${result.updatedRows} строк`);
-            }
+            return result;
         } catch (e) {
-            showAlert('Ошибка применения изменений: ' + e.message);
+            throw e;
         }
     }
-    
-    startResize(columnIndex, startX, startWidth) {
-        this.resizeState.isResizing = true;
-        this.resizeState.columnIndex = columnIndex;
-        this.resizeState.startX = startX;
 
-        this.resizeState.startWidth = startWidth;
-        
-        const mouseMoveHandler = (e) => {
-            if (this.resizeState.isResizing) {
-                const diff = e.clientX - this.resizeState.startX;
-                const newWidth = Math.max(50, this.resizeState.startWidth + diff);
-                this.fields[this.resizeState.columnIndex].width = newWidth;
-                this.renderTable();
-            }
-        };
-        
-        const mouseUpHandler = () => {
-            if (this.resizeState.isResizing) {
-                this.resizeState.isResizing = false;
-                document.removeEventListener('mousemove', mouseMoveHandler);
-                document.removeEventListener('mouseup', mouseUpHandler);
-                
-                // Save column widths
-                this.saveColumnWidths();
-            }
-        };
-        
-        document.addEventListener('mousemove', mouseMoveHandler);
-        document.addEventListener('mouseup', mouseUpHandler);
-    }
-    
-    async saveColumnWidths() {
+    async data_saveColumnWidths_saveState() {
+        // Persist client-side column widths (was saveColumnWidths)
         try {
             await callServerMethod(this.appName, 'saveClientState', {
                 window: 'dynamicTable',
                 component: this.tableName,
                 data: {
-                    columns: this.fields.map(f => ({ name: f.name, width: f.width }))
+                    columns: (this.fields || []).map(f => ({ name: f.name, width: f.width }))
                 }
             });
         } catch (error) {
             console.error('[DynamicTable] Error saving column widths:', error);
+            throw error;
         }
     }
-    
-    setupKeyboardNavigation() {
-        this.element.addEventListener('keydown', (e) => {
-            if (this.currentRowIndex === null && this.totalRows > 0) {
-                this.currentRowIndex = 0;
-            }
-            
-            switch (e.key) {
-                case 'ArrowUp':
-                    e.preventDefault();
-                    if (this.currentRowIndex > 0) {
-                        this.navigateToRow(this.currentRowIndex - 1, e.shiftKey);
-                    }
-                    break;
-                    
-                case 'ArrowDown':
-                    e.preventDefault();
-                    if (this.currentRowIndex < this.totalRows - 1) {
-                        this.navigateToRow(this.currentRowIndex + 1, e.shiftKey);
-                    }
-                    break;
-                    
-                case 'PageUp':
-                    e.preventDefault();
-                    const pageSize = Math.floor(this.bodyContainer.clientHeight / this.rowHeight);
-                    this.navigateToRow(Math.max(0, this.currentRowIndex - pageSize), e.shiftKey);
-                    break;
-                    
-                case 'PageDown':
-                    e.preventDefault();
-                    const pageSize2 = Math.floor(this.bodyContainer.clientHeight / this.rowHeight);
-                    this.navigateToRow(Math.min(this.totalRows - 1, this.currentRowIndex + pageSize2), e.shiftKey);
-                    break;
-                    
-                case 'Home':
-                    e.preventDefault();
-                    this.navigateToRow(0, e.shiftKey);
-                    break;
-                    
-                case 'End':
-                    e.preventDefault();
-                    this.navigateToRow(this.totalRows - 1, e.shiftKey);
-                    break;
-                    
-                case 'Enter':
-                    e.preventDefault();
-                    if (this.currentRowIndex !== null) {
-                        const rowData = this.dataCache[this.currentRowIndex];
-                        if (rowData) {
-                            this.onRowDoubleClickHandler(rowData, this.currentRowIndex);
-                        }
-                    }
-                    break;
-            }
-        });
-    }
-    
-    navigateToRow(newIndex, extendSelection) {
-        if (newIndex < 0 || newIndex >= this.totalRows) return;
-        
-        if (this.multiSelect && extendSelection) {
-            // Extend selection
-            if (this.lastSelectedIndex === null) {
-                this.lastSelectedIndex = this.currentRowIndex;
-            }
-            const start = Math.min(this.lastSelectedIndex, newIndex);
-            const end = Math.max(this.lastSelectedIndex, newIndex);
-            this.selectedRows.clear();
-            for (let i = start; i <= end; i++) {
-                this.selectedRows.add(i);
-            }
-        } else {
-            // Single selection
-            this.selectedRows.clear();
-            this.selectedRows.add(newIndex);
-            this.lastSelectedIndex = newIndex;
-        }
-        
-        this.currentRowIndex = newIndex;
-        
-        // Auto-scroll to keep visible
-        const scrollTop = this.bodyContainer.scrollTop;
-        const scrollHeight = this.bodyContainer.clientHeight;
-        const rowTop = newIndex * this.rowHeight;
-        const rowBottom = rowTop + this.rowHeight;
-        
-        if (rowTop < scrollTop) {
-            this.bodyContainer.scrollTop = rowTop;
-        } else if (rowBottom > scrollTop + scrollHeight) {
-            this.bodyContainer.scrollTop = rowBottom - scrollHeight;
-        }
-        
-        // Check if we need to load data
-        if (!this.dataCache[newIndex] || !this.dataCache[newIndex].loaded) {
-            this.loadData(newIndex);
-        } else {
-            this.renderBody();
-        }
-        
-        if (this.onSelectionChanged) {
-            this.onSelectionChanged(this.getSelectedRows());
-        }
-    }
-    
-    showLoadingIndicator() {
-        if (this.loadingOverlay) return;
-        
-        const overlay = document.createElement('div');
-        overlay.style.position = 'absolute';
-        overlay.style.top = '0';
-        overlay.style.left = '0';
-        overlay.style.right = '0';
-        overlay.style.bottom = '0';
-        overlay.style.background = 'rgba(192, 192, 192, 0.7)';
-        overlay.style.display = 'flex';
-        overlay.style.alignItems = 'center';
-        overlay.style.justifyContent = 'center';
-        overlay.style.zIndex = '1000';
-        
-        const label = document.createElement('div');
-        label.textContent = 'Loading...';
-        label.style.padding = '10px 20px';
-        label.style.background = '#c0c0c0';
-        label.style.borderTop = '2px solid #ffffff';
-        label.style.borderLeft = '2px solid #ffffff';
-        label.style.borderRight = '2px solid #808080';
-        label.style.borderBottom = '2px solid #808080';
-        label.style.fontFamily = 'MS Sans Serif, sans-serif';
-        label.style.fontSize = '11px';
-        overlay.appendChild(label);
-        
-        this.element.appendChild(overlay);
-        this.loadingOverlay = overlay;
-    }
-    
-    hideLoadingIndicator() {
-        if (this.loadingOverlay) {
-            this.loadingOverlay.remove();
-            this.loadingOverlay = null;
-        }
-    }
-    
-    connectSSE() {
+
+    data_connectSSE_full() {
+        // Full SSE handler (extracted). Does not replace existing connectSSE; kept for review.
         if (!this.appName || !this.tableName) return;
-        
+
         const url = `/app/${this.appName}/subscribeToTable?tableName=${this.tableName}`;
-        this.eventSource = new EventSource(url);
-        
-        this.eventSource.onopen = () => {
-            console.log('[DynamicTable] SSE connected');
+        const es = new EventSource(url);
+        es.onopen = () => {
+            console.log('[DynamicTable] SSE connected (extracted)');
         };
-        
-        this.eventSource.onmessage = (event) => {
+
+        es.onmessage = (event) => {
             try {
                 const data = JSON.parse(event.data);
-                
                 if (data.type === 'connected') {
                     console.log('[DynamicTable] SSE: connection confirmed');
                 } else if (data.type === 'dataChanged') {
-                    console.log('[DynamicTable] Data changed:', data.action);
+                    console.log('[DynamicTable] Data changed (extracted):', data.action);
                     this.clearCache();
-                    this.refresh();
+                    // NOTE: not calling refresh() here — wiring deferred
                 }
             } catch (e) {
-                console.error('[DynamicTable] SSE message parse error:', e);
+                console.error('[DynamicTable] SSE message parse error (extracted):', e);
             }
         };
-        
-        this.eventSource.onerror = (error) => {
-            console.error('[DynamicTable] SSE error, reconnecting in 3s...', error);
-            if (this.eventSource) {
-                this.eventSource.close();
-                this.eventSource = null;
-            }
-            
+
+        es.onerror = (error) => {
+            console.error('[DynamicTable] SSE error (extracted), reconnecting in 3s...', error);
+            try { es.close(); } catch (e) {}
             setTimeout(() => {
-                this.connectSSE();
+                // do not auto-reconnect here to avoid duplicate connections; caller may choose to reconnect
             }, 3000);
         };
+
+        return es; // caller may store/close
     }
-    
-    destroy() {
-        if (this.eventSource) {
-            this.eventSource.close();
-            this.eventSource = null;
-        }
-        
-        if (this.element && this.element.parentElement) {
-            this.element.parentElement.removeChild(this.element);
-        }
-        
-        this.element = null;
-        this.dataCache = {};
+
+    // ================= END DATA BLOCK =================================================
+
+    // DATA-API OVERRIDES: wrap Table's data helpers so DynamicTable can provide
+    // its own data source (`dataCache`) while remaining compatible with Table.
+    data_getRows(dataKey) {
+        // If caller asks for DynamicTable's main dataKey, return array built from dataCache
+        try {
+            if (dataKey && dataKey === this.dataKey && this.dataCache && this.totalRows >= 0) {
+                const arr = [];
+                for (let i = 0; i < this.totalRows; i++) {
+                    if (this.dataCache[i] && this.dataCache[i].loaded) arr.push(this.dataCache[i]);
+                    else arr.push({});
+                }
+                return arr;
+            }
+        } catch (e) {}
+        // Fallback to Table behaviour
+        try { return super.data_getRows(dataKey); } catch (e) { return []; }
+    }
+
+    data_ensureCellEntry(key, value) {
+        // For dynamic table, keep lightweight mapping in appForm._dataMap for compatibility
+        try {
+            if (!this.appForm) {
+                // If no appForm, keep entry in local dataCache by key if possible
+                return;
+            }
+            // Delegate to base implementation to preserve existing conventions
+            return super.data_ensureCellEntry ? super.data_ensureCellEntry(key, value) : null;
+        } catch (e) {}
+    }
+
+    data_getValue(key, fallback) {
+        try {
+            // If key corresponds to a dynamic row (format: dataKey__r{index}__), try to map to dataCache
+            if (this.dataKey && typeof key === 'string' && key.indexOf(this.dataKey + '__r') === 0) {
+                // attempt to extract row index and column name from key
+                const m = key.match(/__r(\d+)__(.*)$/);
+                if (m) {
+                    const idx = parseInt(m[1], 10);
+                    const colName = m[2];
+                    if (!isNaN(idx) && this.dataCache && this.dataCache[idx] && this.dataCache[idx].loaded) {
+                        // If column name present, return that field value when available
+                        if (colName && Object.prototype.hasOwnProperty.call(this.dataCache[idx], colName)) {
+                            return this.dataCache[idx][colName];
+                        }
+                        // Fallback to full row object
+                        return this.dataCache[idx];
+                    }
+                }
+            }
+        } catch (e) {}
+        try { return super.data_getValue ? super.data_getValue(key, fallback) : fallback; } catch (e) { return fallback; }
+    }
+
+    data_updateValue(key, newVal) {
+        try {
+            // Attempt to update dynamic cache if key maps to row
+            if (this.dataKey && typeof key === 'string' && key.indexOf(this.dataKey + '__r') === 0) {
+                const m = key.match(/__r(\d+)__(.*)$/);
+                if (m) {
+                    const idx = parseInt(m[1], 10);
+                    const colName = m[2];
+                    if (!isNaN(idx)) {
+                        if (!this.dataCache[idx]) this.dataCache[idx] = { loaded: false, __index: idx };
+                        if (colName) {
+                            this.dataCache[idx][colName] = newVal;
+                        } else {
+                            // preserve legacy placeholder if no column name parsed
+                            this.dataCache[idx].__cell = newVal;
+                        }
+                        return;
+                    }
+                }
+            }
+        } catch (e) {}
+        try { if (super.data_updateValue) return super.data_updateValue(key, newVal); } catch (e) {}
+    }
+
+    data_updateParentArray(dataKey, rowIndex, colDef, newVal) {
+        try {
+            if (dataKey && dataKey === this.dataKey) {
+                if (!this.dataCache[rowIndex]) this.dataCache[rowIndex] = { loaded: false, __index: rowIndex };
+                if (colDef && colDef.data) this.dataCache[rowIndex][colDef.data] = newVal;
+                return;
+            }
+        } catch (e) {}
+        try { if (super.data_updateParentArray) return super.data_updateParentArray(dataKey, rowIndex, colDef, newVal); } catch (e) {}
     }
 }
