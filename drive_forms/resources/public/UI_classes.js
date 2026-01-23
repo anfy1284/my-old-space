@@ -341,6 +341,29 @@ class FormInput extends UIObject {
 
         return this.containerElement || this._labelInstance || null;
     }
+
+    // Clean up DOM and observers when control is no longer needed
+    destroy() {
+        try {
+            if (this._ro && typeof this._ro.disconnect === 'function') {
+                try { this._ro.disconnect(); } catch (e) {}
+                this._ro = null;
+            }
+        } catch (e) {}
+
+        try { if (this.inputContainer && typeof this.inputContainer.remove === 'function') this.inputContainer.remove(); } catch (e) {}
+        try { if (this.element && typeof this.element.remove === 'function') this.element.remove(); } catch (e) {}
+        try { if (this.containerElement && typeof this.containerElement.remove === 'function') this.containerElement.remove(); } catch (e) {}
+        try { if (this._labelInstance && this._labelInstance.element && typeof this._labelInstance.element.remove === 'function') this._labelInstance.element.remove(); } catch (e) {}
+
+        // Nullify references to assist GC
+        try { this.element = null; } catch (e) {}
+        try { this.inputContainer = null; } catch (e) {}
+        try { this.containerElement = null; } catch (e) {}
+        try { this._labelInstance = null; } catch (e) {}
+        try { this._listBtn = null; } catch (e) {}
+        try { this._selectBtn = null; } catch (e) {}
+    }
 }
 
 // Minimal MySpace registrar exposed at framework (drive_forms) client level.
@@ -1762,6 +1785,10 @@ class TextBox extends FormInput {
         if (typeof this.listMode === 'undefined' || this.listMode === null) this.listMode = false;
         // Optional: show a selection button ("...") to trigger a selection procedure
         if (typeof this.showSelectionButton === 'undefined' || this.showSelectionButton === null) this.showSelectionButton = false;
+        // Optional: selection metadata for selector button (e.g. { table, idField, displayField })
+        this.selection = (properties && properties.selection) ? properties.selection : (this.selection || null);
+        // Optional: listSource metadata for dropdown list (e.g. { table, idField, displayField, limit })
+        this.listSource = (properties && properties.listSource) ? properties.listSource : (this.listSource || null);
         // listItems: array of objects { value: any, caption: string }
         if (!Array.isArray(this.listItems)) this.listItems = (properties && properties.listItems) ? properties.listItems : [];
         this._listBtn = null;
@@ -2106,6 +2133,43 @@ class TextBox extends FormInput {
                         } catch (_) {}
                          */
                         this.inputContainer.appendChild(this._listBtn);
+
+                        // If listMode is enabled and a listSource is provided, attempt to preload first N rows
+                        try {
+                            (async () => {
+                                try {
+                                    if (this.listMode && this.listSource && typeof callServerMethod === 'function') {
+                                        const src = this.listSource || {};
+                                        // Support both legacy and explicit app/table specification.
+                                        // Preferred: { app: 'organizations', table: 'accommodation_types', ... }
+                                        // Legacy: { table: 'organizations', ... } where `table` was also the app name.
+                                        const appName = src.app || src.appName || null;
+                                        const tableName = src.tableName || src.table || null;
+                                        const idField = src.idField || 'id';
+                                        const displayField = src.displayField || 'name';
+                                        const limit = (typeof src.limit === 'number' && src.limit > 0) ? src.limit : (src.limit ? (src.limit | 0) : 10);
+                                        // Determine RPC target app. If `appName` provided, use it; otherwise
+                                        // fall back to using `tableName` as app (legacy behavior).
+                                        const rpcApp = appName || tableName;
+                                        if (rpcApp && tableName) {
+                                            try {
+                                                const resp = await callServerMethod(rpcApp, 'getDynamicTableData', { tableName: tableName, firstRow: 0, visibleRows: limit });
+                                                const rows = resp && (resp.rows || resp.data || resp.items) ? (resp.rows || resp.data || resp.items) : [];
+                                                // Map rows to listItems: { value: id, caption: displayField }
+                                                this.listItems = (rows || []).slice(0, limit).map(r => {
+                                                    const value = (r && (r[idField] !== undefined)) ? r[idField] : (r && r.id);
+                                                    const caption = (r && (r[displayField] !== undefined)) ? r[displayField] : (r && r.name) || (value !== undefined ? String(value) : '');
+                                                    return { value: value, caption: caption };
+                                                });
+                                            } catch (e) {
+                                                // ignore fetch errors
+                                                try { console.error('TextBox: failed to preload listSource', e); } catch(_){ }
+                                            }
+                                        }
+                                    }
+                                } catch (_) {}
+                            })();
+                        } catch (e) {}
                     }
 
                     // implement open/close/toggle helpers on the instance
@@ -2636,7 +2700,40 @@ class TextBox extends FormInput {
 
 
     onSelectionStart() {
-        // Empty handler - override in applications to start selection flow
+        // Default selection start handler: dispatch `open-record-selector` event
+        try {
+            const selMeta = this.selection || {};
+            const table = selMeta.table || null;
+
+            const setSelected = (rec) => {
+                try {
+                    const displayField = selMeta.displayField || 'name';
+                    const display = (rec && (rec[displayField] !== undefined)) ? rec[displayField] : (rec && rec.name) || (rec && rec.id) || '';
+                    try { if (typeof this.setText === 'function') this.setText(String(display)); } catch (_) { try { if (this.element) this.element.value = display; } catch(_){} }
+                    // signal change to consumers
+                    try { if (this.element) this.element.dispatchEvent(new Event('input', { bubbles: true })); } catch (_) {}
+                } catch (e) { console.error('TextBox.onSelectionStart.setSelected error', e); }
+            };
+
+            const evDetail = { table, selection: selMeta, callback: setSelected, control: this };
+            const custom = new CustomEvent('open-record-selector', { detail: evDetail, cancelable: true });
+            window.dispatchEvent(custom);
+            // If nobody handled the event, fallback to a simple prompt
+            if (!custom.defaultPrevented) {
+                try {
+                    const input = prompt('Введите текст для поиска (' + (table || 'таблица') + ')');
+                    if (input !== null) setSelected({ id: input, [selMeta.displayField || 'name']: input });
+                } catch (e) {}
+            }
+        } catch (e) {
+            try {
+                const input = prompt('Введите текст для поиска');
+                if (input !== null) {
+                    try { if (typeof this.setText === 'function') this.setText(String(input)); } catch (_) { try { if (this.element) this.element.value = input; } catch(_){} }
+                    try { if (this.element) this.element.dispatchEvent(new Event('input', { bubbles: true })); } catch (_) {}
+                }
+            } catch (_) {}
+        }
     }
 
 }
@@ -4772,6 +4869,18 @@ class Table extends UIObject {
         cellItem.properties = Object.assign({}, col.properties || {}, { noCaption: true, showBorder: false });
         cellItem.value = this.data_getValue(cellKey, (row && row[col.data]));
 
+        // If server returned a separate display value for this FK (e.g. __accommodationTypeId_display),
+        // prefer it for non-editor rendering so the cell shows human-friendly text.
+        try {
+            if (row && col && col.data) {
+                const dispKey = '__' + col.data + '_display';
+                if (Object.prototype.hasOwnProperty.call(row, dispKey)) {
+                    cellItem.properties = cellItem.properties || {};
+                    cellItem.properties.__display = row[dispKey];
+                }
+            }
+        } catch (e) {}
+
         // Normalize object values: preserve primitive ID/value for editing, but keep display text
         try {
             const rawVal = cellItem.value;
@@ -4817,53 +4926,25 @@ class Table extends UIObject {
 
         // Map column/field metadata to renderItem types (ensure cellItem.type is set)
         try {
-            const rawType = col.type || col.datatype || col.kind || col.typeName || col.dataType || '';
-            const ftype = rawType ? String(rawType).trim().toLowerCase() : '';
-            const dtMap = {
-                'string': 'textbox',
-                'varchar': 'textbox',
-                'text': 'textarea',
-                'longtext': 'textarea',
-                'boolean': 'checkbox',
-                'bool': 'checkbox',
-                'int': 'number',
-                'integer': 'number',
-                'decimal': 'number',
-                'float': 'number',
-                'number': 'number',
-                'enum': 'emunList',
-                'lookup': 'emunList',
-                'date': 'textbox'
-            };
-            if (dtMap[ftype]) {
-                cellItem.type = dtMap[ftype];
-                try { console.log('[DynamicTable] mapped field -> type', col && col.data, '->', cellItem.type); } catch (e) {}
-            } else {
-                try { console.warn('[DynamicTable] Unmapped field type', { name: col && col.data, rawType: rawType, ftype: ftype, col: col }); } catch (e) {}
-            }
+            // Prefer explicit inputType provided by server-side column definition
+            try {
+                if (col && col.inputType) {
+                    cellItem.type = col.inputType;
+                    try { console.log('[DynamicTable] used inputType from column ->', col.data, '->', cellItem.type); } catch (e) {}
+                }
+            } catch (e) {}
 
-            // propagate options/listItems
+            // Propagate list items if provided by server and choose list editor when appropriate
             if ((col.options && Array.isArray(col.options)) || (col.listItems && Array.isArray(col.listItems))) {
                 if (!cellItem.properties) cellItem.properties = {};
                 cellItem.properties.listItems = col.options || col.listItems;
+                if (!cellItem.type) cellItem.type = 'emunList';
             }
 
-            // Fallback heuristics if still undefined
+            // If server did not specify a type, default to textbox (keep client simple)
             if (!cellItem.type) {
-                try {
-                    if ((col.options && Array.isArray(col.options)) || (col.listItems && Array.isArray(col.listItems)) || col.lookup || col.foreignKey) {
-                        cellItem.type = 'emunList';
-                    } else if (ftype === 'yesno' || ftype === 'flag' || /^(is|has|can|allow)|(_is|_flag|active|enabled)$/i.test(col.data || '')) {
-                        cellItem.type = 'checkbox';
-                    } else if (/int|decimal|float|number|amount|qty|count/.test(ftype) || /(amount|count|qty|number)$/i.test(col.data || '')) {
-                        cellItem.type = 'number';
-                    } else if (/date|time/.test(ftype) || /(date|time)$/i.test(col.data || '')) {
-                        cellItem.type = 'textbox';
-                    } else {
-                        cellItem.type = 'textbox';
-                    }
-                    try { console.log('[DynamicTable] fallback-mapped field -> type', col && col.data, '->', cellItem.type); } catch (e) {}
-                } catch (e) { try { console.error('[DynamicTable] fallback mapping error', e); } catch (ee) {} }
+                cellItem.type = 'textbox';
+                try { console.log('[DynamicTable] defaulted field -> type', col && col.data, '->', cellItem.type); } catch (e) {}
             }
         } catch (e) { try { console.error('[DynamicTable] Error mapping column type', e); } catch (ee) {} }
 
@@ -5309,9 +5390,16 @@ class DynamicTable extends Table {
             // Normalize columns: ensure each column is {data, caption, width?}
             let columns = [];
             if (Array.isArray(columnsRaw) && columnsRaw.length > 0) {
+                // Preserve full column object returned by server so client can use
+                // additional metadata like `inputType`, `properties`, etc.
                 columns = columnsRaw.map(col => {
                     if (typeof col === 'string') return { data: col, caption: col };
-                    if (col && typeof col === 'object') return { data: col.data || col.name || '', caption: col.caption || col.data || col.name || '', width: col.width };
+                    if (col && typeof col === 'object') {
+                        const out = Object.assign({}, col);
+                        out.data = out.data || out.name || '';
+                        out.caption = out.caption || out.data || out.name || '';
+                        return out;
+                    }
                     return { data: '', caption: '' };
                 });
             } else {
