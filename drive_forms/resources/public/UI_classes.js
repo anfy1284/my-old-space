@@ -216,6 +216,8 @@ class UIObject {
     }
 }
 
+// DataForm relocated below (defined after Form)
+
 // Base class for form input controls: provides common label/container helpers
 class FormInput extends UIObject {
     constructor(parentElement = null, properties = {}) {
@@ -1075,6 +1077,12 @@ class Form extends UIObject {
             }
         }
 
+        // If no container explicitly provided, append form to document.body
+        // so Form.Draw() will render the form visibly by default.
+        if (typeof document !== 'undefined' && (container === undefined || container === null)) {
+            container = document.body;
+        }
+
         if (container) {
             container.appendChild(this.element);
         }
@@ -1498,6 +1506,365 @@ if (typeof window !== 'undefined') {
             }
         }, 100);
     });
+}
+
+// DataForm: specialized Form that knows how to load/render layout/data for
+// data-driven apps. This class mirrors the instance helper methods previously
+// defined on individual app forms and centralizes them here for reuse.
+class DataForm extends Form {
+    constructor(appName) {
+        super();
+        this.appName = appName || null;
+        this.controlsMap = {};
+        this._dataMap = {};
+        this._datasetId = null;
+        this.showLoading = false;
+    }
+
+    async renderLayout(contentArea = null, layout = null) {
+        if (!contentArea) contentArea = this.getContentArea();
+        const items = layout || this.layout || [];
+        for (const item of items) {
+            await this.renderItem(item, contentArea);
+        }
+    }
+
+    async renderItem(item, contentArea = null) {
+        contentArea = contentArea || this.getContentArea();
+        let element = null;
+        const properties = item.properties || {};
+        const caption = (properties && properties.noCaption) ? '' : (item.caption || '');
+
+        // Helper to create textbox-like controls (single and multiline)
+        const createTextControl = (ControlCtor) => {
+            const ctrl = new ControlCtor(contentArea, properties);
+            let val = '';
+            if (item.value !== null && item.value !== undefined) val = item.value;
+            else if (item.data && this._dataMap && Object.prototype.hasOwnProperty.call(this._dataMap, item.data)) {
+                const rec = this._dataMap[item.data];
+                val = (rec && (rec.value !== undefined)) ? rec.value : (rec && rec !== undefined ? rec : '');
+            }
+            try { if (item.properties && item.properties.__display !== undefined) { val = item.properties.__display; } } catch (e) {}
+            try { if (typeof ctrl.setText === 'function') ctrl.setText(String(val)); } catch (e) {}
+            try { if (typeof item.rows === 'number' && typeof ctrl.setRows === 'function') ctrl.setRows(item.rows); else if (properties && properties.rows && typeof ctrl.setRows === 'function') ctrl.setRows(properties.rows); } catch (e) {}
+            try { if (typeof ctrl.setCaption === 'function') ctrl.setCaption(caption); } catch (e) {}
+            ctrl.Draw(contentArea);
+            try { if (item.data && ctrl.element) { ctrl.element.dataset.field = item.data; } } catch (e) {}
+            try { if (ctrl.element) ctrl.element.style.width = '100%'; } catch (e) {}
+            if (item.name) this.controlsMap[item.name] = ctrl;
+            return ctrl;
+        };
+
+        switch (item.type) {
+            case 'number': {
+                properties.digitsOnly = true;
+            }
+            case 'textbox': {
+                createTextControl(TextBox);
+                break;
+            }
+            case 'emunList': {
+                const dataKey = item.data;
+                let val = '';
+                if (item.value !== null && item.value !== undefined) val = item.value;
+                else if (dataKey && this._dataMap && Object.prototype.hasOwnProperty.call(this._dataMap, dataKey)) {
+                    const rec = this._dataMap[dataKey];
+                    val = (rec && (rec.value !== undefined)) ? rec.value : (rec && rec !== undefined ? rec : '');
+                }
+                try { if (item.properties && item.properties.__display !== undefined) val = item.properties.__display; } catch (e) {}
+
+                let listItems = [];
+                try {
+                    if (dataKey && this._dataMap && this._dataMap[dataKey] && Array.isArray(this._dataMap[dataKey].options)) {
+                        listItems = this._dataMap[dataKey].options;
+                    } else if (Array.isArray(item.options)) {
+                        listItems = item.options;
+                    } else if (properties.listItems && Array.isArray(properties.listItems)) {
+                        listItems = properties.listItems;
+                    }
+                } catch (e) { listItems = []; }
+
+                const propClone = Object.assign({}, properties, { listMode: true, listItems: listItems, readOnly: true });
+                const ctrl = new TextBox(contentArea, propClone);
+                try { if (typeof ctrl.setText === 'function') ctrl.setText(String(val)); } catch (e) {}
+                try { if (typeof ctrl.setCaption === 'function') ctrl.setCaption(caption); } catch (e) {}
+                ctrl.Draw(contentArea);
+
+                try {
+                    if (item.data) {
+                        const fieldKey = item.data;
+                        const handler = (ev) => {
+                            try {
+                                const newVal = (typeof ctrl.getText === 'function') ? ctrl.getText() : (ctrl.element ? ctrl.element.value : undefined);
+                                if (!this._dataMap) this._dataMap = {};
+                                if (!this._dataMap[fieldKey]) this._dataMap[fieldKey] = { name: fieldKey, value: newVal };
+                                else this._dataMap[fieldKey].value = newVal;
+                            } catch (_) {}
+                        };
+                        try { if (ctrl.element && ctrl.element.addEventListener) ctrl.element.addEventListener('input', handler); } catch (_) {}
+                    }
+                } catch (_) {}
+                try { if (item.data && ctrl.element) ctrl.element.dataset.field = item.data; } catch (e) {}
+                if (item.name) this.controlsMap[item.name] = ctrl;
+                break;
+            }
+            case 'textarea': {
+                createTextControl(MultilineTextBox);
+                break;
+            }
+            case 'recordSelector': {
+                const dataKey = item.data;
+                let val = '';
+                if (item.value !== null && item.value !== undefined) val = item.value;
+                else if (dataKey && this._dataMap && Object.prototype.hasOwnProperty.call(this._dataMap, dataKey)) {
+                    const rec = this._dataMap[dataKey];
+                    if (rec && typeof rec.value === 'object' && rec.value !== null) {
+                        const disp = (rec.value && rec.value.name) || (rec.value && rec.value.id) || '';
+                        val = disp;
+                    } else {
+                        val = (rec && (rec.value !== undefined)) ? rec.value : (rec && rec !== undefined ? rec : '');
+                    }
+                }
+                try { if (item.properties && item.properties.__display !== undefined) val = item.properties.__display; } catch (e) {}
+
+                const propClone = Object.assign({}, properties || {}, { readOnly: false });
+                let ctrl = new TextBox(contentArea, propClone);
+                try { if (typeof ctrl.setText === 'function') ctrl.setText(String(val)); } catch (e) {}
+                try { if (typeof ctrl.setCaption === 'function') ctrl.setCaption(caption); } catch (e) {}
+                ctrl.Draw(contentArea);
+
+                const propClone2 = Object.assign({}, propClone);
+                if (properties && properties.selection) propClone2.selection = properties.selection;
+                propClone2.showSelectionButton = true;
+                try { if (typeof ctrl.destroy === 'function') ctrl.destroy(); } catch (_) {}
+                const ctrlSel = new TextBox(contentArea, propClone2);
+                try { if (typeof ctrlSel.setText === 'function') ctrlSel.setText(String(val)); } catch (e) {}
+                try { if (typeof ctrlSel.setCaption === 'function') ctrlSel.setCaption(caption); } catch (e) {}
+                try { ctrlSel.Draw(contentArea); } catch (e) { ctrl.Draw(contentArea); }
+                ctrl = ctrlSel;
+
+                try {
+                    if (item.data) {
+                        const fieldKey = item.data;
+                        const handler = (ev) => {
+                            try {
+                                const newVal = (typeof ctrl.getText === 'function') ? ctrl.getText() : (ctrl.element ? ctrl.element.value : undefined);
+                                if (!this._dataMap) this._dataMap = {};
+                                if (!this._dataMap[fieldKey]) this._dataMap[fieldKey] = { name: fieldKey, value: newVal };
+                                else this._dataMap[fieldKey].value = newVal;
+                            } catch (_) {}
+                        };
+                        try { if (ctrl.element && ctrl.element.addEventListener) ctrl.element.addEventListener('input', handler); } catch (_) {}
+                    }
+                } catch (_) {}
+
+                try { if (item.data && ctrl.element) ctrl.element.dataset.field = item.data; } catch (e) {}
+                if (item.name) this.controlsMap[item.name] = ctrl;
+                break;
+            }
+            case 'checkbox': {
+                const cb = new CheckBox(contentArea, properties);
+                let checked = !!item.value;
+                if ((item.value === null || item.value === undefined) && item.data && this._dataMap && Object.prototype.hasOwnProperty.call(this._dataMap, item.data)) {
+                    const rec = this._dataMap[item.data];
+                    checked = !!(rec && (rec.value !== undefined) ? rec.value : rec);
+                }
+                cb.setChecked(checked);
+                cb.setHeight(22);
+                cb.setCaption(caption);
+                cb.Draw(contentArea);
+                try { if (item.data && cb.element) cb.element.dataset.field = item.data; } catch (e) {}
+                if (item.name) this.controlsMap[item.name] = cb;
+                break;
+            }
+            case 'group': {
+                const grp = new Group(contentArea, properties);
+                grp.setCaption(caption);
+                if (item.orientation) grp.orientation = item.orientation;
+                grp.Draw(contentArea);
+                if (grp.element && item.layout && Array.isArray(item.layout)) {
+                    await this.renderLayout(grp.element, item.layout);
+                }
+                break;
+            }
+            case 'button': {
+                let btn = null;
+                try {
+                    if (typeof Button === 'function') {
+                        try { btn = new Button(contentArea, properties); } catch (e) { btn = new Button(); }
+                    }
+                } catch (e) { btn = null; }
+
+                if (!btn) {
+                    console.warn('Button control is not available');
+                    break;
+                }
+
+                try { if (typeof btn.setCaption === 'function') btn.setCaption(caption); } catch (e) {}
+                try { if (properties && properties.width && typeof btn.setWidth === 'function') btn.setWidth(properties.width); } catch (e) {}
+                try { if (properties && properties.height && typeof btn.setHeight === 'function') btn.setHeight(properties.height); } catch (e) {}
+
+                try { if (typeof btn.Draw === 'function') btn.Draw(contentArea); else if (btn.element && contentArea.appendChild) contentArea.appendChild(btn.element); } catch (e) {}
+
+                try {
+                    const action = item.action;
+                    const params = item.params || {};
+                    btn.onClick = (ev) => {
+                        try { if (action && this && typeof this.doAction === 'function') this.doAction(action, params); } catch (e) {}
+                    };
+                } catch (e) {}
+
+                try { if (item.name) this.controlsMap[item.name] = btn; } catch (e) {}
+                break;
+            }
+            case 'table': {
+                try {
+                    const tblProps = Object.assign({}, properties || {}, { columns: item.columns || [], dataKey: item.data, appForm: this });
+                    const wantsDynamic = !!(properties && (properties.dynamicTable || properties.appName || properties.tableName));
+                    if (wantsDynamic && typeof DynamicTable === 'function') {
+                        const dtConf = Object.assign({}, tblProps);
+                        if (properties && properties.appName) dtConf.appName = properties.appName;
+                        if (properties && properties.tableName) dtConf.tableName = properties.tableName;
+                        dtConf.rowHeight = dtConf.rowHeight || 25;
+                        dtConf.multiSelect = dtConf.multiSelect || false;
+                        dtConf.editable = (dtConf.editable === undefined) ? true : dtConf.editable;
+                        dtConf.showToolbar = (dtConf.showToolbar === undefined) ? true : dtConf.showToolbar;
+                        const tbl = new DynamicTable(dtConf);
+                        try { if (typeof tbl.setCaption === 'function') tbl.setCaption(caption); } catch (e) {}
+                        try { if (typeof tbl.Draw === 'function') tbl.Draw(contentArea); } catch (e) {}
+                        if (item.name) this.controlsMap[item.name] = tbl;
+                    } else {
+                        const tbl = new Table(contentArea, tblProps);
+                        try { if (typeof tbl.setCaption === 'function') tbl.setCaption(caption); } catch (e) {}
+                        try { if (typeof tbl.Draw === 'function') tbl.Draw(contentArea); } catch (e) {}
+                        if (item.name) this.controlsMap[item.name] = tbl;
+                    }
+                } catch (e) {
+                    console.error('Error creating table control', e);
+                }
+                break;
+            }
+            case 'tabs': {
+                try {
+                    let tabsCtrl = null;
+                    try { tabsCtrl = new Tabs(contentArea, { tabs: item.tabs || [], appForm: this }); } catch (e) {
+                        const TabsClass = (window.UI_Classes && window.UI_Classes.Tabs) ? window.UI_Classes.Tabs : null;
+                        if (!TabsClass) throw new Error('Tabs control is not available');
+                        tabsCtrl = new TabsClass(contentArea, { tabs: item.tabs || [], appForm: this });
+                    }
+                    try { if (typeof tabsCtrl.setCaption === 'function') tabsCtrl.setCaption(caption); } catch (e) {}
+                    try { if (typeof tabsCtrl.Draw === 'function') tabsCtrl.Draw(contentArea); } catch (e) {}
+                    if (item.name) this.controlsMap[item.name] = tabsCtrl;
+                } catch (e) {
+                    console.error('Error creating tabs control', e);
+                }
+                break;
+            }
+            default:
+                console.warn('Unknown layout item type:', item.type);
+        }
+    }
+
+    async loadData() {
+        try {
+            const d = await callServerMethod(this.appName, 'getData', {});
+            this._dataMap = {};
+            if (d && Array.isArray(d)) {
+                for (const rec of d) {
+                    if (rec && rec.name) this._dataMap[rec.name] = rec;
+                }
+            }
+        } catch (e) {
+            this._dataMap = {};
+        }
+    }
+
+    async getLayoutWithData() {
+        try {
+            const both = await callServerMethod(this.appName, 'getLayoutWithData', {});
+            return both;
+        } catch (err) {
+            throw err;
+        }
+    }
+
+    async loadLayout() {
+        try {
+            const both = await this.getLayoutWithData();
+            if (both && (Array.isArray(both.layout) || Array.isArray(both.data))) {
+                this.layout = Array.isArray(both.layout) ? both.layout : (both.layout && Array.isArray(both.layout.layout) ? both.layout.layout : []);
+                try { this._datasetId = both.datasetId || null; } catch (e) { this._datasetId = null; }
+                this._dataMap = {};
+                if (both.data && Array.isArray(both.data)) {
+                    for (const rec of both.data) {
+                        if (rec && rec.name) this._dataMap[rec.name] = rec;
+                    }
+                }
+                this.showLoading = false;
+                return;
+            }
+        } catch (err) {
+            // Combined RPC not available — fallback below
+        }
+
+        try {
+            const data = await callServerMethod(this.appName, 'getLayout', {});
+            if (data && Array.isArray(data)) {
+                this.layout = data;
+            } else if (data && Array.isArray(data.layout)) {
+                this.layout = data.layout;
+            } else {
+                this.layout = [];
+            }
+        } catch (error) {
+            console.error('Ошибка загрузки макета:', error);
+            if (error && error.message && error.message.indexOf('Method not found') !== -1) {
+                this.layout = [];
+            }
+            if (typeof showAlert === 'function') showAlert('Ошибка загрузки макета: ' + (error && error.message ? error.message : String(error)));
+        } finally {
+            this.showLoading = false;
+        }
+    }
+
+    async applyChanges(changes) {
+        const payload = { datasetId: this._datasetId || null, changes: changes };
+        try {
+            const res = await callServerMethod(this.appName, 'applyChanges', payload);
+            return res;
+        } catch (e) {
+            console.error('[DataForm] applyChanges error', e);
+            throw e;
+        }
+    }
+
+    async Draw(parent) {
+        super.Draw(parent);
+        const contentArea = this.getContentArea();
+        try { if (contentArea) contentArea.style.display = 'flex'; } catch (e) {}
+        try { if (contentArea) contentArea.style.flexDirection = 'column'; } catch (e) {}
+        try { if (contentArea) contentArea.style.padding = '10px'; } catch (e) {}
+
+        // Clear previous content and controls before re-rendering layout
+        try { if (contentArea) contentArea.innerHTML = ''; } catch (e) {}
+        try { for (const k in this.controlsMap) { if (Object.prototype.hasOwnProperty.call(this.controlsMap, k)) delete this.controlsMap[k]; } } catch (e) {}
+
+        await this.loadLayout();
+        await this.renderLayout();
+
+        try {
+            setTimeout(() => {
+                try {
+                    const selector = 'input, textarea, select, button, [tabindex]';
+                    const first = contentArea && contentArea.querySelector ? contentArea.querySelector(selector) : null;
+                    if (first && typeof first.focus === 'function') {
+                        first.focus();
+                        try { if (first.select && first.tagName && first.tagName.toLowerCase() === 'input') first.select(); } catch (e) {}
+                    }
+                } catch (e) {}
+            }, 0);
+        } catch (e) {}
+    }
 }
 
 class Button extends UIObject {
@@ -5656,5 +6023,71 @@ class DynamicTable extends Table {
             }
         } catch (e) {}
         try { if (super.data_updateParentArray) return super.data_updateParentArray(dataKey, rowIndex, colDef, newVal); } catch (e) {}
+    }
+}
+
+
+class App {
+    constructor(name, params = {}) {
+        this.name = name;
+        this.params = params || {};
+        this.caption = this.params.caption || name;
+        this.config = this.params.config || { allowMultipleInstances: false };
+    }
+
+    // Return descriptor object suitable for MySpace.register
+    getDescriptor() {
+        const self = this;
+        return {
+            config: this.config,
+            init() {
+                try { console.log('[' + self.name + '] descriptor initialized'); } catch (e) {}
+            },
+            async createInstance(params) {
+                return await self.createInstance(params || {});
+            }
+        };
+    }
+
+    // Helper to generate instance id
+    generateInstanceId() {
+        return this.name + '-' + Date.now() + '-' + Math.floor(Math.random() * 10000);
+    }
+
+    // Create a new app instance. By default this returns a minimal instance
+    // skeleton without creating any `Form`. Applications that need a form
+    // should override `createInstance` or replace it on the App instance.
+    async createInstance(params) {
+        const instanceId = this.generateInstanceId();
+
+        const instance = {
+            id: instanceId,
+            appName: this.name,
+            form: null,
+            // No-op onOpen by default — apps should provide behavior if needed
+            onOpen: (openParams) => {
+                // intentionally empty
+            },
+            onAction: (action, actionParams) => {
+                // intentionally empty
+            },
+            destroy: () => {
+                // intentionally empty
+            }
+        };
+
+        // Auto-open hint for apps that want it
+        try { if (params && (params.dbTable || params.table || params.open)) instance.onOpen(params); } catch (e) {}
+
+        return instance;
+    }
+
+    // Convenience: register this app with MySpace
+    register() {
+        try {
+            if (typeof window !== 'undefined' && window.MySpace && typeof window.MySpace.register === 'function') {
+                window.MySpace.register(this.name, this.getDescriptor());
+            }
+        } catch (e) { console.error(e); }
     }
 }

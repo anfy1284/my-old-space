@@ -198,87 +198,92 @@ try {
     process.exit(1);
 }
 
-// Создаем client.js с пустой формой
+// Создаем client.js с шаблоном, использующим базовый `App`
 try {
     console.log('📝 Создание resources/public/client.js...');
-    
+
     const clientContent = `/**
  * ${appName} Application - Client Side (generated)
+ *
+ * This scaffold uses the framework ` + 'App' + ` helper. Apps that need a UI
+ * should override ` + 'createInstance' + ` and create their own ` + 'Form' + ` / ` + 'DataForm' + `.
  */
 
 try {
     (function() {
         const APP_NAME = '${appName}';
 
-        const descriptor = {
-            config: { allowMultipleInstances: false },
-            init() {
-                console.log('[' + APP_NAME + '] descriptor init');
-            },
-            async createInstance(params) {
-                const instanceId = APP_NAME + '-' + Date.now() + '-' + Math.floor(Math.random() * 10000);
-                const container = document.createElement('div');
-                container.dataset.instanceId = instanceId;
-                document.body.appendChild(container);
+        // Create App helper and override instance creation when a form is needed
+        const app = new App(APP_NAME, { config: { allowMultipleInstances: false } });
 
-                const appForm = new Form();
-                appForm.setTitle(APP_NAME);
-                appForm.setWidth(800);
-                appForm.setHeight(600);
-                appForm.setX(100);
-                appForm.setY(100);
+        // Override createInstance to create a DataForm for this app only
+        app.createInstance = async function(params) {
+            const instanceId = this.generateInstanceId();
+            const container = null; // no global container by default
 
-                const originalDraw = appForm.Draw.bind(appForm);
-                appForm.Draw = function(parent) {
-                    originalDraw(parent);
+            const appForm = new DataForm(APP_NAME);
+            appForm.setTitle(APP_NAME);
+            appForm.setWidth(800);
+            appForm.setHeight(600);
+            appForm.setX(100);
+            appForm.setY(100);
+
+            // Example Draw extension — apps can customize their layout instead
+            const originalDraw = typeof appForm.Draw === 'function' ? appForm.Draw.bind(appForm) : null;
+            appForm.Draw = function(parent) {
+                if (originalDraw) originalDraw(parent);
+                try {
                     const contentArea = this.getContentArea();
-                    contentArea.style.display = 'flex';
-                    contentArea.style.flexDirection = 'column';
-                    contentArea.style.padding = '10px';
-                    const welcomeText = document.createElement('div');
-                    welcomeText.textContent = 'Добро пожаловать в приложение ' + APP_NAME + '!';
-                    contentArea.appendChild(welcomeText);
-                };
+                    if (contentArea) {
+                        contentArea.style.display = 'flex';
+                        contentArea.style.flexDirection = 'column';
+                        contentArea.style.padding = '10px';
+                        const welcomeText = document.createElement('div');
+                        welcomeText.textContent = 'Добро пожаловать в приложение ' + APP_NAME + '!';
+                        contentArea.appendChild(welcomeText);
+                    }
+                } catch (e) { /* ignore */ }
+            };
 
-                appForm.doAction = function(action, params) {
-                    if (action === 'open') appForm.Draw(container);
-                };
+            const instance = {
+                id: instanceId,
+                appName: APP_NAME,
+                container,
+                form: appForm,
+                onOpen(openParams) {
+                    const tableName = openParams && (openParams.dbTable || openParams.table);
+                    if (tableName) appForm.dbTable = tableName;
+                    try { appForm.Draw(); } catch (e) { console.error(e); }
+                },
+                onAction(action, params) {
+                    try { if (typeof appForm.doAction === 'function') appForm.doAction(action, params); } catch (e) { console.error(e); }
+                },
+                destroy() {
+                    try { if (typeof appForm.destroy === 'function') appForm.destroy(); } catch (e) {}
+                }
+            };
 
-                const instance = {
-                    id: instanceId,
-                    appName: APP_NAME,
-                    container,
-                    onOpen(params) { appForm.doAction('open', params); },
-                    onAction(action, params) { appForm.doAction(action, params); },
-                    destroy() { try { if (typeof appForm.destroy === 'function') appForm.destroy(); } catch (e) {} container.remove(); }
-                };
-
-                return instance;
-            }
+            if (params && (params.dbTable || params.table)) instance.onOpen(params);
+            return instance;
         };
 
-        if (window.MySpace && typeof window.MySpace.register === 'function') {
-            window.MySpace.register(APP_NAME, descriptor);
-        } else {
-            console.warn('window.MySpace.register not available — descriptor defined locally');
-            window.MySpace = window.MySpace || { register: function() {}, open: async function(){} };
-            window.MySpace.register(APP_NAME, descriptor);
-        }
+        try { app.register(); } catch (e) { console.error('Failed to register app descriptor', e); }
 
     })();
+
 } catch (error) {
     console.error('[${appName}] Error initializing client descriptor:', error);
 }
 `;
-    
+
     fs.writeFileSync(
         path.join(appDir, 'resources', 'public', 'client.js'),
         clientContent,
         'utf8'
     );
-    
+
     console.log('   ✓ resources/public/client.js создан');
-    
+
 } catch (error) {
     console.error('❌ Ошибка при создании client.js:', error.message);
     process.exit(1);
