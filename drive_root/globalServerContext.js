@@ -561,6 +561,32 @@ module.exports.getProjectRoot = function () {
     return projectRoot;
 };
 
+/**
+ * Find a model name by its table name (or by model name), case-insensitive.
+ * Returns the model name (as present in modelsDB) or null if not found.
+ */
+module.exports.getModelNameForTable = function (tableName) {
+    if (!tableName) return null;
+    // Exact match by model name
+    if (modelsDB[tableName]) return tableName;
+
+    // Search by tableName property in models
+    const lower = tableName.toLowerCase();
+    for (const m of Object.keys(modelsDB)) {
+        try {
+            const model = modelsDB[m];
+            if (!model) continue;
+            const tname = (model.tableName || '').toString().toLowerCase();
+            if (tname === lower) return m;
+            if (m.toLowerCase() === lower) return m;
+        } catch (e) {
+            continue;
+        }
+    }
+
+    return null;
+};
+
 // --- Dynamic Table Support Functions ---
 
 /**

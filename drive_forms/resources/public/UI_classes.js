@@ -2517,7 +2517,7 @@ class TextBox extends FormInput {
                                         const limit = (typeof src.limit === 'number' && src.limit > 0) ? src.limit : (src.limit ? (src.limit | 0) : 10);
                                         // Determine RPC target app. If `appName` provided, use it; otherwise
                                         // fall back to using `tableName` as app (legacy behavior).
-                                        const rpcApp = appName || tableName;
+                                        const rpcApp = appName;
                                         if (rpcApp && tableName) {
                                             try {
                                                 const resp = await callServerMethod(rpcApp, 'getDynamicTableData', { tableName: tableName, firstRow: 0, visibleRows: limit });
@@ -5308,7 +5308,35 @@ class Table extends UIObject {
                 if (!cellItem.type) cellItem.type = 'emunList';
             }
 
-            // If server did not specify a type, default to textbox (keep client simple)
+            /*
+            // If server provided a DB-style type (INTEGER/STRING/BOOLEAN/etc), map it to client input types
+            try {
+                const t = (cellItem.type || '').toString().toUpperCase();
+                if (t === 'INTEGER' || t === 'INT' || t === 'NUMBER' || t === 'BIGINT') cellItem.type = 'number';
+                else if (t === 'BOOLEAN' || t === 'BOOL') cellItem.type = 'checkbox';
+                else if (t === 'DATE' || t === 'DATEONLY' || t === 'DATETIME') cellItem.type = 'date';
+                else if (t === 'STRING' || t === 'TEXT' || t === 'CHAR' || t === 'VARCHAR') cellItem.type = 'textbox';
+                // leave enums and custom inputType values as-is
+            } catch (e) {}
+
+            // If server provided foreignKey metadata but did not set inputType,
+            // prefer rendering a record selector (so DynamicTable cells get selection button)
+            try {
+                if ((!cellItem.type || cellItem.type === 'textbox') && col && col.foreignKey) {
+                    cellItem.type = 'recordSelector';
+                    const fk = col.foreignKey || {};
+                    cellItem.properties = cellItem.properties || {};
+                    cellItem.properties.selection = { table: fk.table, idField: fk.field || 'id', displayField: fk.displayField || 'name' };
+                    cellItem.properties.showSelectionButton = true;
+                    cellItem.properties.listMode = true;
+                    // Try to prefer explicit app hint from column properties if present, otherwise fallback to table name
+                    const rpcApp = (col.properties && (col.properties.app || col.properties.appName)) || col.app || fk.table;
+                    cellItem.properties.listSource = { app: rpcApp, table: fk.table, idField: fk.field || 'id', displayField: fk.displayField || 'name', limit: 50 };
+                }
+            } catch (e) {}
+            */
+
+            // If server did not specify a type (after mapping), default to textbox (keep client simple)
             if (!cellItem.type) {
                 cellItem.type = 'textbox';
                 try { console.log('[DynamicTable] defaulted field -> type', col && col.data, '->', cellItem.type); } catch (e) {}

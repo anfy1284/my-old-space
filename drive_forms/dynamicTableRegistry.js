@@ -60,7 +60,20 @@ function registerDynamicTableMethods(appName, config = {}) {
             }
 
             // Маппинг таблицы на модель
-            const modelName = tables[tableName];
+            let modelName = tables[tableName];
+            // Fallback: try to resolve model name by table name from global models (handles init-order issues)
+            if (!modelName) {
+                try {
+                    const resolved = globalServerContext.getModelNameForTable(tableName);
+                    if (resolved) {
+                        modelName = resolved;
+                        console.log(`[${appName}/getDynamicTableData] Resolved table '${tableName}' -> model '${modelName}' via global lookup`);
+                    }
+                } catch (e) {
+                    // ignore and throw below
+                }
+            }
+
             if (!modelName) {
                 throw new Error('Unknown table: ' + tableName);
             }
