@@ -131,6 +131,50 @@ function handleRequest(req, res, appDir, appAlias) {
 	console.log('[drive_forms/handleRequest] Request:', req.method, req.url, 'appAlias:', appAlias);
 	try {
 		// --- Endpoint for GET requests with parameters (for SSE) - CHECK FIRST ---
+		// --- Global SSE endpoint for session-scoped events (one EventSource per session) ---
+		if (req.method === 'GET' && req.url === `/${appAlias}/events`) {
+			// Extract sessionID from cookie
+			let sessionID = null;
+			if (req.headers && req.headers.cookie) {
+				const match = req.headers.cookie.match(/(?:^|; )sessionID=([^;]+)/);
+				if (match) sessionID = decodeURIComponent(match[1]);
+			}
+			// Verify user
+			globalRoot.getUserBySessionID(sessionID).then(user => {
+				if (!user) {
+					res.writeHead(401, { 'Content-Type': 'application/json' });
+					res.end(JSON.stringify({ error: 'User not authorized' }));
+					return;
+				}
+				res.writeHead(200, {
+					'Content-Type': 'text/event-stream',
+					'Cache-Control': 'no-cache',
+					'Connection': 'keep-alive',
+					'Access-Control-Allow-Origin': '*'
+				});
+
+				if (!global._sessionSseClients) global._sessionSseClients = new Map();
+				if (!global._sessionSseClients.has(sessionID)) global._sessionSseClients.set(sessionID, new Set());
+				const set = global._sessionSseClients.get(sessionID);
+				const clientId = Math.random().toString(36).substr(2, 9);
+				const clientInfo = { res, clientId };
+				set.add(clientInfo);
+				console.log(`[drive_forms/events] session SSE connected session=${sessionID} user=${user.id} clientId=${clientId} total=${set.size}`);
+				res.write(`data: ${JSON.stringify({ type: 'connected', clientId })}\n\n`);
+
+				req.on('close', () => {
+					try {
+						set.delete(clientInfo);
+						console.log(`[drive_forms/events] session SSE disconnected session=${sessionID} clientId=${clientId} remaining=${set.size}`);
+						if (set.size === 0) global._sessionSseClients.delete(sessionID);
+					} catch (e) { console.error('[drive_forms/events] error on close handler:', e); }
+				});
+			}).catch(e => {
+				res.writeHead(500, { 'Content-Type': 'application/json' });
+				res.end(JSON.stringify({ error: e.message }));
+			});
+			return;
+		}
 		if (req.method === 'GET' && req.url.startsWith(`/${appAlias}/`) && !req.url.startsWith(`/${appAlias}/res/`) && req.url !== `/${appAlias}/loadApps`) {
 			const urlObj = new URL(req.url, `http://${req.headers.host}`);
 			const pathParts = urlObj.pathname.split('/').filter(Boolean);

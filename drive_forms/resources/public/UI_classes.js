@@ -5906,17 +5906,92 @@ class DynamicTable extends Table {
             }
         } catch (e) {}
 
-        const sharedKey = `${this.appName}::${this.tableName}`;
-        this._sseSharedKey = sharedKey;
+        // Try session-scoped global SSE first (one EventSource per session)
+        const sessionSharedKey = `__session__events`;
+        const perTableSharedKey = `${this.appName}::${this.tableName}`;
+        this._sseSharedKey = perTableSharedKey;
 
+        // First try session-level SSE
+        try {
+            const existingSession = (typeof window !== 'undefined' && window._dynamicTableEventSources) ? window._dynamicTableEventSources.get(sessionSharedKey) : null;
+            if (existingSession && existingSession.es) {
+                this.eventSource = existingSession.es;
+                this._sseSharedKey = sessionSharedKey;
+                const subs = (typeof window !== 'undefined' && window._dynamicTableSubscribers) ? (window._dynamicTableSubscribers.get(sessionSharedKey) || new Set()) : new Set();
+                subs.add(this);
+                if (typeof window !== 'undefined' && window._dynamicTableSubscribers) window._dynamicTableSubscribers.set(sessionSharedKey, subs);
+                console.log('[DynamicTable] reused session SSE for', this.appName, this.tableName, 'subscribers=', subs.size);
+                // fall through to attach no new handlers (shared ES already has onmessage attached)
+            } else {
+                // Try to open a new session-scoped EventSource
+                const sessionUrl = `/app/events`;
+                console.log('[DynamicTable] attempting session SSE to', sessionUrl);
+                try {
+                    const ses = new EventSource(sessionUrl);
+                    // register
+                    if (typeof window !== 'undefined') {
+                        window._dynamicTableEventSources.set(sessionSharedKey, { es: ses });
+                        const subs = window._dynamicTableSubscribers.get(sessionSharedKey) || new Set();
+                        subs.add(this);
+                        window._dynamicTableSubscribers.set(sessionSharedKey, subs);
+                    }
+                    this.eventSource = ses;
+                    this._sseSharedKey = sessionSharedKey;
+
+                    ses.onopen = () => {
+                        console.log('[DynamicTable] session SSE connected for', this.appName, this.tableName);
+                    };
+
+                    ses.onmessage = (event) => {
+                        try {
+                            const d = JSON.parse(event.data);
+                            if (d && d.type === 'dataChanged') {
+                                // Only react if message matches this table
+                                if (d.app === this.appName && d.tableName === this.tableName) {
+                                    try { const subs = window._dynamicTableSubscribers.get(sessionSharedKey); if (subs) subs.forEach(sub => { try { sub.dataCache = {}; } catch(e){}; try { if (typeof sub.refresh === 'function') sub.refresh(); } catch(e){} }); } catch(e){}
+                                }
+                            }
+                        } catch (e) { console.error('[DynamicTable] session SSE parse error', e); }
+                    };
+
+                    ses.onerror = () => {
+                        console.warn('[DynamicTable] session SSE error/closed for', this.appName, this.tableName);
+                        try { ses.close(); } catch (e) {}
+                        // cleanup registry if needed
+                        try {
+                            const subs = window._dynamicTableSubscribers.get(sessionSharedKey);
+                            if (subs && subs.delete) subs.delete(this);
+                            const remaining = subs ? subs.size : 0;
+                            if (remaining === 0) {
+                                try { window._dynamicTableEventSources.delete(sessionSharedKey); } catch(e){}
+                            }
+                        } catch (e) {}
+                        // fallback to per-table SSE
+                        this._sseSharedKey = perTableSharedKey;
+                        try { if (typeof this.connectSSE === 'function') { /* will not re-enter */ } } catch(e){}
+                    };
+                } catch (e) {
+                    console.warn('[DynamicTable] session SSE failed, will fallback to per-table SSE', e);
+                }
+            }
+        } catch (e) { console.warn('[DynamicTable] session SSE init error', e); }
+
+        // If session SSE already attached and in registry, we don't need to create per-table ES
+        const activeShared = (typeof window !== 'undefined' && window._dynamicTableEventSources) ? window._dynamicTableEventSources.get(this._sseSharedKey) : null;
+        if (activeShared && activeShared.es && this._sseSharedKey === sessionSharedKey) {
+            // already handled via session ES
+            return;
+        }
+
+        // Fallback: per-table EventSource
         try {
             // Reuse existing shared EventSource if present
-            const existing = (typeof window !== 'undefined' && window._dynamicTableEventSources) ? window._dynamicTableEventSources.get(sharedKey) : null;
+            const existing = (typeof window !== 'undefined' && window._dynamicTableEventSources) ? window._dynamicTableEventSources.get(perTableSharedKey) : null;
             if (existing && existing.es) {
                 this.eventSource = existing.es;
-                const subs = (typeof window !== 'undefined' && window._dynamicTableSubscribers) ? (window._dynamicTableSubscribers.get(sharedKey) || new Set()) : new Set();
+                const subs = (typeof window !== 'undefined' && window._dynamicTableSubscribers) ? (window._dynamicTableSubscribers.get(perTableSharedKey) || new Set()) : new Set();
                 subs.add(this);
-                if (typeof window !== 'undefined' && window._dynamicTableSubscribers) window._dynamicTableSubscribers.set(sharedKey, subs);
+                if (typeof window !== 'undefined' && window._dynamicTableSubscribers) window._dynamicTableSubscribers.set(perTableSharedKey, subs);
                 console.log('[DynamicTable] reused shared SSE for', this.appName, this.tableName, 'subscribers=', subs.size);
                 return;
             }
@@ -5929,10 +6004,10 @@ class DynamicTable extends Table {
         // Register shared event source and subscriber set
         try {
             if (typeof window !== 'undefined') {
-                window._dynamicTableEventSources.set(sharedKey, { es: es });
-                const subs = window._dynamicTableSubscribers.get(sharedKey) || new Set();
+                window._dynamicTableEventSources.set(perTableSharedKey, { es: es });
+                const subs = window._dynamicTableSubscribers.get(perTableSharedKey) || new Set();
                 subs.add(this);
-                window._dynamicTableSubscribers.set(sharedKey, subs);
+                window._dynamicTableSubscribers.set(perTableSharedKey, subs);
             }
         } catch (e) {}
 

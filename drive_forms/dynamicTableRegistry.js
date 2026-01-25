@@ -296,29 +296,56 @@ function registerDynamicTableMethods(appName, config = {}) {
          */
         notifyTableChange(tableName, action, rowId, rowData = null) {
             if (!appSseClients.has(tableName)) {
-                return;
+                // still notify session-scoped SSE clients if present
+                // (fall through to session clients below)
             }
 
             const tableClients = appSseClients.get(tableName);
-            const message = JSON.stringify({
+            const messageObj = {
                 type: 'dataChanged',
+                app: appName,
                 tableName,
                 action,
                 rowId,
                 rowData
-            });
+            };
+            const message = JSON.stringify(messageObj);
 
             const deadClients = [];
-            tableClients.forEach(client => {
-                try {
-                    client.res.write(`data: ${message}\n\n`);
-                } catch (error) {
-                    console.error(`[${appName}/notifyTableChange] Error sending to client:`, error.message);
-                    deadClients.push(client);
-                }
-            });
+            if (tableClients) {
+                tableClients.forEach(client => {
+                    try {
+                        client.res.write(`data: ${message}\n\n`);
+                    } catch (error) {
+                        console.error(`[${appName}/notifyTableChange] Error sending to client:`, error.message);
+                        deadClients.push(client);
+                    }
+                });
+                deadClients.forEach(client => tableClients.delete(client));
+            }
 
-            deadClients.forEach(client => tableClients.delete(client));
+            // Broadcast to session-scoped SSE clients (one EventSource per session)
+            try {
+                if (global._sessionSseClients) {
+                    // Iterate over all sessions and send event to each connected session client
+                    for (const [sessionID, set] of global._sessionSseClients.entries()) {
+                        const sessionMsg = JSON.stringify(messageObj);
+                        const dead = [];
+                        set.forEach(client => {
+                            try {
+                                client.res.write(`data: ${sessionMsg}\n\n`);
+                            } catch (e) {
+                                console.error(`[${appName}/notifyTableChange] Error sending to session client:`, e.message);
+                                dead.push(client);
+                            }
+                        });
+                        dead.forEach(c => set.delete(c));
+                        if (set.size === 0) global._sessionSseClients.delete(sessionID);
+                    }
+                }
+            } catch (e) {
+                console.error(`[${appName}/notifyTableChange] Error broadcasting to session SSE clients:`, e.message);
+            }
         },
 
         /**
