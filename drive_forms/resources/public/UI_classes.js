@@ -559,6 +559,21 @@ class Form extends UIObject {
         return this.contentArea;
     }
 
+    // Clean up form and child controls (invoke destroy on known children)
+    destroy() {
+        try {
+            // If the form has a DynamicTable or other control assigned to common properties, destroy them
+            try { if (this.table && typeof this.table.destroy === 'function') this.table.destroy(); } catch (e) {}
+            try { if (this._child && typeof this._child.destroy === 'function') this._child.destroy(); } catch (e) {}
+        } catch (e) {}
+
+        try {
+            if (UIObject && UIObject.prototype && typeof UIObject.prototype.destroy === 'function') {
+                UIObject.prototype.destroy.call(this);
+            }
+        } catch (e) {}
+    }
+
     setModal(modal) {
         this.isModal = modal;
         if (this.element) {
@@ -676,14 +691,17 @@ class Form extends UIObject {
 
             // Asynchronously load config and update colors if not already loaded
             UIObject.loadClientConfig().then(cfg => {
-                const finalColor = UIObject.getClientConfigValue('defaultColor', bgColor);
-                if (finalColor !== bgColor) {
-                    this.element.style.backgroundColor = finalColor;
-                    this.element.style.borderTop = `2px solid ${UIObject.brightenColor(finalColor, 60)}`;
-                    this.element.style.borderLeft = `2px solid ${UIObject.brightenColor(finalColor, 60)}`;
-                    this.element.style.borderRight = `2px solid ${UIObject.brightenColor(finalColor, -60)}`;
-                    this.element.style.borderBottom = `2px solid ${UIObject.brightenColor(finalColor, -60)}`;
-                }
+                try {
+                    if (!this.element) return;
+                    const finalColor = UIObject.getClientConfigValue('defaultColor', bgColor);
+                    if (finalColor !== bgColor) {
+                        this.element.style.backgroundColor = finalColor;
+                        this.element.style.borderTop = `2px solid ${UIObject.brightenColor(finalColor, 60)}`;
+                        this.element.style.borderLeft = `2px solid ${UIObject.brightenColor(finalColor, 60)}`;
+                        this.element.style.borderRight = `2px solid ${UIObject.brightenColor(finalColor, -60)}`;
+                        this.element.style.borderBottom = `2px solid ${UIObject.brightenColor(finalColor, -60)}`;
+                    }
+                } catch (e) {}
             });
 
             // Create title bar (initially inactive - dark gray)
@@ -815,10 +833,13 @@ class Form extends UIObject {
 
             // Update button colors after loading client_config (if not already loaded)
             UIObject.loadClientConfig().then(() => {
-                const base = UIObject.getClientConfigValue('defaultColor', initialBg);
-                applyTitleButtonColors(btnMinimize, base);
-                applyTitleButtonColors(btnMaximize, base);
-                applyTitleButtonColors(btnClose, base);
+                try {
+                    if (!this.element) return;
+                    const base = UIObject.getClientConfigValue('defaultColor', initialBg);
+                    applyTitleButtonColors(btnMinimize, base);
+                    applyTitleButtonColors(btnMaximize, base);
+                    applyTitleButtonColors(btnClose, base);
+                } catch (e) {}
             });
 
             // Handlers
@@ -1164,6 +1185,7 @@ class Form extends UIObject {
     }
 
     close() {
+        try { if (typeof this.destroy === 'function') this.destroy(); } catch (e) {}
         if (this.modalOverlay) {
             this.modalOverlay.remove();
             this.modalOverlay = null;
@@ -2052,14 +2074,17 @@ class Button extends UIObject {
 
             // Load config and update colors if needed
             UIObject.loadClientConfig().then(() => {
-                const base = UIObject.getClientConfigValue('defaultColor', btnBase);
-                const light = UIObject.brightenColor(base, 60);
-                const dark = UIObject.brightenColor(base, -60);
-                this.element.style.backgroundColor = base;
-                this.element.style.borderTop = `2px solid ${light}`;
-                this.element.style.borderLeft = `2px solid ${light}`;
-                this.element.style.borderRight = `2px solid ${dark}`;
-                this.element.style.borderBottom = `2px solid ${dark}`;
+                try {
+                    if (!this.element) return;
+                    const base = UIObject.getClientConfigValue('defaultColor', btnBase);
+                    const light = UIObject.brightenColor(base, 60);
+                    const dark = UIObject.brightenColor(base, -60);
+                    this.element.style.backgroundColor = base;
+                    this.element.style.borderTop = `2px solid ${light}`;
+                    this.element.style.borderLeft = `2px solid ${light}`;
+                    this.element.style.borderRight = `2px solid ${dark}`;
+                    this.element.style.borderBottom = `2px solid ${dark}`;
+                } catch (e) {}
             });
 
             // Press effect
@@ -2422,15 +2447,13 @@ class TextBox extends FormInput {
 
             // Load config and update if needed
             UIObject.loadClientConfig().then(() => {
-                const base = UIObject.getClientConfigValue('defaultColor', tbBase);
-                const light = UIObject.brightenColor(base, 60);
-                const dark = UIObject.brightenColor(base, -60);
-                this.element.style.backgroundColor = '#ffffff';
-                // Keep input borders controlled by the container; skip updating element borders
-                // this.element.style.borderTop = `2px solid ${dark}`;
-                // this.element.style.borderLeft = `2px solid ${dark}`;
-                // this.element.style.borderRight = `2px solid ${light}`;
-                // this.element.style.borderBottom = `2px solid ${light}`;
+                try {
+                    if (!this.element) return;
+                    const base = UIObject.getClientConfigValue('defaultColor', tbBase);
+                    const light = UIObject.brightenColor(base, 60);
+                    const dark = UIObject.brightenColor(base, -60);
+                    this.element.style.backgroundColor = '#ffffff';
+                } catch (e) {}
             });
 
             // If listMode is enabled, add a small Win95-style button at right to open prepared list
@@ -2501,42 +2524,7 @@ class TextBox extends FormInput {
                          */
                         this.inputContainer.appendChild(this._listBtn);
 
-                        // If listMode is enabled and a listSource is provided, attempt to preload first N rows
-                        try {
-                            (async () => {
-                                try {
-                                    if (this.listMode && this.listSource && typeof callServerMethod === 'function') {
-                                        const src = this.listSource || {};
-                                        // Support both legacy and explicit app/table specification.
-                                        // Preferred: { app: 'organizations', table: 'accommodation_types', ... }
-                                        // Legacy: { table: 'organizations', ... } where `table` was also the app name.
-                                        const appName = src.app || src.appName || null;
-                                        const tableName = src.tableName || src.table || null;
-                                        const idField = src.idField || 'id';
-                                        const displayField = src.displayField || 'name';
-                                        const limit = (typeof src.limit === 'number' && src.limit > 0) ? src.limit : (src.limit ? (src.limit | 0) : 10);
-                                        // Determine RPC target app. If `appName` provided, use it; otherwise
-                                        // fall back to using `tableName` as app (legacy behavior).
-                                        const rpcApp = appName;
-                                        if (rpcApp && tableName) {
-                                            try {
-                                                const resp = await callServerMethod(rpcApp, 'getLookupList', { tableName: tableName, firstRow: 0, visibleRows: limit });
-                                                const rows = resp && (resp.rows || resp.data || resp.items) ? (resp.rows || resp.data || resp.items) : [];
-                                                // Map rows to listItems: { value: id, caption: displayField }
-                                                this.listItems = (rows || []).slice(0, limit).map(r => {
-                                                    const value = (r && (r[idField] !== undefined)) ? r[idField] : (r && r.id);
-                                                    const caption = (r && (r[displayField] !== undefined)) ? r[displayField] : (r && r.name) || (value !== undefined ? String(value) : '');
-                                                    return { value: value, caption: caption };
-                                                });
-                                            } catch (e) {
-                                                // ignore fetch errors
-                                                try { console.error('TextBox: failed to preload listSource', e); } catch(_){ }
-                                            }
-                                        }
-                                    }
-                                } catch (_) {}
-                            })();
-                        } catch (e) {}
+                        // Removed automatic preload — list must be provided from outside
                     }
 
                     // implement open/close/toggle helpers on the instance
@@ -5679,6 +5667,8 @@ class DynamicTable extends Table {
         this.firstVisibleRow = 0;
         this.editSessionId = null;
         this.eventSource = null;
+        this._sseReconnectTimer = null;
+        this._sseDestroyed = false;
     }
 
     // Override Draw to ensure data subscription happens before base drawing
@@ -5804,6 +5794,63 @@ class DynamicTable extends Table {
                     try { console.log('[DynamicTable.loadData] inferred columns from first row:', columns.map(c=>c.data)); } catch(e) {}
                 }
             }
+            // Preload lookup lists once per column (avoid per-row lookups)
+            try {
+                if (typeof callServerMethod === 'function') {
+                    const lookupKeyToPromise = new Map();
+                    const pendingAssignments = [];
+
+                    for (let i = 0; i < columns.length; i++) {
+                        const col = columns[i] || {};
+                        const ls = (col.properties && col.properties.listSource) ? col.properties.listSource : null;
+                        if (ls) {
+                            const rpcApp = ls.app || ls.appName || this.appName || null;
+                            const table = ls.table || ls.tableName || null;
+                            if (rpcApp && table) {
+                                const idField = ls.idField || 'id';
+                                const displayField = ls.displayField || 'name';
+                                const limit = (typeof ls.limit === 'number' && ls.limit > 0) ? ls.limit : (ls.limit ? (ls.limit|0) : 100);
+                                const key = `${rpcApp}::${table}::${idField}::${displayField}::${limit}`;
+                                if (!lookupKeyToPromise.has(key)) {
+                                    const p = (async () => {
+                                        try {
+                                            const resp = await callServerMethod(rpcApp, 'getLookupList', { tableName: table, firstRow: 0, visibleRows: limit });
+                                            const rawRows = resp && (resp.rows || resp.data || resp.items) ? (resp.rows || resp.data || resp.items) : [];
+                                            return (rawRows || []).map(r => {
+                                                const val = (r && (r[idField] !== undefined)) ? r[idField] : (r && r.id);
+                                                const cap = (r && (r.display !== undefined)) ? r.display : ((r && (r[displayField] !== undefined)) ? r[displayField] : ((r && r.name) || (val !== undefined ? String(val) : '')));
+                                                return { value: val, caption: cap };
+                                            });
+                                        } catch (e) {
+                                            try { console.error('[DynamicTable] preload getLookupList failed for', rpcApp, table, e); } catch(_){}
+                                            return [];
+                                        }
+                                    })();
+                                    lookupKeyToPromise.set(key, p);
+                                }
+                                pendingAssignments.push({ colIndex: i, key });
+                            }
+                        }
+                    }
+
+                    // Await all distinct lookups
+                    await Promise.all(Array.from(lookupKeyToPromise.values()));
+
+                    // Assign lists to corresponding columns
+                    for (const pa of pendingAssignments) {
+                        try {
+                            const list = await lookupKeyToPromise.get(pa.key);
+                            if (!columns[pa.colIndex].properties) columns[pa.colIndex].properties = {};
+                            columns[pa.colIndex].listItems = list;
+                            columns[pa.colIndex].properties.listItems = list;
+                        } catch (e) {
+                            try { console.error('[DynamicTable] assign preload list failed', e); } catch(_){}
+                        }
+                    }
+                }
+            } catch (e) {
+                try { console.error('[DynamicTable.loadData] preload lookup lists error', e); } catch(_){}
+            }
             try { console.log('[DynamicTable.loadData] normalized columns count=', columns.length, 'captions=', columns.map(c=>c.caption).slice(0,50)); } catch(e) {}
             const rangeFrom = (data.range && (typeof data.range.from === 'number')) ? data.range.from : (typeof firstRow === 'number' ? firstRow : 0);
 
@@ -5848,29 +5895,129 @@ class DynamicTable extends Table {
     connectSSE() {
         if (!this.appName || !this.tableName) return;
 
-        const url = `/app/${this.appName}/subscribeToTable?tableName=${this.tableName}`;
-        this.eventSource = new EventSource(url);
+        // If destroyed or scheduled to be destroyed, do not (re)connect
+        if (this._sseDestroyed) return;
 
-        this.eventSource.onopen = () => {
-            console.log('[DynamicTable] SSE connected');
+        // Ensure global registries
+        try {
+            if (typeof window !== 'undefined') {
+                window._dynamicTableEventSources = window._dynamicTableEventSources || new Map();
+                window._dynamicTableSubscribers = window._dynamicTableSubscribers || new Map();
+            }
+        } catch (e) {}
+
+        const sharedKey = `${this.appName}::${this.tableName}`;
+        this._sseSharedKey = sharedKey;
+
+        try {
+            // Reuse existing shared EventSource if present
+            const existing = (typeof window !== 'undefined' && window._dynamicTableEventSources) ? window._dynamicTableEventSources.get(sharedKey) : null;
+            if (existing && existing.es) {
+                this.eventSource = existing.es;
+                const subs = (typeof window !== 'undefined' && window._dynamicTableSubscribers) ? (window._dynamicTableSubscribers.get(sharedKey) || new Set()) : new Set();
+                subs.add(this);
+                if (typeof window !== 'undefined' && window._dynamicTableSubscribers) window._dynamicTableSubscribers.set(sharedKey, subs);
+                console.log('[DynamicTable] reused shared SSE for', this.appName, this.tableName, 'subscribers=', subs.size);
+                return;
+            }
+        } catch (e) {}
+
+        const url = `/app/${this.appName}/subscribeToTable?tableName=${this.tableName}`;
+        console.log('[DynamicTable] connecting SSE to', url);
+        const es = new EventSource(url);
+
+        // Register shared event source and subscriber set
+        try {
+            if (typeof window !== 'undefined') {
+                window._dynamicTableEventSources.set(sharedKey, { es: es });
+                const subs = window._dynamicTableSubscribers.get(sharedKey) || new Set();
+                subs.add(this);
+                window._dynamicTableSubscribers.set(sharedKey, subs);
+            }
+        } catch (e) {}
+
+        this.eventSource = es;
+
+        es.onopen = () => {
+            console.log('[DynamicTable] SSE connected for', this.appName, this.tableName);
         };
 
-        this.eventSource.onmessage = (event) => {
+        es.onmessage = (event) => {
             try {
                 const d = JSON.parse(event.data);
                 if (d && d.type === 'dataChanged') {
-                    // Consumer can call loadData or handle update when needed
-                    this.dataCache = {};
+                    // Notify all subscribers for this table
+                    try {
+                        const subs = (typeof window !== 'undefined' && window._dynamicTableSubscribers) ? window._dynamicTableSubscribers.get(sharedKey) : null;
+                        if (subs && subs.size > 0) {
+                            subs.forEach(sub => {
+                                try { sub.dataCache = {}; } catch (e) {}
+                                try { if (typeof sub.refresh === 'function') sub.refresh(); } catch (e) {}
+                            });
+                        }
+                    } catch (e) {}
                 }
             } catch (e) {
                 console.error('[DynamicTable] SSE parse error', e);
             }
         };
 
-        this.eventSource.onerror = () => {
-            if (this.eventSource) { this.eventSource.close(); this.eventSource = null; }
-            setTimeout(() => this.connectSSE(), 3000);
+        es.onerror = () => {
+            console.warn('[DynamicTable] SSE error/closed for', this.appName, this.tableName);
+            try {
+                // Remove this instance from subscribers
+                const subs = (typeof window !== 'undefined' && window._dynamicTableSubscribers) ? window._dynamicTableSubscribers.get(sharedKey) : null;
+                if (subs && subs.delete) subs.delete(this);
+                const remaining = subs ? subs.size : 0;
+                if (typeof window !== 'undefined' && window._dynamicTableSubscribers) window._dynamicTableSubscribers.set(sharedKey, subs || new Set());
+                try { es.close(); } catch (e) {}
+                try { if (this._sseReconnectTimer) { clearTimeout(this._sseReconnectTimer); this._sseReconnectTimer = null; } } catch (e) {}
+                // If no subscribers left, remove shared source entry
+                if (remaining === 0) {
+                    try { if (typeof window !== 'undefined' && window._dynamicTableEventSources) window._dynamicTableEventSources.delete(sharedKey); } catch (e) {}
+                }
+            } catch (e) {
+                try { es.close(); } catch (e2) {}
+            }
         };
+    }
+
+    // Ensure cleanup of long-lived resources (SSE) when table is destroyed
+    destroy() {
+        try {
+            this._sseDestroyed = true;
+            console.log('[DynamicTable] destroy() called for', this.appName, this.tableName);
+            try { if (this._sseReconnectTimer) { clearTimeout(this._sseReconnectTimer); this._sseReconnectTimer = null; } } catch (e) {}
+            try {
+                const sharedKey = this._sseSharedKey;
+                if (typeof window !== 'undefined' && sharedKey && window._dynamicTableSubscribers) {
+                    const subs = window._dynamicTableSubscribers.get(sharedKey);
+                    if (subs && subs.delete) subs.delete(this);
+                    const remaining = subs ? subs.size : 0;
+                    if (typeof window !== 'undefined' && window._dynamicTableSubscribers) window._dynamicTableSubscribers.set(sharedKey, subs || new Set());
+                    if (remaining === 0) {
+                        // close shared event source
+                        try {
+                            const entry = window._dynamicTableEventSources && window._dynamicTableEventSources.get(sharedKey);
+                            if (entry && entry.es) {
+                                try { console.log('[DynamicTable] closing shared EventSource for', sharedKey); entry.es.close(); } catch (e) {}
+                            }
+                        } catch (e) {}
+                        try { if (typeof window !== 'undefined' && window._dynamicTableEventSources) window._dynamicTableEventSources.delete(sharedKey); } catch (e) {}
+                    }
+                }
+            } catch (e) {}
+            if (this.eventSource) {
+                try { console.log('[DynamicTable] closing eventSource for', this.appName, this.tableName); this.eventSource.close(); } catch (e) {}
+                this.eventSource = null;
+            }
+        } catch (e) {}
+
+        try {
+            if (UIObject && UIObject.prototype && typeof UIObject.prototype.destroy === 'function') {
+                UIObject.prototype.destroy.call(this);
+            }
+        } catch (e) {}
     }
 
     // ================= DATA BLOCK (extracted from old DynamicTable) =================

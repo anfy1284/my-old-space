@@ -258,13 +258,18 @@ function registerDynamicTableMethods(appName, config = {}) {
                     const clientInfo = { res, userId: user.id, clientId };
                     tableClients.add(clientInfo);
 
+                    console.log(`[${appName}/subscribeToTable] client connected table=${tableName} clientId=${clientId} user=${user.id} totalClients=${tableClients.size}`);
                     res.write(`data: ${JSON.stringify({ type: 'connected', tableName, clientId })}\n\n`);
 
                     req.on('close', () => {
-                        tableClients.delete(clientInfo);
-                        if (tableClients.size === 0) {
-                            appSseClients.delete(tableName);
-                        }
+                        try {
+                            tableClients.delete(clientInfo);
+                            console.log(`[${appName}/subscribeToTable] client disconnected table=${tableName} clientId=${clientId} remaining=${tableClients.size}`);
+                            if (tableClients.size === 0) {
+                                appSseClients.delete(tableName);
+                                console.log(`[${appName}/subscribeToTable] no more clients for table=${tableName}, cleaned up map`);
+                            }
+                        } catch (e) { console.error(`[${appName}/subscribeToTable] error on close handler:`, e); }
                     });
 
                 } catch (error) {
