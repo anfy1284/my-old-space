@@ -205,6 +205,40 @@ function mergeModelDefinitions(allDefs) {
   return Array.from(mergedMap.values());
 }
 
+/**
+ * Ensure each table has a `name` column of string type.
+ * Runs during DB init using the provided Sequelize instance and model definitions.
+ */
+async function ensureNameColumns(sequelize, modelsDefs) {
+  const qi = sequelize.getQueryInterface();
+  for (const def of modelsDefs) {
+    const tableName = def.tableName;
+    try {
+      const desc = await qi.describeTable(tableName).catch(() => null);
+      if (!desc) {
+        console.warn(`[MIGRATION] Table ${tableName} not found when ensuring name column`);
+        continue;
+      }
+      if (!desc.name) {
+        await qi.addColumn(tableName, 'name', { type: Sequelize.DataTypes.STRING, allowNull: true });
+        console.log(`[MIGRATION] Added 'name' column to table ${tableName}`);
+      } else {
+        const colType = (desc.name.type || '').toString().toLowerCase();
+        if (colType && !colType.includes('char') && !colType.includes('text')) {
+          try {
+            await qi.changeColumn(tableName, 'name', { type: Sequelize.DataTypes.STRING, allowNull: true });
+            console.log(`[MIGRATION] Changed 'name' column type to STRING in table ${tableName}`);
+          } catch (e) {
+            console.warn(`[MIGRATION] Could not change 'name' type for ${tableName}: ${e.message}`);
+          }
+        }
+      }
+    } catch (e) {
+      console.error(`[MIGRATION] Error ensuring 'name' for ${tableName}:`, e.message);
+    }
+  }
+}
+
 async function createAll() {
   await ensureDatabase();
   const sequelize = getSequelizeInstance();
@@ -760,6 +794,13 @@ async function createAll() {
       await transaction.commit();
     }
     console.log('[MIGRATION] Database migration completed successfully.');
+
+    // Ensure each table has a `name` column of string type (run after commit to avoid lock conflicts)
+    try {
+      await ensureNameColumns(sequelize, mergedModelsDef);
+    } catch (e) {
+      console.error('[MIGRATION] ensureNameColumns failed:', e.message);
+    }
 
   } catch (error) {
     // Rollback transaction on error (if created)

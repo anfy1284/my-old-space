@@ -36,6 +36,10 @@
         {
             "name": "UserSettings",
             "path": "/UserSettings"
+        },
+        {
+            "name": "uniListForm",
+            "path": "/uniListForm"
         }
     ]
 }

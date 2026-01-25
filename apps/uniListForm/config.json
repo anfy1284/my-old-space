@@ -1,0 +1,25 @@
+{
+    "name": "uniListForm",
+    "autoStart": false,
+    "system": ["mySpace"],
+    "access": ["admin", "user"],
+    "dependencies": {},
+    "mainMenuCommands": 
+        [
+            {"id": "main", "items": 
+                [
+                    { "caption": "Neues", "items": 
+                        [
+                            {
+                                "caption": "Universal list form org", "action": "open", "params": {"dbTable": "organizations"}
+                            },
+                            {
+                                "caption": "Universal list form usr", "action": "open", "params": {"dbTable": "users"}
+                            }
+
+                        ]
+                    }
+                ]
+            }
+        ]
+}
