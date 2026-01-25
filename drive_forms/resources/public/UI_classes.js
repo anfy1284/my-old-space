@@ -2520,7 +2520,7 @@ class TextBox extends FormInput {
                                         const rpcApp = appName;
                                         if (rpcApp && tableName) {
                                             try {
-                                                const resp = await callServerMethod(rpcApp, 'getDynamicTableData', { tableName: tableName, firstRow: 0, visibleRows: limit });
+                                                const resp = await callServerMethod(rpcApp, 'getLookupList', { tableName: tableName, firstRow: 0, visibleRows: limit });
                                                 const rows = resp && (resp.rows || resp.data || resp.items) ? (resp.rows || resp.data || resp.items) : [];
                                                 // Map rows to listItems: { value: id, caption: displayField }
                                                 this.listItems = (rows || []).slice(0, limit).map(r => {

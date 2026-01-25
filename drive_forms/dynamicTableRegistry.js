@@ -60,7 +60,34 @@ function registerDynamicTableMethods(appName, config = {}) {
             }
 
             // Маппинг таблицы на модель
-            let modelName = tables[tableName];
+            // `tables` may be:
+            // - an object map { tableName: modelName }
+            // - an object map where values may be functions returning modelName
+            // - a function resolver which accepts either (params, sessionID, user)
+            //   or the legacy signature (tableName, params, sessionID, user)
+            let modelName = null;
+            try {
+                if (typeof tables === 'function') {
+                    // Prefer calling resolver with params first (params should include tableName)
+                    if (tables.length <= 1) {
+                        modelName = await tables(params, sessionID, user);
+                    } else {
+                        modelName = await tables(tableName, params, sessionID, user);
+                    }
+                } else {
+                    modelName = tables[tableName];
+                    if (typeof modelName === 'function') {
+                        if (modelName.length <= 1) {
+                            modelName = await modelName(params, sessionID, user);
+                        } else {
+                            modelName = await modelName(tableName, params, sessionID, user);
+                        }
+                    }
+                }
+            } catch (e) {
+                console.error(`[${appName}/getDynamicTableData] Error resolving modelName for table ${tableName}:`, e);
+                modelName = null;
+            }
             // Fallback: try to resolve model name by table name from global models (handles init-order issues)
             if (!modelName) {
                 try {
@@ -79,7 +106,33 @@ function registerDynamicTableMethods(appName, config = {}) {
             }
 
             // Получить конфигурацию полей для таблицы (если есть)
-            const fieldConfig = tableFields[tableName] || null;
+            // `tableFields` may be:
+            // - an object map { tableName: fields }
+            // - an object map where values may be functions returning fields
+            // - a function resolver which accepts either (params, sessionID, user)
+            //   or legacy signature (tableName, params, sessionID, user)
+            let fieldConfig = null;
+            try {
+                if (typeof tableFields === 'function') {
+                    if (tableFields.length <= 1) {
+                        fieldConfig = await tableFields(params, sessionID, user);
+                    } else {
+                        fieldConfig = await tableFields(tableName, params, sessionID, user);
+                    }
+                } else {
+                    fieldConfig = tableFields[tableName] || null;
+                    if (typeof fieldConfig === 'function') {
+                        if (fieldConfig.length <= 1) {
+                            fieldConfig = await fieldConfig(params, sessionID, user);
+                        } else {
+                            fieldConfig = await fieldConfig(tableName, params, sessionID, user);
+                        }
+                    }
+                }
+            } catch (e) {
+                console.error(`[${appName}/getDynamicTableData] Error resolving fieldConfig for table ${tableName}:`, e);
+                fieldConfig = null;
+            }
 
             // Вызов глобальной функции получения сырых данных
             const raw = await globalServerContext.getDynamicTableData({
@@ -112,6 +165,57 @@ function registerDynamicTableMethods(appName, config = {}) {
                 rows,
                 totalRows
             };
+        },
+
+        /**
+         * Lightweight lookup for dropdowns: returns id and display values
+         */
+        async getLookupList(params, sessionID) {
+            const { tableName, firstRow, visibleRows } = params;
+
+            // Get user
+            const user = await globalServerContext.getUserBySessionID(sessionID);
+            if (!user) throw new Error('User not authorized');
+
+            if (accessCheck) {
+                const hasAccess = await accessCheck(user, tableName, 'read');
+                if (!hasAccess) throw new Error('Access denied to table: ' + tableName);
+            }
+
+            // Resolve modelName using same logic as above
+            let modelName = null;
+            try {
+                if (typeof tables === 'function') {
+                    if (tables.length <= 1) modelName = await tables(params, sessionID, user);
+                    else modelName = await tables(tableName, params, sessionID, user);
+                } else {
+                    modelName = tables[tableName];
+                    if (typeof modelName === 'function') {
+                        if (modelName.length <= 1) modelName = await modelName(params, sessionID, user);
+                        else modelName = await modelName(tableName, params, sessionID, user);
+                    }
+                }
+            } catch (e) {
+                console.error(`[${appName}/getLookupList] Error resolving modelName for table ${tableName}:`, e);
+                modelName = null;
+            }
+
+            if (!modelName) {
+                const resolved = globalServerContext.getModelNameForTable(tableName);
+                if (resolved) modelName = resolved;
+            }
+
+            if (!modelName) throw new Error('Unknown table: ' + tableName);
+
+            const raw = await globalServerContext.getLookupList({ modelName, firstRow, visibleRows, userId: user.id });
+
+            const rows = raw && (raw.rows || raw.data) || [];
+            const fields = raw && raw.fields || [{ name: 'id' }, { name: 'display' }];
+            const totalRows = raw && raw.totalRows || (rows.length ? rows.length : 0);
+
+            const columns = normalizeColumnsFromFields(fields, rows);
+
+            return { columns, rows, totalRows };
         },
 
         /**

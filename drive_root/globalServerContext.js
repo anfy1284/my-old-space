@@ -997,3 +997,61 @@ module.exports.getDynamicTableData = getDynamicTableData;
 module.exports.resolveTableForeignKeys = resolveTableForeignKeys;
 module.exports.recordTableEdit = recordTableEdit;
 module.exports.commitTableEdits = commitTableEdits;
+
+/**
+ * Lightweight lookup: return id and display field for a table (for dropdowns/lookups)
+ * @param {Object} options - { tableName, modelName, firstRow, visibleRows, userId }
+ * @returns {Promise<Object>} - { totalRows, fields, data, range }
+ */
+async function getLookupList(options) {
+    let { tableName, modelName, firstRow, visibleRows, userId } = options || {};
+
+    // Resolve modelName if tableName provided
+    if (!modelName && tableName) {
+        modelName = module.exports.getModelNameForTable(tableName);
+    }
+
+    if (!modelName) throw new Error('modelName or tableName is required');
+
+    const Model = modelsDB[modelName];
+    if (!Model) throw new Error(`Model ${modelName} not found in modelsDB`);
+
+    // Determine display field: prefer 'name', fallback to first STRING attribute, then 'id'
+    const attrs = Model.rawAttributes || {};
+    let displayField = 'name';
+    if (!attrs[displayField]) {
+        displayField = Object.keys(attrs).find(k => {
+            try {
+                const t = attrs[k].type.key || attrs[k].type.constructor.key;
+                return t === 'STRING';
+            } catch (e) {
+                return false;
+            }
+        }) || 'id';
+    }
+
+    visibleRows = Math.max(0, Math.min(visibleRows || 20, 1000));
+    firstRow = Math.max(0, firstRow || 0);
+
+    const totalRows = await Model.count();
+
+    const rows = await Model.findAll({
+        attributes: ['id', displayField],
+        offset: firstRow,
+        limit: visibleRows,
+        order: [['id', 'ASC']],
+        raw: true
+    });
+
+    // Normalize to simple objects with id and display
+    const data = rows.map(r => ({ id: r.id, display: r[displayField] }));
+
+    return {
+        totalRows,
+        fields: [ { name: 'id' }, { name: displayField } ],
+        data,
+        range: { from: firstRow, to: firstRow + data.length - 1 }
+    };
+}
+
+module.exports.getLookupList = getLookupList;
