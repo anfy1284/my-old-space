@@ -40,6 +40,10 @@
         {
             "name": "uniListForm",
             "path": "/uniListForm"
+        },
+        {
+            "name": "uniRecordForm",
+            "path": "/uniRecordForm"
         }
     ]
 }

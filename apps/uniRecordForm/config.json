@@ -1,0 +1,22 @@
+{
+    "name": "uniListForm",
+    "autoStart": false,
+    "system": ["mySpace"],
+    "access": ["admin", "user"],
+    "dependencies": {},
+    "mainMenuCommands": 
+        [
+            {"id": "main", "items": 
+                [
+                    { "caption": "uniRecordForm", "items": 
+                        [
+                            {
+                                "caption": "Universal list form usr", "action": "open", "params": {"tableName": "users", "recordID": 0}
+                            }
+
+                        ]
+                    }
+                ]
+            }
+        ]
+}
