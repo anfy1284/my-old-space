@@ -173,6 +173,9 @@ function registerDynamicTableMethods(appName, config = {}) {
         async getLookupList(params, sessionID) {
             const { tableName, firstRow, visibleRows } = params;
 
+            // TEMP LOG: record incoming lookup requests to help debug empty dropdowns
+            try { console.log(`[${appName}/getLookupList] called with params:`, JSON.stringify(params)); } catch (e) {}
+
             // Get user
             const user = await globalServerContext.getUserBySessionID(sessionID);
             if (!user) throw new Error('User not authorized');

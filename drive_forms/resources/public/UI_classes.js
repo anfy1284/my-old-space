@@ -5026,6 +5026,8 @@ class Table extends UIObject {
     constructor(parentElement = null, properties = {}) {
         super();
         this.parentElement = parentElement;
+        // Index of currently active (selected) row for highlighting
+        this._activeRowIndex = -1;
         this.columns = properties.columns || [];
         this.dataKey = properties.dataKey || properties.data || null;
         this.appForm = properties.appForm || null;
@@ -5038,6 +5040,11 @@ class Table extends UIObject {
         // Resize state for column resizing
         this.resizeState = { isResizing: false, columnIndex: null, startX: 0, startWidth: 0 };
         this.currentSort = []; // { field, order }
+        // Editing mode: 'row-activate' (default) or 'cell-immediate'
+        this.editMode = properties.editMode || 'row-activate';
+        // Internal handlers and state for managing row/cell activation
+        this._docClickHandler = null;
+        this._docKeyHandler = null;
     }
 
     // Data helpers: encapsulate all _dataMap access for Table
@@ -5339,7 +5346,7 @@ class Table extends UIObject {
                         await this.appForm.renderItem(cellItemLocal, containerLocal);
                     } catch (e) {}
                     try {
-                        const el = containerLocal.querySelector('[data-field="' + key + '"]') || containerLocal.querySelector('input,textarea,select');
+                        const el = containerLocal.querySelector('[data-field="' + key + '"]') || containerLocal.querySelector('input,textarea,select,button');
                         if (el) {
                             const handler = (ev) => {
                                 try {
@@ -5351,39 +5358,73 @@ class Table extends UIObject {
                             el.addEventListener('input', handler);
                             el.addEventListener('change', handler);
                         }
-                        try {
-                            const nativeCb = containerLocal.querySelector('input[type="checkbox"]');
-                            if (nativeCb) {
-                                if (!containerLocal.dataset.checkboxListener) {
-                                    containerLocal.style.cursor = nativeCb.disabled ? 'default' : 'pointer';
-                                    containerLocal.addEventListener('click', (ev) => {
-                                        try {
-                                            if (ev.target === nativeCb) return;
-                                            if (nativeCb.disabled) return;
-                                            nativeCb.checked = !nativeCb.checked;
-                                            nativeCb.dispatchEvent(new Event('change', { bubbles: true }));
-                                        } catch (_) {}
-                                    });
-                                    containerLocal.dataset.checkboxListener = '1';
+
+                        // Set initial editable state based on active row and table-level readOnly
+                        const isActive = (this._activeRowIndex === rowIndexLocal) && !this.readOnly;
+                        // Helper to apply readonly/disabled to typical controls inside cell
+                        const applyReadonlyToElement = (node, makeReadOnly) => {
+                            try {
+                                if (!node) return;
+                                // If node has an associated UI object with setReadOnly, try to call it
+                                if (node._uiObject && typeof node._uiObject.setReadOnly === 'function') {
+                                    try { node._uiObject.setReadOnly(!isActive); } catch (e) {}
                                 }
-                                if (!containerLocal.dataset.checkboxCapture) {
-                                    containerLocal.addEventListener('click', (ev) => {
-                                        try {
-                                            if (ev.__checkboxHandled) return;
-                                            if (ev.target === nativeCb || nativeCb.contains(ev.target)) return;
-                                            if (nativeCb.disabled) return;
-                                            nativeCb.checked = !nativeCb.checked;
-                                            nativeCb.dispatchEvent(new Event('change', { bubbles: true }));
-                                            ev.__checkboxHandled = true;
-                                        } catch (_) {}
-                                    }, true);
-                                    containerLocal.dataset.checkboxCapture = '1';
+                                if (typeof node.setReadOnly === 'function') {
+                                    try { node.setReadOnly(!isActive); } catch (e) {}
                                 }
+                                // Native inputs
+                                if (node.tagName) {
+                                    const tag = node.tagName.toLowerCase();
+                                    if (tag === 'input' || tag === 'textarea') {
+                                        try { node.readOnly = !isActive; } catch (e) {}
+                                    }
+                                    if (tag === 'select' || tag === 'button' || (node.type && (node.type === 'checkbox' || node.type === 'radio'))) {
+                                        try { node.disabled = !isActive; } catch (e) {}
+                                    }
+                                    // add pointer-events none for non-active to prevent JS click handlers
+                                    try { node.style.pointerEvents = isActive ? '' : 'none'; } catch (e) {}
+                                }
+                            } catch (e) {}
+                        };
+
+                        // Apply to primary element
+                        if (el) applyReadonlyToElement(el, !isActive);
+                        // Also apply to any interactive descendants
+                        const interactive = containerLocal.querySelectorAll('input,textarea,select,button');
+                        for (let ii = 0; ii < interactive.length; ii++) applyReadonlyToElement(interactive[ii], !isActive);
+                    } catch (e) {}
+                    try {
+                        const nativeCb = containerLocal.querySelector('input[type="checkbox"]');
+                        if (nativeCb) {
+                            if (!containerLocal.dataset.checkboxListener) {
+                                containerLocal.style.cursor = nativeCb.disabled ? 'default' : 'pointer';
+                                containerLocal.addEventListener('click', (ev) => {
+                                    try {
+                                        if (ev.target === nativeCb) return;
+                                        if (nativeCb.disabled) return;
+                                        nativeCb.checked = !nativeCb.checked;
+                                        nativeCb.dispatchEvent(new Event('change', { bubbles: true }));
+                                    } catch (_) {}
+                                });
+                                containerLocal.dataset.checkboxListener = '1';
                             }
-                        } catch (e) {}
+                            if (!containerLocal.dataset.checkboxCapture) {
+                                containerLocal.addEventListener('click', (ev) => {
+                                    try {
+                                        if (ev.__checkboxHandled) return;
+                                        if (ev.target === nativeCb || nativeCb.contains(ev.target)) return;
+                                        if (nativeCb.disabled) return;
+                                        nativeCb.checked = !nativeCb.checked;
+                                        nativeCb.dispatchEvent(new Event('change', { bubbles: true }));
+                                        ev.__checkboxHandled = true;
+                                    } catch (_) {}
+                                }, true);
+                                containerLocal.dataset.checkboxCapture = '1';
+                            }
+                        }
                     } catch (e) {}
                 })(cellItem, cellContainer, rowIndex, col, cellKey);
-            } else {
+        } else {
                 const span = document.createElement('span');
                 const displayText = (cellItem.properties && cellItem.properties.__display !== undefined) ? cellItem.properties.__display : (cellItem.value !== undefined && cellItem.value !== null ? String(cellItem.value) : '');
                 span.textContent = displayText;
@@ -5396,13 +5437,205 @@ class Table extends UIObject {
 
     renderRowElement(rowIndex, row) {
         const tr = document.createElement('tr');
-        tr.style.backgroundColor = (rowIndex % 2 === 0) ? '#ffffff' : '#f0f0f0';
+        // Use CSS classes for zebra and active-row highlighting
+        try { tr.classList.add('ui-table-row'); } catch (e) {}
+        if (this._activeRowIndex === rowIndex) {
+            try { tr.classList.add('active'); } catch (e) {}
+        }
+        // Make rows focusable so keyboard users can select them
+        try { tr.tabIndex = 0; } catch (e) {}
+
+        // Clicking a row / cell: handle activation and editing
+        tr.addEventListener('click', (ev) => {
+            try {
+                const prevActive = this._activeRowIndex;
+                const clickedRow = rowIndex;
+
+                // If click target is inside a td, find nearest td
+                const td = ev.target && ev.target.closest ? ev.target.closest('td') : null;
+
+                if (this.editMode === 'row-activate') {
+                    // First click: just activate the row
+                    if (this._activeRowIndex !== clickedRow) {
+                        this.activateRow(clickedRow);
+                        return;
+                    }
+                    // If already active, second click should focus the cell's editor
+                    // fall through to focusing logic below
+                } else {
+                    // cell-immediate: activate row (if needed) and then focus the cell
+                    if (this._activeRowIndex !== clickedRow) this.activateRow(clickedRow);
+                }
+
+                // Focus appropriate editor/control inside clicked cell
+                if (td) {
+                    try {
+                        // prefer element with data-field
+                        const keyEl = td.querySelector('[data-field]') || td.querySelector('input,textarea,select,button');
+                        if (keyEl) {
+                            try { keyEl.focus && keyEl.focus(); } catch (e) {}
+                            // If text input, select contents
+                            try { if (keyEl.select && (keyEl.tagName.toLowerCase() === 'input' || keyEl.tagName.toLowerCase() === 'textarea')) keyEl.select(); } catch (e) {}
+                        }
+                    } catch (e) {}
+                }
+            } catch (e) {}
+        });
+
+        // Allow Enter key to activate the row
+        tr.addEventListener('keydown', (ev) => {
+            try { if (ev.key === 'Enter') tr.click(); } catch (e) {}
+        });
         for (let c = 0; c < this.columns.length; c++) {
             const col = this.columns[c] || {};
             const td = this.renderCellElement(rowIndex, c, col, row);
             tr.appendChild(td);
         }
         return tr;
+    }
+
+    // Activate a row: set _activeRowIndex and update readonly/disabled state of controls
+    activateRow(rowIndex) {
+        try {
+            this._activeRowIndex = rowIndex;
+            // Update CSS classes
+            if (this.element) {
+                const tbody = this.element.querySelector('tbody');
+                if (tbody) {
+                    const children = Array.from(tbody.children || []);
+                    for (let i = 0; i < children.length; i++) {
+                        const child = children[i];
+                        try {
+                            if (i === rowIndex) child.classList.add('active');
+                            else child.classList.remove('active');
+                        } catch (e) {}
+                    }
+                }
+            }
+            // Update controls
+            this.updateAllRowsReadOnly();
+            // attach global handlers to close editors on outside click / Escape
+            if (!this._docClickHandler) {
+                this._docClickHandler = (ev) => {
+                    try {
+                        const host = this.element;
+                        if (!host) return;
+                        if (!host.contains(ev.target)) {
+                            this.deactivateRow();
+                        }
+                    } catch (e) {}
+                };
+                document.addEventListener('click', this._docClickHandler);
+            }
+            if (!this._docKeyHandler) {
+                this._docKeyHandler = (ev) => {
+                    try {
+                        if (ev.key === 'Escape') {
+                            try {
+                                const tgt = ev.target;
+                                // If focus is inside an editable control, blur it and keep row active
+                                const isEditable = (node => {
+                                    if (!node) return false;
+                                    try {
+                                        const tag = node.tagName ? node.tagName.toLowerCase() : '';
+                                        if (tag === 'input' || tag === 'textarea' || tag === 'select' || tag === 'button') return true;
+                                        if (node.isContentEditable) return true;
+                                        if (node.closest) {
+                                            const p = node.closest('input,textarea,select,button,[contenteditable="true"]');
+                                            if (p) return true;
+                                        }
+                                    } catch (e) {}
+                                    return false;
+                                })(tgt);
+                                if (isEditable) {
+                                    try { if (tgt && typeof tgt.blur === 'function') tgt.blur(); } catch (e) {}
+                                    try { ev.preventDefault(); ev.stopPropagation(); } catch (e) {}
+                                    // After blurring editor, restore focus to table (or active row) so keyboard navigation resumes
+                                    try {
+                                        setTimeout(() => {
+                                            try {
+                                                if (this.element) {
+                                                    const tbody = this.element.querySelector && this.element.querySelector('tbody');
+                                                    if (tbody && typeof this._activeRowIndex === 'number' && this._activeRowIndex >= 0 && tbody.children && tbody.children[this._activeRowIndex]) {
+                                                        try { tbody.children[this._activeRowIndex].focus(); return; } catch (e) {}
+                                                    }
+                                                    try { this.element.focus(); } catch (e) {}
+                                                }
+                                            } catch (e) {}
+                                        }, 0);
+                                    } catch (e) {}
+                                    return;
+                                }
+                            } catch (e) {}
+                            this.deactivateRow();
+                        }
+                    } catch (e) {}
+                };
+                document.addEventListener('keydown', this._docKeyHandler);
+            }
+        } catch (e) {}
+    }
+
+    // Deactivate active row
+    deactivateRow() {
+        try {
+            this._activeRowIndex = -1;
+            if (this.element) {
+                const tbody = this.element.querySelector('tbody');
+                if (tbody) {
+                    const children = Array.from(tbody.children || []);
+                    for (let i = 0; i < children.length; i++) {
+                        const child = children[i];
+                        try { child.classList.remove('active'); } catch (e) {}
+                    }
+                }
+            }
+            this.updateAllRowsReadOnly();
+            if (this._docClickHandler) {
+                try { document.removeEventListener('click', this._docClickHandler); } catch (e) {}
+                this._docClickHandler = null;
+            }
+            if (this._docKeyHandler) {
+                try { document.removeEventListener('keydown', this._docKeyHandler); } catch (e) {}
+                this._docKeyHandler = null;
+            }
+            // blur any focused control inside the table
+            try {
+                const focused = document.activeElement;
+                if (focused && this.element && this.element.contains(focused)) try { focused.blur(); } catch (e) {}
+            } catch (e) {}
+        } catch (e) {}
+    }
+
+    // Iterate rows and set readOnly/disabled state on controls depending on active row
+    updateAllRowsReadOnly() {
+        try {
+            const tbody = this.element ? this.element.querySelector('tbody') : null;
+            if (!tbody) return;
+            const rows = Array.from(tbody.children || []);
+            for (let r = 0; r < rows.length; r++) {
+                const tr = rows[r];
+                const isActive = (this._activeRowIndex === r) && !this.readOnly;
+                const interactives = tr.querySelectorAll('input,textarea,select,button');
+                for (let i = 0; i < interactives.length; i++) {
+                    const el = interactives[i];
+                    try {
+                        if (el.tagName) {
+                            const tag = el.tagName.toLowerCase();
+                            if (tag === 'input' || tag === 'textarea') el.readOnly = !isActive;
+                            if (tag === 'select' || tag === 'button' || (el.type && (el.type === 'checkbox' || el.type === 'radio'))) el.disabled = !isActive;
+                            try { el.style.pointerEvents = isActive ? '' : 'none'; } catch (e) {}
+                        }
+                        if (el._uiObject && typeof el._uiObject.setReadOnly === 'function') {
+                            try { el._uiObject.setReadOnly(!isActive); } catch (e) {}
+                        }
+                        if (typeof el.setReadOnly === 'function') {
+                            try { el.setReadOnly(!isActive); } catch (e) {}
+                        }
+                    } catch (e) {}
+                }
+            }
+        } catch (e) {}
     }
 
     buildBody(bodyContainer, rows) {
@@ -5558,6 +5791,109 @@ class Table extends UIObject {
             this.headerContainer = headerContainer;
             this.bodyContainer = bodyContainer;
             this.tableElement = bodyTable;
+            // Ensure initial readonly/disabled state for controls according to active row
+            try { this.updateAllRowsReadOnly(); } catch (e) {}
+            // Keyboard navigation: enable row navigation when in 'row-activate' mode
+            try {
+                // make wrapper focusable to receive key events
+                try { this.element.tabIndex = 0; } catch (e) {}
+                this._anchorRow = null; // for shift-selection
+                this.element.addEventListener('keydown', (ev) => {
+                    try {
+                        if (this.editMode !== 'row-activate') return;
+                        const key = ev.key;
+                        const tgt = ev.target;
+                        // If focus is inside an editable control (input/textarea/select/button/contenteditable),
+                        // allow default behavior so cursor movement and native handling work.
+                        try {
+                            const isEditable = (node => {
+                                if (!node) return false;
+                                try {
+                                    const tag = node.tagName ? node.tagName.toLowerCase() : '';
+                                    if (tag === 'input' || tag === 'textarea' || tag === 'select' || tag === 'button') return true;
+                                    if (node.isContentEditable) return true;
+                                    if (node.closest) {
+                                        const p = node.closest('input,textarea,select,button,[contenteditable="true"]');
+                                        if (p) return true;
+                                    }
+                                } catch (e) {}
+                                return false;
+                            })(tgt);
+                            if (isEditable) return;
+                        } catch (e) {}
+                        const ctrl = ev.ctrlKey || ev.metaKey;
+                        const shift = ev.shiftKey;
+                        const tbody = this.element.querySelector('tbody');
+                        if (!tbody) return;
+                        const rows = Array.from(tbody.children || []);
+                        const count = rows.length;
+                        if (count === 0) return;
+                        let idx = this._activeRowIndex >= 0 ? this._activeRowIndex : 0;
+
+                        const pageSize = Math.max(1, Math.floor((this.bodyContainer ? this.bodyContainer.clientHeight : (this.visibleRows || 10) * this.rowHeight) / this.rowHeight) || this.visibleRows || 10);
+
+                        const clamp = (v) => Math.max(0, Math.min(count - 1, v));
+
+                        let handled = false;
+                        if (key === 'ArrowDown') {
+                            if (ctrl) idx = count - 1; else idx = clamp(idx + 1);
+                            handled = true;
+                        } else if (key === 'ArrowUp') {
+                            if (ctrl) idx = 0; else idx = clamp(idx - 1);
+                            handled = true;
+                        } else if (key === 'PageDown') {
+                            if (ctrl) idx = count - 1; else idx = clamp(idx + pageSize);
+                            handled = true;
+                        } else if (key === 'PageUp') {
+                            if (ctrl) idx = 0; else idx = clamp(idx - pageSize);
+                            handled = true;
+                        } else if (key === 'Home') {
+                            idx = 0;
+                            handled = true;
+                        } else if (key === 'End') {
+                            idx = count - 1;
+                            handled = true;
+                        } else if (key === 'Enter') {
+                            // Enter should focus first interactive element in active row
+                            const activeRow = (this._activeRowIndex >= 0 && this._activeRowIndex < rows.length) ? rows[this._activeRowIndex] : rows[0];
+                            if (activeRow) {
+                                const first = activeRow.querySelector('[data-field]') || activeRow.querySelector('input,textarea,select,button');
+                                try { if (first) { first.focus(); if (first.select && (first.tagName.toLowerCase()==='input' || first.tagName.toLowerCase()==='textarea')) first.select(); } } catch (e) {}
+                            }
+                            handled = true;
+                        }
+
+                        if (handled) {
+                            ev.preventDefault();
+                            // set anchor for shift-selection
+                            if (shift) {
+                                if (this._anchorRow === null) this._anchorRow = this._activeRowIndex >= 0 ? this._activeRowIndex : 0;
+                            } else {
+                                this._anchorRow = null;
+                            }
+                            // Activate new row
+                            this.activateRow(idx);
+                            // focus row element so further keyboard events target table
+                            try { const tr = rows[idx]; if (tr) tr.focus(); } catch (e) {}
+                            // update selection range UI when shift is held
+                            try {
+                                if (this._anchorRow !== null && shift) {
+                                    const a = this._anchorRow;
+                                    const b = idx;
+                                    const start = Math.min(a,b);
+                                    const end = Math.max(a,b);
+                                    for (let i = 0; i < rows.length; i++) {
+                                        try { if (i >= start && i <= end) rows[i].classList.add('range-selected'); else rows[i].classList.remove('range-selected'); } catch (e) {}
+                                    }
+                                } else {
+                                    // clear any previous range selections
+                                    for (let i = 0; i < rows.length; i++) try { rows[i].classList.remove('range-selected'); } catch (e) {}
+                                }
+                            } catch (e) {}
+                        }
+                    } catch (e) {}
+                });
+            } catch (e) {}
         }
 
         if (container && this.element && !this.element.parentElement) {
@@ -5649,7 +5985,7 @@ class Tabs extends UIObject {
 // DynamicTable class for displaying tabular data with virtual scrolling
 class DynamicTable extends Table {
     constructor(options = {}) {
-        super(null, { columns: options.fields || options.columns || [], rowHeight: options.rowHeight, appForm: options.appForm, dataKey: options.dataKey || options.data || options.tableName });
+        super(null, { columns: options.fields || options.columns || [], rowHeight: options.rowHeight, appForm: options.appForm, dataKey: options.dataKey || options.data || options.tableName, readOnly: options.readOnly !== false });
 
         this.appName = options.appName || '';
         this.tableName = options.tableName || '';
@@ -5879,6 +6215,7 @@ class DynamicTable extends Table {
                     if (bodyContainer) {
                         bodyContainer.innerHTML = '';
                         this.buildBody(bodyContainer, rows);
+                        try { this.updateAllRowsReadOnly(); } catch (e) {}
                     }
                 }
             } catch (e) { console.error('[DynamicTable] rebuild after loadData failed', e); }

@@ -10,9 +10,10 @@
                 [
                     { "caption": "uniRecordForm", "items": 
                         [
-                            {
-                                "caption": "Universal list form usr", "action": "open", "params": {"tableName": "users", "recordID": 0}
-                            }
+                            { "caption": "Universal list form usr 0", "action": "open", "params": {"tableName": "users", "recordID": 0}},
+                            { "caption": "Universal list form usr 1", "action": "open", "params": {"tableName": "users", "recordID": 1}},
+                            { "caption": "Universal list form usr 2", "action": "open", "params": {"tableName": "users", "recordID": 2}},
+                            { "caption": "Universal list form usr 3", "action": "open", "params": {"tableName": "users", "recordID": 3}}
 
                         ]
                     }

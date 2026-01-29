@@ -16,6 +16,8 @@ function getData(params) {
     return data;
 }
 
+
+
 function getLayout(params) {
     // params may be used to customise layout depending on how app is opened
     let layout = [
@@ -30,9 +32,22 @@ function getLayout(params) {
     return layout;
 }
 
-function getLayoutWithData(params) {
+async function getLayoutWithData(params) {
     // Return layout and data together for atomic loading
     try {
+        // If caller requested a tableName, prefer the generated form spec (async)
+        if (params && params.tableName) {
+            try {
+                const spec = await generateFormSpec(params.tableName, params);
+                const payload = { layout: spec.layout || [], data: spec.data || [], params: params || {} };
+                const datasetId = dataApp.storeDataset(payload);
+                return { layout: payload.layout, data: payload.data, datasetId };
+            } catch (e) {
+                // fallthrough to default behaviour on error
+                console.error('[uniRecordForm/getLayoutWithData] generateFormSpec error:', e && e.message || e);
+            }
+        }
+
         const layout = getLayout(params);
         const data = getData(params);
         // Store the returned payload in server memory and expose a datasetId
@@ -139,6 +154,118 @@ async function buildTableFieldsFromModel(tableName) {
         return null;
     }
 }
+
+// Map inputType to UI control type
+function mapInputTypeToControl(inputType) {
+    const t = (inputType || '').toString().toLowerCase();
+    if (t === 'textbox' || t === 'string') return 'textbox';
+    if (t === 'number' || t === 'integer') return 'number';
+    if (t === 'checkbox' || t === 'boolean') return 'checkbox';
+    if (t === 'date' || t === 'dateonly') return 'date';
+    if (t === 'recordselector' || t === 'recordSelector') return 'recordSelector';
+    if (t === 'textarea' || t === 'text') return 'textarea';
+    if (t === 'enum' || t === 'emunlist' || t === 'emunList') return 'emunList';
+    return 'textbox';
+}
+
+// Автоматическая функция: по имени таблицы возвращает объекты `data` и `layout`
+// Параметр: tableName (string)
+// Возвращает: { data: Array, layout: Array }
+// params may include { recordID }
+async function generateFormSpec(tableName, params) {
+    try {
+        if (!tableName) return { data: [], layout: [] };
+        const fields = await buildTableFieldsFromModel(tableName);
+        if (!Array.isArray(fields)) return { data: [], layout: [] };
+
+        // Attempt to load record by ID if provided
+        let record = null;
+        try {
+            const globalCtx = require('../../drive_root/globalServerContext');
+            const modelName = globalCtx.getModelNameForTable(tableName) || tableName;
+            const models = globalCtx.modelsDB || {};
+            const Model = models[modelName];
+            const recordId = params && (params.recordID || params.recordId || params.id);
+            if (Model && recordId !== undefined && recordId !== null) {
+                try {
+                    record = await Model.findByPk(recordId, { raw: true });
+                } catch (e) {
+                    console.error('[generateFormSpec] Model.findByPk error:', e && e.message || e);
+                    record = null;
+                }
+            }
+        } catch (e) {
+            // ignore lookup errors and proceed with defaults
+            console.error('[generateFormSpec] globalCtx lookup error:', e && e.message || e);
+        }
+
+        const data = await Promise.all(fields.map(async f => {
+            const typeKey = (f.type || '').toUpperCase();
+            let defaultValue = null;
+            if (typeKey === 'INTEGER' || typeKey === 'NUMBER') defaultValue = 0;
+            else if (typeKey === 'BOOLEAN') defaultValue = false;
+            else if (typeKey === 'DATE' || typeKey === 'DATEONLY') defaultValue = null;
+            else defaultValue = '';
+
+            const item = {
+                name: f.name,
+                caption: f.caption || f.name,
+                valueType: typeKey || 'STRING',
+                editable: !!f.editable,
+                value: defaultValue
+            };
+
+            // If we have a record, populate the value
+            if (record && Object.prototype.hasOwnProperty.call(record, f.name)) {
+                item.value = record[f.name];
+            }
+
+            // Resolve FK display if selection metadata present
+            if (item.value != null && f.properties && f.properties.selection) {
+                try {
+                    const globalCtx = require('../../drive_root/globalServerContext');
+                    const targetTable = f.properties.selection.table || f.properties.selection.tableName || f.foreignKey && f.foreignKey.table;
+                    const displayField = f.properties.selection.displayField || f.foreignKey && f.foreignKey.displayField || 'name';
+                    if (targetTable) {
+                        const targetModelName = globalCtx.getModelNameForTable(targetTable) || targetTable;
+                        const targetModel = (globalCtx.modelsDB || {})[targetModelName];
+                        if (targetModel) {
+                            const trg = await targetModel.findByPk(item.value, { raw: true });
+                            if (trg) {
+                                // Provide selection object for recordSelector controls
+                                item.selection = { id: trg.id, display: trg[displayField] || String(trg.id) };
+                            }
+                        }
+                    }
+                } catch (e) {
+                    // ignore FK resolution errors
+                }
+            }
+
+            if (f.options) item.options = f.options;
+            if (f.properties && !item.selection) item.properties = f.properties;
+            return item;
+        }));
+
+        const controls = fields.map(f => {
+            const ctrlType = mapInputTypeToControl(f.inputType || f.input || 'textbox');
+            const ctrl = { type: ctrlType, data: f.name, caption: f.caption || f.name };
+            if (f.properties) ctrl.properties = f.properties;
+            if (f.options) ctrl.options = f.options;
+            return ctrl;
+        });
+
+        const layout = [
+            { type: 'group', caption: tableName, orientation: 'vertical', layout: controls },
+            { type: 'group', caption: 'Действия', orientation: 'horizontal', layout: [ { type: 'button', action: 'save', caption: 'Сохранить' }, { type: 'button', action: 'cancel', caption: 'Отмена' } ] }
+        ];
+
+        return { data, layout };
+    } catch (e) {
+        console.error('[uniRecordForm/generateFormSpec] failed:', e && e.message || e);
+        return { data: [], layout: [] };
+    }
+}
 // Helper to resolve model name (table -> model) based on params
 function buildTableModel(params) {
     const tableName = params && (params.tableName || params.tableName || params.table);
@@ -182,6 +309,8 @@ module.exports = {
     getData,
     getLayoutWithData,
     applyChanges,
+    // Возвращает спецификацию формы по имени таблицы
+    generateFormSpec,
 
     // Dynamic table helpers used by UI controls (preload/dropdowns etc.)
     getDynamicTableData: dynamicTableMethods.getDynamicTableData,

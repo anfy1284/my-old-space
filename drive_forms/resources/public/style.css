@@ -345,5 +345,19 @@ input[type="checkbox"],
   /*font-weight: bold;*/
 }
 
+/* Table row styling: zebra + active highlight */
+.ui-dynamictable table tbody tr.ui-table-row {
+  background-color: #ffffff;
+}
+.ui-dynamictable table tbody tr.ui-table-row:nth-child(even) {
+  background-color: #f0f0f0;
+}
+.ui-dynamictable table tbody tr.ui-table-row.active {
+  background-color: #cdeeff !important;
+}
+.ui-dynamictable table tbody tr.ui-table-row:focus {
+  outline: none;
+}
+
 
 
