@@ -14,6 +14,8 @@ try {
         app.createInstance = async function(params) {
             const instanceId = this.generateInstanceId();
             const container = null; // App decides not to create per-instance container
+            // Preserve any onSelect callback passed via MySpace.open(params)
+            const initialOnSelectCallBack = (params && typeof params.onSelectCallBack === 'function') ? params.onSelectCallBack : null;
 
             const appForm = new DataForm(APP_NAME);
             appForm.setTitle(APP_NAME);
@@ -31,20 +33,137 @@ try {
                 return true;
             }
 
+            appForm.getCurrentRow = function() {
+                try {
+                    // Prefer table-like controls in controlsMap
+                    const cm = this.controlsMap || {};
+                    for (const k in cm) {
+                        const ctrl = cm[k];
+                        if (!ctrl) continue;
+                        // If control exposes active row index, prefer DynamicTable-style mapping
+                        if (typeof ctrl._activeRowIndex === 'number') {
+                            const localIdx = ctrl._activeRowIndex | 0;
+                            // If control exposes firstVisibleRow (DynamicTable), compute global index
+                            const first = (typeof ctrl.firstVisibleRow === 'number') ? (ctrl.firstVisibleRow | 0) : (typeof ctrl.firstRow === 'number' ? (ctrl.firstRow|0) : null);
+                            if (first !== null) {
+                                const globalIdx = first + localIdx;
+                                try {
+                                    if (ctrl.dataCache && Object.prototype.hasOwnProperty.call(ctrl.dataCache, globalIdx) && ctrl.dataCache[globalIdx] && ctrl.dataCache[globalIdx].loaded) return ctrl.dataCache[globalIdx];
+                                } catch (e) {}
+                                try {
+                                    const all = (typeof ctrl.data_getRows === 'function') ? ctrl.data_getRows(ctrl.dataKey || ctrl.data) : null;
+                                    if (Array.isArray(all) && all[globalIdx]) return all[globalIdx];
+                                } catch (e) {}
+                            }
+                            // Fallback: try to get from rows array if control exposes data_getRows (some tables return full array)
+                            try {
+                                if (typeof ctrl.data_getRows === 'function') {
+                                    const rows = ctrl.data_getRows(ctrl.dataKey || ctrl.data);
+                                    if (Array.isArray(rows) && localIdx >= 0 && localIdx < rows.length) return rows[localIdx];
+                                }
+                            } catch (e) {}
+                        }
+                        // If control provides getSelectedRows/getSelected, try those
+                        if (typeof ctrl.getSelectedRows === 'function') {
+                            const sel = ctrl.getSelectedRows();
+                            if (Array.isArray(sel) && sel.length) {
+                                // If array contains indices, map to dataCache/all rows
+                                if (typeof sel[0] === 'number') {
+                                    const idx = sel[0] | 0;
+                                    const first = (typeof ctrl.firstVisibleRow === 'number') ? (ctrl.firstVisibleRow|0) : 0;
+                                    const global = first + idx;
+                                    if (ctrl.dataCache && ctrl.dataCache[global] && ctrl.dataCache[global].loaded) return ctrl.dataCache[global];
+                                    try { const all = (typeof ctrl.data_getRows === 'function') ? ctrl.data_getRows(ctrl.dataKey || ctrl.data) : null; if (Array.isArray(all) && all[global]) return all[global]; } catch(e){}
+                                }
+                                // otherwise assume it's array of row objects
+                                return sel[0];
+                            }
+                        }
+                        if (typeof ctrl.getSelected === 'function') {
+                            const s = ctrl.getSelected();
+                            if (s) return s;
+                        }
+                    }
+
+                    // Fallback: inspect appForm._dataMap for selected flag or first row in first array
+                    // Try to find DynamicTable instances registered globally (when table had no name)
+                    try {
+                        if (typeof window !== 'undefined' && window._dynamicTableSubscribers && this.appName) {
+                            const subsIter = window._dynamicTableSubscribers.values();
+                            for (const s of subsIter) {
+                                try {
+                                    for (const tbl of s) {
+                                        try {
+                                            if (!tbl) continue;
+                                            if ((tbl.appName === this.appName || tbl.appName === APP_NAME) && (tbl.tableName === (this.dbTable || this.tableName || ''))) {
+                                                // map active row
+                                                const local = (typeof tbl._activeRowIndex === 'number') ? (tbl._activeRowIndex|0) : -1;
+                                                const first = (typeof tbl.firstVisibleRow === 'number') ? (tbl.firstVisibleRow|0) : (typeof tbl.firstRow === 'number' ? (tbl.firstRow|0) : 0);
+                                                const global = first + local;
+                                                if (tbl.dataCache && tbl.dataCache[global] && tbl.dataCache[global].loaded) return tbl.dataCache[global];
+                                                try { const arr = (typeof tbl.data_getRows === 'function') ? tbl.data_getRows(tbl.dataKey || tbl.data) : null; if (Array.isArray(arr) && arr[global]) return arr[global]; } catch(e){}
+                                            }
+                                        } catch(e){}
+                                    }
+                                } catch(e){}
+                            }
+                        }
+                    } catch (e) {}
+
+                    if (this._dataMap && typeof this._dataMap === 'object') {
+                        for (const key in this._dataMap) {
+                            const entry = this._dataMap[key];
+                            if (!entry) continue;
+                            if (Array.isArray(entry.value)) {
+                                const found = entry.value.find(r => r && (r._selected || r.selected || r.checked));
+                                if (found) return found;
+                                if (entry.value.length) return entry.value[0];
+                            }
+                        }
+                    }
+                } catch (e) {
+                    try { console.error('[uniListForm] getCurrentRow error', e); } catch (__) {}
+                }
+                return null;
+            }
+
             const instance = {
                 id: instanceId,
                 appName: APP_NAME,
                 container,
                 form: appForm,
+                initialOnSelectCallBack: initialOnSelectCallBack,
+
+                async onSelect(callParams) {
+                    let currentRecord = null;
+                    try { currentRecord = appForm.getCurrentRow(); } catch (_) {}
+
+                    try {
+                        const cb = (callParams && typeof callParams.onSelectCallBack === 'function') ? callParams.onSelectCallBack : (typeof instance.initialOnSelectCallBack === 'function' ? instance.initialOnSelectCallBack : null);
+                        if (cb) {
+                            try { cb(currentRecord, instance); } catch (e) { try { console.error && console.error('[uniListForm] callback error', e); } catch(_){} }
+                        } else {
+                            try { if (typeof showAlert === 'function') showAlert('Selected record123: ' + JSON.stringify(currentRecord)); } catch(_){ }
+                        }
+
+                        try {
+                            if (instance && typeof instance.destroy === 'function') {
+                                try { instance.destroy(); } catch (_) {}
+                            } else if (typeof window !== 'undefined' && window.MySpace && instance && instance.id && typeof window.MySpace.close === 'function') {
+                                try { window.MySpace.close(instance.id); } catch (_) {}
+                            }
+                        } catch (e) { try { console.error && console.error('[uniListForm] close error', e); } catch(_){} }
+                    } catch (e) {
+                        try { console.error && console.error('[uniListForm] onSelect error', e); } catch (_) {}
+                    }
+                },
+
                 async onOpen(params) {
                     const tableName = params && (params.dbTable || params.table);
                     if (!instanceOnOpen(tableName)) return;
-                    // Capture the open params so loader overrides can forward them to server
                     const openParams = Object.assign({}, params || {});
-                    // Normalize dbTable/table -> tableName so server resolvers receive `params.tableName`
                     openParams.tableName = openParams.tableName || openParams.dbTable || openParams.table || '';
 
-                    // Override DataForm methods so subsequent internal loads include openParams
                     try {
                         appForm.appName = APP_NAME;
                         appForm.getLayoutWithData = async function() {
@@ -71,6 +190,10 @@ try {
                 },
                 onAction(action, params) {
                     // Support framework calling instance.onAction('open', params)
+                    if (action === 'select') {
+                        try { if (typeof this.onSelect === 'function') this.onSelect(params); } catch (e) { console.error(e); }
+                        return;
+                    }
                     if (action === 'open') {
                         try { if (typeof this.onOpen === 'function') this.onOpen(params); } catch (e) { console.error(e); }
                         return;
@@ -81,8 +204,12 @@ try {
                 },
                 destroy() {
                     try { if (typeof appForm.destroy === 'function') appForm.destroy(); } catch (e) {}
+                    try { if (typeof appForm.close === 'function') appForm.close(); } catch (e) {}
                 }
             };
+
+            // Attach instance to the form so Form.doAction forwards to instance.onAction
+            appForm.instance = instance;
 
             if (params && (params.dbTable || params.table)) instance.onOpen(params);
             return instance;

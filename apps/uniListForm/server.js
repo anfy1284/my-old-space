@@ -19,11 +19,12 @@ function getData(params) {
 function getLayout(params) {
     // params may be used to customise layout depending on how app is opened
     let layout = [
-        {
+        { type: 'group', caption: 'Действия', orientation: 'horizontal', layout: [ { type: 'button', action: 'select', caption: 'Выбрать' }, { type: 'button', action: 'cancel', caption: 'Отмена' } ] },
+        {           
             type: 'table',
             caption: 'Организации (БД)',
             // dynamicTable true signals client to construct a DynamicTable bound to a server table
-            properties: { dynamicTable: true, appName: config.name, tableName: params.tableName, visibleRows: 10, editable: true, showToolbar: true, initialSort: [{ field: 'name', order: 'asc' }] }
+            properties: { dynamicTable: true, readOnly: false, appName: config.name, tableName: params.tableName, visibleRows: 10, editable: true, showToolbar: true, initialSort: [{ field: 'name', order: 'asc' }] }
         }
     ];
 

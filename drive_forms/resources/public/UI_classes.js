@@ -674,8 +674,8 @@ class Form extends UIObject {
                 if (this.element) this.activate();
             }, 0);
 
-            // Add form to global array
-            Form._allForms.push(this);
+            // NOTE: defer adding to global array until after we resolve overlaps
+            // (we will push `this` into Form._allForms after inserting into DOM)
 
             // Retro style: 3D border
             // Use client_config.json (if loaded) or default value
@@ -1108,6 +1108,14 @@ class Form extends UIObject {
             container.appendChild(this.element);
         }
 
+        // Resolve overlaps with existing forms so new windows cascade
+        try {
+            Form._resolveOverlap(this);
+        } catch (e) {}
+
+        // Now register this form in the global list
+        Form._allForms.push(this);
+
         // Update modal state if needed
         this.updateModalState();
 
@@ -1505,6 +1513,48 @@ Form._allForms = []; // Array of all created forms
 Form.topOffset = 0; // Top offset (e.g. for menu)
 Form.bottomOffset = 0; // Bottom offset (e.g. for taskbar)
 
+// Ensure a newly created form does not exactly overlap existing forms.
+// If a conflict is detected (same x and y as any existing form), shift the
+// new form right/down by the title bar height and re-check recursively.
+Form._resolveOverlap = function(form) {
+    if (!form) return;
+    // Determine shift amount: prefer actual titleBar height when available
+    let shift = 20;
+    try {
+        if (form.titleBar && typeof form.titleBar.offsetHeight === 'number' && form.titleBar.offsetHeight > 0) {
+            shift = form.titleBar.offsetHeight;
+        }
+    } catch (e) {}
+
+    // Safety limit to avoid infinite loops
+    const maxIter = Math.max(200, Form._allForms.length + 20);
+    let iter = 0;
+    let moved = false;
+
+    do {
+        moved = false;
+        for (let i = 0; i < Form._allForms.length; i++) {
+            const f = Form._allForms[i];
+            if (!f || f === form) continue;
+            try {
+                if (f.x === form.x && f.y === form.y) {
+                    form.x += shift;
+                    form.y += shift;
+                    if (form.element) {
+                        form.element.style.left = form.x + 'px';
+                        form.element.style.top = form.y + 'px';
+                    }
+                    moved = true;
+                    break; // restart checking from beginning
+                }
+            } catch (e) {
+                // ignore and continue
+            }
+        }
+        iter++;
+    } while (moved && iter < maxIter);
+};
+
 // Activate top form after page load
 if (typeof window !== 'undefined') {
     window.addEventListener('DOMContentLoaded', () => {
@@ -1533,6 +1583,19 @@ if (typeof window !== 'undefined') {
 // DataForm: specialized Form that knows how to load/render layout/data for
 // data-driven apps. This class mirrors the instance helper methods previously
 // defined on individual app forms and centralizes them here for reuse.
+// Default action forwarding: delegate form actions to attached instance, if present.
+// Implemented as prototype assignment to avoid placing a bare method at top-level.
+Form.prototype.doAction = function(action, params) {
+    try {
+        if (this.instance && typeof this.instance.onAction === 'function') {
+            return this.instance.onAction(action, params);
+        }
+    } catch (e) {
+        try { console.error('[Form] doAction forwarding error', e); } catch (_) {}
+    }
+    // no-op when no instance handler
+};
+
 class DataForm extends Form {
     constructor(appName) {
         super();
@@ -3055,7 +3118,7 @@ class TextBox extends FormInput {
 
 
     onSelectionStart() {
-        // Default selection start handler: dispatch `open-record-selector` event
+        // Open uniListForm chooser directly and forward selection to `handleSelection`.
         try {
             const selMeta = this.selection || {};
             const table = selMeta.table || null;
@@ -3065,21 +3128,27 @@ class TextBox extends FormInput {
                     const displayField = selMeta.displayField || 'name';
                     const display = (rec && (rec[displayField] !== undefined)) ? rec[displayField] : (rec && rec.name) || (rec && rec.id) || '';
                     try { if (typeof this.setText === 'function') this.setText(String(display)); } catch (_) { try { if (this.element) this.element.value = display; } catch(_){} }
-                    // signal change to consumers
                     try { if (this.element) this.element.dispatchEvent(new Event('input', { bubbles: true })); } catch (_) {}
-                } catch (e) { console.error('TextBox.onSelectionStart.setSelected error', e); }
+                } catch (e) {}
             };
 
-            const evDetail = { table, selection: selMeta, callback: setSelected, control: this };
-            const custom = new CustomEvent('open-record-selector', { detail: evDetail, cancelable: true });
-            window.dispatchEvent(custom);
-            // If nobody handled the event, fallback to a simple prompt
-            if (!custom.defaultPrevented) {
-                try {
-                    const input = prompt('Введите текст для поиска (' + (table || 'таблица') + ')');
-                    if (input !== null) setSelected({ id: input, [selMeta.displayField || 'name']: input });
-                } catch (e) {}
+            if (typeof window !== 'undefined' && window.MySpace && typeof window.MySpace.open === 'function') {
+                (async () => {
+                    try {
+                        // pass callback in params and wire instance to call it
+                        const cb = this.handleSelection.bind(this);
+                        const id = await window.MySpace.open('uniListForm', { dbTable: table, onSelectCallBack: cb });
+                        const inst = (window.MySpace && typeof window.MySpace.getInstance === 'function') ? window.MySpace.getInstance(id) : null;
+                    } catch (e) {}
+                })();
+                return;
             }
+
+            // Fallback to simple prompt when framework not available
+            try {
+                const input = prompt('Введите текст для поиска (' + (table || 'таблица') + ')');
+                if (input !== null) setSelected({ id: input, [selMeta.displayField || 'name']: input });
+            } catch (e) {}
         } catch (e) {
             try {
                 const input = prompt('Введите текст для поиска');
@@ -3089,6 +3158,28 @@ class TextBox extends FormInput {
                 }
             } catch (_) {}
         }
+    }
+
+    // Selection handler ("Обработка выбора") — default implementation: apply selection to the field
+    handleSelection(selectedRecord, uniListFormInstance) {
+        try {
+            const selMeta = this.selection || {};
+            const displayField = selMeta.displayField || 'name';
+            const display = (selectedRecord && (selectedRecord[displayField] !== undefined)) ? selectedRecord[displayField] : (selectedRecord && (selectedRecord.name || selectedRecord.id)) || '';
+
+            try {
+                if (typeof this.setText === 'function') this.setText(String(display));
+                else if (this.element) this.element.value = String(display);
+            } catch (_) {}
+
+            try { if (this.element) this.element.dispatchEvent(new Event('input', { bubbles: true })); } catch (_) {}
+
+            // Close/destroy chooser instance if provided
+            try {
+                if (uniListFormInstance && typeof uniListFormInstance.destroy === 'function') uniListFormInstance.destroy();
+                else if (typeof window !== 'undefined' && window.MySpace && uniListFormInstance && uniListFormInstance.id && typeof window.MySpace.close === 'function') window.MySpace.close(uniListFormInstance.id);
+            } catch (_) {}
+        } catch (e) {}
     }
 
 }
@@ -3949,7 +4040,7 @@ class AlertForm extends ModalForm {
         btnOk.Draw(this.contentArea);
         btnOk.onClick = () => {
             this.close();
-            if (this.onOk) this.onOk();
+            try { if (typeof this.onOk === 'function') this.onOk(); } catch (e) { console.error('AlertForm onOk callback error', e); }
         };
 
         const btnWidth = 80;
