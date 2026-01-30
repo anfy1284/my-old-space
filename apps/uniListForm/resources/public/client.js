@@ -143,7 +143,7 @@ try {
                         if (cb) {
                             try { cb(currentRecord, instance); } catch (e) { try { console.error && console.error('[uniListForm] callback error', e); } catch(_){} }
                         } else {
-                            try { if (typeof showAlert === 'function') showAlert('Selected record123: ' + JSON.stringify(currentRecord)); } catch(_){ }
+                            try {  } catch(_){ }
                         }
 
                         try {
