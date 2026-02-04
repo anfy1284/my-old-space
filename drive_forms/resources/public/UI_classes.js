@@ -1818,6 +1818,30 @@ class DataForm extends Form {
                         try { if (typeof tbl.setCaption === 'function') tbl.setCaption(caption); } catch (e) {}
                         try { if (typeof tbl.Draw === 'function') tbl.Draw(contentArea); } catch (e) {}
                         if (item.name) this.controlsMap[item.name] = tbl;
+                        
+                        // СИСТЕМНАЯ ИНТЕГРАЦИЯ: Автоматически связываем таблицу с формой
+                        // Таблица будет обновлять this._currentRecord при активации строки
+                        try {
+                            const form = this;
+                            if (!this._tables) this._tables = [];
+                            this._tables.push(tbl);
+                            if (!this.table) this.table = tbl; // Первая таблица - главная
+                            
+                            // Устанавливаем callback для автоматического обновления _currentRecord
+                            tbl.onRowActivate = function(rowIndex) {
+                                try {
+                                    const first = (typeof this.firstVisibleRow === 'number') ? (this.firstVisibleRow | 0) : 0;
+                                    const global = first + rowIndex;
+                                    if (this.dataCache && this.dataCache[global] && this.dataCache[global].loaded) {
+                                        form._currentRecord = this.dataCache[global];
+                                    }
+                                } catch (e) {
+                                    console.error('[DataForm] table onRowActivate error:', e);
+                                }
+                            };
+                        } catch (e) {
+                            console.error('[DataForm] failed to setup table integration:', e);
+                        }
                     } else {
                         const tbl = new Table(contentArea, tblProps);
                         try { if (typeof tbl.setCaption === 'function') tbl.setCaption(caption); } catch (e) {}
@@ -3137,7 +3161,10 @@ class TextBox extends FormInput {
                     try {
                         // pass callback in params and wire instance to call it
                         const cb = this.handleSelection.bind(this);
+                        const textBoxId = this.element ? this.element.id : 'unknown';
+                        console.log('[TextBox.onSelectionStart] Creating callback for TextBox:', textBoxId);
                         const id = await window.MySpace.open('uniListForm', { dbTable: table, onSelectCallBack: cb });
+                        console.log('[TextBox.onSelectionStart] Opened uniListForm instance:', id, 'for TextBox:', textBoxId);
                         const inst = (window.MySpace && typeof window.MySpace.getInstance === 'function') ? window.MySpace.getInstance(id) : null;
                     } catch (e) {}
                 })();
@@ -3163,6 +3190,8 @@ class TextBox extends FormInput {
     // Selection handler ("Обработка выбора") — default implementation: apply selection to the field
     handleSelection(selectedRecord, uniListFormInstance) {
         try {
+            const textBoxId = this.element ? this.element.id : 'unknown';
+            console.log('[TextBox.handleSelection] Called for TextBox:', textBoxId, 'with record:', selectedRecord);
             const selMeta = this.selection || {};
             const displayField = selMeta.displayField || 'name';
             const display = (selectedRecord && (selectedRecord[displayField] !== undefined)) ? selectedRecord[displayField] : (selectedRecord && (selectedRecord.name || selectedRecord.id)) || '';
@@ -3170,6 +3199,7 @@ class TextBox extends FormInput {
             try {
                 if (typeof this.setText === 'function') this.setText(String(display));
                 else if (this.element) this.element.value = String(display);
+                console.log('[TextBox.handleSelection] Updated TextBox:', textBoxId, 'with value:', display);
             } catch (_) {}
 
             try { if (this.element) this.element.dispatchEvent(new Event('input', { bubbles: true })); } catch (_) {}
@@ -5605,6 +5635,16 @@ class Table extends UIObject {
             }
             // Update controls
             this.updateAllRowsReadOnly();
+            
+            // Call onRowActivate callback if present
+            try {
+                if (typeof this.onRowActivate === 'function') {
+                    this.onRowActivate(rowIndex);
+                }
+            } catch (e) {
+                console.error('[DynamicTable] onRowActivate error:', e);
+            }
+            
             // attach global handlers to close editors on Escape
             // NOTE: Do NOT deactivate row on outside click - active row should remain active
             // even when focus moves to other UI elements (buttons, other forms, etc.)
@@ -5810,12 +5850,13 @@ class Table extends UIObject {
             bodyContainer.style.borderRight = '2px solid #ffffff';
             bodyContainer.style.borderBottom = '2px solid #ffffff';
             // If visibleRows specified (>0) fix the height to visibleRows*rowHeight, otherwise allow flexible grow
-            if (this.visibleRows && this.visibleRows > 0) {
-                bodyContainer.style.flex = '0 0 auto';
-                bodyContainer.style.height = (this.visibleRows * this.rowHeight) + 'px';
-            } else {
+            // ОТКЛЮЧЕНО: visibleRows мешает flex-растягиванию таблиц
+            // if (this.visibleRows && this.visibleRows > 0) {
+            //     bodyContainer.style.flex = '0 0 auto';
+            //     bodyContainer.style.height = (this.visibleRows * this.rowHeight) + 'px';
+            // } else {
                 bodyContainer.style.flex = '1 1 auto';
-            }
+            // }
             wrapper.appendChild(bodyContainer);
 
             // Build header and body using extractable helpers so DynamicTable can override

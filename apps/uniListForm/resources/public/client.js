@@ -35,20 +35,59 @@ try {
 
             appForm.getCurrentRow = function() {
                 try {
+                    console.log('[getCurrentRow] instanceId:', instanceId);
+                    
+                    // SIMPLE FIX: If we have stored current record, return it!
+                    if (this._currentRecord) {
+                        console.log('[getCurrentRow] returning stored _currentRecord:', this._currentRecord);
+                        return this._currentRecord;
+                    }
+                    
+                    console.log('[getCurrentRow] no stored record, this.controlsMap keys:', Object.keys(this.controlsMap || {}));
+                    
+                    // CRITICAL FIX: If we have a direct reference to our DynamicTable, use it first!
+                    if (this._dynamicTableInstance) {
+                        console.log('[getCurrentRow] using stored _dynamicTableInstance');
+                        const tbl = this._dynamicTableInstance;
+                        const local = (typeof tbl._activeRowIndex === 'number') ? (tbl._activeRowIndex|0) : -1;
+                        const first = (typeof tbl.firstVisibleRow === 'number') ? (tbl.firstVisibleRow|0) : (typeof tbl.firstRow === 'number' ? (tbl.firstRow|0) : 0);
+                        const global = first + local;
+                        console.log('[getCurrentRow] from stored table - local:', local, 'first:', first, 'global:', global);
+                        if (local >= 0) {
+                            if (tbl.dataCache && tbl.dataCache[global] && tbl.dataCache[global].loaded) {
+                                console.log('[getCurrentRow] returning from stored table dataCache:', tbl.dataCache[global]);
+                                return tbl.dataCache[global];
+                            }
+                            try { 
+                                const arr = (typeof tbl.data_getRows === 'function') ? tbl.data_getRows(tbl.dataKey || tbl.data) : null; 
+                                if (Array.isArray(arr) && arr[global]) {
+                                    console.log('[getCurrentRow] returning from stored table data_getRows:', arr[global]);
+                                    return arr[global];
+                                }
+                            } catch(e){}
+                        }
+                    }
+                    
                     // Prefer table-like controls in controlsMap
                     const cm = this.controlsMap || {};
                     for (const k in cm) {
                         const ctrl = cm[k];
                         if (!ctrl) continue;
+                        console.log('[getCurrentRow] checking control:', k, 'has _activeRowIndex:', typeof ctrl._activeRowIndex === 'number', 'value:', ctrl._activeRowIndex);
                         // If control exposes active row index, prefer DynamicTable-style mapping
                         if (typeof ctrl._activeRowIndex === 'number') {
                             const localIdx = ctrl._activeRowIndex | 0;
+                            console.log('[getCurrentRow] found table control, localIdx:', localIdx);
                             // If control exposes firstVisibleRow (DynamicTable), compute global index
                             const first = (typeof ctrl.firstVisibleRow === 'number') ? (ctrl.firstVisibleRow | 0) : (typeof ctrl.firstRow === 'number' ? (ctrl.firstRow|0) : null);
                             if (first !== null) {
                                 const globalIdx = first + localIdx;
+                                console.log('[getCurrentRow] globalIdx:', globalIdx, 'firstVisibleRow:', first);
                                 try {
-                                    if (ctrl.dataCache && Object.prototype.hasOwnProperty.call(ctrl.dataCache, globalIdx) && ctrl.dataCache[globalIdx] && ctrl.dataCache[globalIdx].loaded) return ctrl.dataCache[globalIdx];
+                                    if (ctrl.dataCache && Object.prototype.hasOwnProperty.call(ctrl.dataCache, globalIdx) && ctrl.dataCache[globalIdx] && ctrl.dataCache[globalIdx].loaded) {
+                                        console.log('[getCurrentRow] returning from dataCache:', ctrl.dataCache[globalIdx]);
+                                        return ctrl.dataCache[globalIdx];
+                                    }
                                 } catch (e) {}
                                 try {
                                     const all = (typeof ctrl.data_getRows === 'function') ? ctrl.data_getRows(ctrl.dataKey || ctrl.data) : null;
@@ -88,19 +127,58 @@ try {
                     // Fallback: inspect appForm._dataMap for selected flag or first row in first array
                     // Try to find DynamicTable instances registered globally (when table had no name)
                     try {
+                        console.log('[getCurrentRow] fallback: checking window._dynamicTableSubscribers');
                         if (typeof window !== 'undefined' && window._dynamicTableSubscribers && this.appName) {
+                            console.log('[getCurrentRow] this.appName:', this.appName, 'this.dbTable:', this.dbTable, 'instanceId:', instanceId);
                             const subsIter = window._dynamicTableSubscribers.values();
+                            
+                            // First pass: try to find table with matching _uniListFormId
                             for (const s of subsIter) {
                                 try {
+                                    console.log('[getCurrentRow] checking subscriber set, size:', s.size);
                                     for (const tbl of s) {
                                         try {
                                             if (!tbl) continue;
-                                            if ((tbl.appName === this.appName || tbl.appName === APP_NAME) && (tbl.tableName === (this.dbTable || this.tableName || ''))) {
+                                            console.log('[getCurrentRow] checking table, appName:', tbl.appName, 'tableName:', tbl.tableName, '_activeRowIndex:', tbl._activeRowIndex, '_uniListFormId:', tbl._uniListFormId);
+                                            // CRITICAL: Match by instanceId first!
+                                            if (tbl._uniListFormId === instanceId && (tbl.appName === this.appName || tbl.appName === APP_NAME) && (tbl.tableName === (this.dbTable || this.tableName || ''))) {
+                                                console.log('[getCurrentRow] MATCHED table by instanceId!');
                                                 // map active row
                                                 const local = (typeof tbl._activeRowIndex === 'number') ? (tbl._activeRowIndex|0) : -1;
                                                 const first = (typeof tbl.firstVisibleRow === 'number') ? (tbl.firstVisibleRow|0) : (typeof tbl.firstRow === 'number' ? (tbl.firstRow|0) : 0);
                                                 const global = first + local;
-                                                if (tbl.dataCache && tbl.dataCache[global] && tbl.dataCache[global].loaded) return tbl.dataCache[global];
+                                                console.log('[getCurrentRow] local:', local, 'first:', first, 'global:', global);
+                                                if (tbl.dataCache && tbl.dataCache[global] && tbl.dataCache[global].loaded) {
+                                                    console.log('[getCurrentRow] returning from matched table dataCache:', tbl.dataCache[global]);
+                                                    return tbl.dataCache[global];
+                                                }
+                                                try { const arr = (typeof tbl.data_getRows === 'function') ? tbl.data_getRows(tbl.dataKey || tbl.data) : null; if (Array.isArray(arr) && arr[global]) return arr[global]; } catch(e){}
+                                            }
+                                        } catch(e){}
+                                    }
+                                } catch(e){}
+                            }
+                            
+                            // Second pass: if not found by instanceId, take any unassigned table
+                            console.log('[getCurrentRow] no table matched by instanceId, trying unassigned tables');
+                            const subsIter2 = window._dynamicTableSubscribers.values();
+                            for (const s of subsIter2) {
+                                try {
+                                    for (const tbl of s) {
+                                        try {
+                                            if (!tbl) continue;
+                                            if (!tbl._uniListFormId && (tbl.appName === this.appName || tbl.appName === APP_NAME) && (tbl.tableName === (this.dbTable || this.tableName || ''))) {
+                                                console.log('[getCurrentRow] Found unassigned table, claiming it');
+                                                tbl._uniListFormId = instanceId; // Claim it
+                                                // map active row
+                                                const local = (typeof tbl._activeRowIndex === 'number') ? (tbl._activeRowIndex|0) : -1;
+                                                const first = (typeof tbl.firstVisibleRow === 'number') ? (tbl.firstVisibleRow|0) : (typeof tbl.firstRow === 'number' ? (tbl.firstRow|0) : 0);
+                                                const global = first + local;
+                                                console.log('[getCurrentRow] local:', local, 'first:', first, 'global:', global);
+                                                if (tbl.dataCache && tbl.dataCache[global] && tbl.dataCache[global].loaded) {
+                                                    console.log('[getCurrentRow] returning from claimed table dataCache:', tbl.dataCache[global]);
+                                                    return tbl.dataCache[global];
+                                                }
                                                 try { const arr = (typeof tbl.data_getRows === 'function') ? tbl.data_getRows(tbl.dataKey || tbl.data) : null; if (Array.isArray(arr) && arr[global]) return arr[global]; } catch(e){}
                                             }
                                         } catch(e){}
@@ -135,13 +213,31 @@ try {
                 initialOnSelectCallBack: initialOnSelectCallBack,
 
                 async onSelect(callParams) {
+                    console.log('[onSelect] called for instance:', instanceId);
+                    console.log('[onSelect] callParams:', callParams);
+                    console.log('[onSelect] has callParams.onSelectCallBack:', !!(callParams && callParams.onSelectCallBack));
+                    console.log('[onSelect] has instance.initialOnSelectCallBack:', !!instance.initialOnSelectCallBack);
+                    
                     let currentRecord = null;
                     try { currentRecord = appForm.getCurrentRow(); } catch (_) {}
+                    console.log('[onSelect] currentRecord:', currentRecord);
+                    
+                    if (!currentRecord) {
+                        console.log('[onSelect] NO CURRENT RECORD - ABORTING');
+                        return;
+                    }
 
                     try {
+                        // IMPORTANT: Always use callParams.onSelectCallBack if present,
+                        // only fall back to instance.initialOnSelectCallBack if callParams is empty.
+                        // This ensures that when multiple instances are open, each uses its own callback.
                         const cb = (callParams && typeof callParams.onSelectCallBack === 'function') ? callParams.onSelectCallBack : (typeof instance.initialOnSelectCallBack === 'function' ? instance.initialOnSelectCallBack : null);
+                        console.log('[uniListForm] using callback:', cb ? 'found' : 'NOT FOUND');
                         if (cb) {
-                            try { cb(currentRecord, instance); } catch (e) { try { console.error && console.error('[uniListForm] callback error', e); } catch(_){} }
+                            try { 
+                                console.log('[uniListForm] calling callback with record:', currentRecord);
+                                cb(currentRecord, instance); 
+                            } catch (e) { try { console.error && console.error('[uniListForm] callback error', e); } catch(_){} }
                         } else {
                             try {  } catch(_){ }
                         }
@@ -187,6 +283,11 @@ try {
                     }
 
                     try { appForm.Draw(); } catch (e) { console.error(e); }
+                    
+                    // Таблица автоматически связана с формой через DataForm.renderItem
+                    // При клике на строку таблица обновит appForm._currentRecord
+                    // Ничего настраивать не нужно!
+                    console.log('[uniListForm] form opened, table:', appForm.table ? 'connected' : 'not found');
                 },
                 onAction(action, params) {
                     // Support framework calling instance.onAction('open', params)
@@ -233,6 +334,9 @@ try {
                     }
                 },
                 destroy() {
+                    console.log('[uniListForm] destroy called for instance:', instanceId);
+                    
+                    // Cleanup не нужен - таблица умрет вместе с формой
                     try { if (typeof appForm.destroy === 'function') appForm.destroy(); } catch (e) {}
                     try { if (typeof appForm.close === 'function') appForm.close(); } catch (e) {}
                 }
