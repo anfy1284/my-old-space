@@ -419,20 +419,22 @@ async function reloadDefaultValues() {
     return await loadDefaultValuesFromDB();
 }
 
-module.exports = {
-    getServerTime,
-    helloFromGlobal,
-    getUserBySessionID,
-    modelsDB,
-    initModelsDB,
-    getContentType,
-    processDefaultValues,
-    loadDefaultValuesFromDB,
-    getDefaultValue,
-    getDefaultValues,
-    reloadDefaultValues,
-    collectAllModelDefs,  // Export for createDB.js
-};
+// Add getter for modelsDB to ensure we always get the current value
+Object.defineProperty(module.exports, 'modelsDB', {
+    get: function() { return modelsDB; }
+});
+
+module.exports.getServerTime = getServerTime;
+module.exports.helloFromGlobal = helloFromGlobal;
+module.exports.getUserBySessionID = getUserBySessionID;
+module.exports.initModelsDB = initModelsDB;
+module.exports.getContentType = getContentType;
+module.exports.processDefaultValues = processDefaultValues;
+module.exports.loadDefaultValuesFromDB = loadDefaultValuesFromDB;
+module.exports.getDefaultValue = getDefaultValue;
+module.exports.getDefaultValues = getDefaultValues;
+module.exports.reloadDefaultValues = reloadDefaultValues;
+module.exports.collectAllModelDefs = collectAllModelDefs;  // Export for createDB.js
 
 // --- User management moved to drive_root level ---
 async function createNewUser(sessionID, name, systems, roles, isGuest = false, guestEmail = null) {

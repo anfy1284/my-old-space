@@ -1,8 +1,8 @@
 {
-    "name": "uniListForm",
-    "autoStart": false,
+    "name": "uniRecordForm",
+    "autoStart": true,
     "system": ["mySpace"],
-    "access": ["admin", "user"],
+    "access": ["admin", "user", "public"],
     "dependencies": {},
     "mainMenuCommands": 
         [

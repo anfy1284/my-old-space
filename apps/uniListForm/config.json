@@ -2,7 +2,7 @@
     "name": "uniListForm",
     "autoStart": false,
     "system": ["mySpace"],
-    "access": ["admin", "user"],
+    "access": ["admin", "user", "public"],
     "dependencies": {},
     "mainMenuCommands": 
         [

@@ -5605,19 +5605,9 @@ class Table extends UIObject {
             }
             // Update controls
             this.updateAllRowsReadOnly();
-            // attach global handlers to close editors on outside click / Escape
-            if (!this._docClickHandler) {
-                this._docClickHandler = (ev) => {
-                    try {
-                        const host = this.element;
-                        if (!host) return;
-                        if (!host.contains(ev.target)) {
-                            this.deactivateRow();
-                        }
-                    } catch (e) {}
-                };
-                document.addEventListener('click', this._docClickHandler);
-            }
+            // attach global handlers to close editors on Escape
+            // NOTE: Do NOT deactivate row on outside click - active row should remain active
+            // even when focus moves to other UI elements (buttons, other forms, etc.)
             if (!this._docKeyHandler) {
                 this._docKeyHandler = (ev) => {
                     try {
@@ -5682,10 +5672,6 @@ class Table extends UIObject {
                 }
             }
             this.updateAllRowsReadOnly();
-            if (this._docClickHandler) {
-                try { document.removeEventListener('click', this._docClickHandler); } catch (e) {}
-                this._docClickHandler = null;
-            }
             if (this._docKeyHandler) {
                 try { document.removeEventListener('keydown', this._docKeyHandler); } catch (e) {}
                 this._docKeyHandler = null;

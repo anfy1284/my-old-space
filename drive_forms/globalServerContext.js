@@ -56,10 +56,13 @@ async function loadApps(user) {
     const appsBasePath = app.__appsPath || 'apps';
     const cleanAppPath = (app.path || `/${app.name}`).replace(/^[/\\]+/, '');
     const configPath = path.resolve(baseDir, appsBasePath, cleanAppPath, 'config.json');
-    if (!fs.existsSync(configPath)) continue;
+    if (!fs.existsSync(configPath)) {
+      console.log(`[loadApps] Config not found for ${app.name}: ${configPath}`);
+      continue;
+    }
     const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
     if (Array.isArray(config.access) && config.access.includes(effectiveRole)) {
-      console.log(`[loadApps] Loading app: ${app.name}`);
+      console.log(`[loadApps] Loading app: ${app.name}, autoStart: ${config.autoStart}`);
       // Only load apps marked with autoStart: true
       if (config.autoStart === true) {
         const clientPath = path.resolve(baseDir, appsBasePath, cleanAppPath, 'resources', 'public', 'client.js');
@@ -67,6 +70,8 @@ async function loadApps(user) {
           allCode += fs.readFileSync(clientPath, 'utf8') + '\n\n';
         }
       }
+    } else {
+      console.log(`[loadApps] Skipping app: ${app.name}, access: ${JSON.stringify(config.access)}, effectiveRole: ${effectiveRole}`);
     }
   }
   return allCode;

@@ -173,6 +173,7 @@ function mapInputTypeToControl(inputType) {
 // Возвращает: { data: Array, layout: Array }
 // params may include { recordID }
 async function generateFormSpec(tableName, params) {
+    console.log('[generateFormSpec] called with tableName:', tableName, 'params:', params);
     try {
         if (!tableName) return { data: [], layout: [] };
         const fields = await buildTableFieldsFromModel(tableName);
@@ -181,18 +182,31 @@ async function generateFormSpec(tableName, params) {
         // Attempt to load record by ID if provided
         let record = null;
         try {
-            const globalCtx = require('../../drive_root/globalServerContext');
+            // Get globalCtx WITHOUT deleting cache - use parent process's version
+            const mainModulePath = require.main.filename;
+            const mainDir = require('path').dirname(mainModulePath);
+            const globalCtxPath = require('path').join(mainDir, 'node_modules', 'my-old-space', 'drive_root', 'globalServerContext.js');
+            const globalCtx = require(globalCtxPath);
+            
             const modelName = globalCtx.getModelNameForTable(tableName) || tableName;
+            console.log('[generateFormSpec] modelName:', modelName);
             const models = globalCtx.modelsDB || {};
+            console.log('[generateFormSpec] available models:', Object.keys(models));
             const Model = models[modelName];
+            console.log('[generateFormSpec] Model found:', !!Model);
             const recordId = params && (params.recordID || params.recordId || params.id);
+            console.log('[generateFormSpec] recordId extracted:', recordId);
             if (Model && recordId !== undefined && recordId !== null) {
                 try {
+                    console.log('[generateFormSpec] Fetching record with id:', recordId);
                     record = await Model.findByPk(recordId, { raw: true });
+                    console.log('[generateFormSpec] Fetched record:', record);
                 } catch (e) {
                     console.error('[generateFormSpec] Model.findByPk error:', e && e.message || e);
                     record = null;
                 }
+            } else {
+                console.log('[generateFormSpec] Skipping record fetch. Model:', !!Model, 'recordId:', recordId);
             }
         } catch (e) {
             // ignore lookup errors and proceed with defaults

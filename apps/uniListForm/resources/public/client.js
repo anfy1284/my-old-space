@@ -198,6 +198,36 @@ try {
                         try { if (typeof this.onOpen === 'function') this.onOpen(params); } catch (e) { console.error(e); }
                         return;
                     }
+                    if (action === 'recordOpen') {
+                        try {
+                            console.log('[recordOpen] Getting current row...');
+                            const row = appForm.getCurrentRow();
+                            console.log('[recordOpen] row:', row);
+                            console.log('[recordOpen] row.id:', row ? row.id : 'row is null');
+                            
+                            // Also log table state
+                            const cm = appForm.controlsMap || {};
+                            for (const k in cm) {
+                                const ctrl = cm[k];
+                                if (ctrl && typeof ctrl._activeRowIndex === 'number') {
+                                    console.log('[recordOpen] table._activeRowIndex:', ctrl._activeRowIndex);
+                                    console.log('[recordOpen] table.firstVisibleRow:', ctrl.firstVisibleRow);
+                                    console.log('[recordOpen] table.firstRow:', ctrl.firstRow);
+                                }
+                            }
+                            
+                            if (!row || !row.id) {
+                                if (typeof showAlert === 'function') showAlert('Выберите запись');
+                                return;
+                            }
+                            const tableName = appForm.dbTable || params.tableName || '';
+                            console.log('[recordOpen] Opening uniRecordForm with tableName:', tableName, 'recordID:', row.id);
+                            if (window.MySpace && typeof window.MySpace.open === 'function') {
+                                window.MySpace.open('uniRecordForm', { tableName, recordID: row.id });
+                            }
+                        } catch (e) { console.error('[recordOpen] error:', e); }
+                        return;
+                    }
                     if (typeof appForm.doAction === 'function') {
                         try { appForm.doAction(action, params); } catch (e) { console.error(e); }
                     }
