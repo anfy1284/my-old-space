@@ -5842,7 +5842,8 @@ class Table extends UIObject {
 
             // Body container (scrollable)
             const bodyContainer = document.createElement('div');
-            bodyContainer.style.overflow = 'auto';
+            bodyContainer.style.overflowY = 'scroll'; // Always show scrollbar to reserve space
+            bodyContainer.style.overflowX = 'auto';
             bodyContainer.style.backgroundColor = '#ffffff';
             bodyContainer.style.boxSizing = 'border-box';
             // Borders for body only: left - dark, right - light, bottom - light, no top
@@ -5882,10 +5883,10 @@ class Table extends UIObject {
                 try {
                     const scrollBarWidth = bodyContainer.offsetWidth - bodyContainer.clientWidth;
                     if (scrollBarWidth > 0) {
-                        // Reduce header by scrollbar width but add a small 4px compensation
-                        headerTable.style.width = 'calc(100% - ' + scrollBarWidth + 'px + 4px)';
+                        // Add padding-right to headerContainer equal to scrollbar width minus 1px
+                        headerContainer.style.paddingRight = (scrollBarWidth - 1) + 'px';
                     } else {
-                        headerTable.style.width = '100%';
+                        headerContainer.style.paddingRight = '0';
                     }
                 } catch (e) {}
             };
