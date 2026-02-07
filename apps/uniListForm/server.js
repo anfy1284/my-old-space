@@ -24,7 +24,7 @@ function getLayout(params) {
             type: 'table',
             caption: 'Организации (БД)',
             // dynamicTable true signals client to construct a DynamicTable bound to a server table
-            properties: { dynamicTable: true, readOnly: false, appName: config.name, tableName: params.tableName, visibleRows: 10, editable: true, showToolbar: true, initialSort: [{ field: 'name', order: 'asc' }] }
+            properties: { dynamicTable: true, readOnly: true, appName: config.name, tableName: params.tableName, visibleRows: 10, editable: true, showToolbar: true, initialSort: [{ field: 'name', order: 'asc' }] }
         }
     ];
 

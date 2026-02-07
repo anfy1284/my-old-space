@@ -259,6 +259,8 @@ try {
                     if (!instanceOnOpen(tableName)) return;
                     const openParams = Object.assign({}, params || {});
                     openParams.tableName = openParams.tableName || openParams.dbTable || openParams.table || '';
+                    // Respect selectMode from openParams; default to false when absent
+                    appForm.selectMode = openParams.selectMode || false;
 
                     try {
                         appForm.appName = APP_NAME;

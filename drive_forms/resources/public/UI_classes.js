@@ -1334,7 +1334,28 @@ class Form extends UIObject {
     }
 
     onKeyPressed(event) {
-        // Handle key pressed event
+        try {
+            // Close form on ESC unless focus is inside an editable control
+            if (!event) return;
+            const key = event.key || event.keyCode || '';
+            if (key === 'Escape' || key === 'Esc' || key === 27) {
+                try {
+                    const active = (typeof document !== 'undefined') ? document.activeElement : null;
+                    let isEditable = false;
+                    try {
+                        if (active) {
+                            const tag = active.tagName ? active.tagName.toLowerCase() : '';
+                            if (tag === 'input' || tag === 'textarea' || tag === 'select' || active.isContentEditable) isEditable = true;
+                        }
+                    } catch (e) {}
+
+                    if (!isEditable) {
+                        try { this.close(); } catch (e) {}
+                        try { event.preventDefault && event.preventDefault(); } catch (e) {}
+                    }
+                } catch (e) {}
+            }
+        } catch (e) {}
     }
 
     onKeyReleased(event) {
@@ -3189,7 +3210,7 @@ class TextBox extends FormInput {
                         const cb = this.handleSelection.bind(this);
                         const textBoxId = this.element ? this.element.id : 'unknown';
                         console.log('[TextBox.onSelectionStart] Creating callback for TextBox:', textBoxId);
-                        const id = await window.MySpace.open('uniListForm', { dbTable: table, onSelectCallBack: cb });
+                        const id = await window.MySpace.open('uniListForm', { dbTable: table, onSelectCallBack: cb, selectMode: true, readOnly: true });
                         console.log('[TextBox.onSelectionStart] Opened uniListForm instance:', id, 'for TextBox:', textBoxId);
                         const inst = (window.MySpace && typeof window.MySpace.getInstance === 'function') ? window.MySpace.getInstance(id) : null;
                     } catch (e) {}
@@ -5612,9 +5633,34 @@ class Table extends UIObject {
             } catch (e) {}
         });
 
-        // Allow Enter key to activate the row
+        // Double-click on a row should trigger select/open only for readOnly tables
+        tr.addEventListener('dblclick', (ev) => {
+            try {
+                if (this.readOnly) {
+                    // Make sure row is active first
+                    if (this._activeRowIndex !== rowIndex) this.activateRow(rowIndex);
+                    if (typeof this.onSelectOrOpen === 'function') {
+                        try { this.onSelectOrOpen(rowIndex); } catch (e) {}
+                    }
+                }
+            } catch (e) {}
+        });
+
+        // Allow Enter key to activate the row (or trigger select/open for readOnly tables)
         tr.addEventListener('keydown', (ev) => {
-            try { if (ev.key === 'Enter') tr.click(); } catch (e) {}
+            try {
+                if (ev.key === 'Enter') {
+                    if (this.readOnly) {
+                        // Ensure row active
+                        if (this._activeRowIndex !== rowIndex) this.activateRow(rowIndex);
+                        if (typeof this.onSelectOrOpen === 'function') {
+                            try { this.onSelectOrOpen(rowIndex); } catch (e) {}
+                        }
+                    } else {
+                        tr.click();
+                    }
+                }
+            } catch (e) {}
         });
         for (let c = 0; c < this.columns.length; c++) {
             const col = this.columns[c] || {};
@@ -5821,6 +5867,50 @@ class Table extends UIObject {
             const hdr = this.element.querySelector('.table-caption');
             if (hdr) hdr.textContent = c;
         } } catch (e) {}
+    }
+
+    // Called when a readOnly table row is requested to be selected/opened
+    // Invoked on double-click or Enter only when `this.readOnly === true`.
+    // The implementation is intentionally empty; it includes a conditional
+    // branch so callers can rely on `appForm.selectMode` being checked here.
+    onSelectOrOpen(rowIndex) {
+        try {
+            const isSelect = !!(this.appForm && this.appForm.selectMode);
+            if (!isSelect) {
+                // open mode: resolve the row object and open uniRecordForm
+                try {
+                    const rows = this.data_getRows ? this.data_getRows(this.dataKey) : [];
+                    const row = Array.isArray(rows) ? rows[rowIndex] : null;
+                    if (row && (row.id !== undefined && row.id !== null)) {
+                        const tableName = this.tableName || (this.appForm && (this.appForm.dbTable || this.dataKey)) || '';
+                        if (typeof window !== 'undefined' && window.MySpace && typeof window.MySpace.open === 'function') {
+                            try { window.MySpace.open('uniRecordForm', { tableName, recordID: row.id }); } catch (e) {}
+                        }
+                    }
+                } catch (e) {}
+            } else {
+                // selectMode === true -> selection mode: set form current record and call onSelect if present
+                try {
+                    const rows = this.data_getRows ? this.data_getRows(this.dataKey) : [];
+                    const row = Array.isArray(rows) ? rows[rowIndex] : null;
+                    if (row) {
+                        try {
+                            if (this.appForm) this.appForm._currentRecord = row;
+                        } catch (e) {}
+
+                        // Prefer instance.onSelect if available, otherwise call appForm.onSelect
+                        try {
+                            const inst = this.appForm && this.appForm.instance ? this.appForm.instance : null;
+                            if (inst && typeof inst.onSelect === 'function') {
+                                try { inst.onSelect({}); } catch (e) {}
+                            } else if (this.appForm && typeof this.appForm.onSelect === 'function') {
+                                try { this.appForm.onSelect({}); } catch (e) {}
+                            }
+                        } catch (e) {}
+                    }
+                } catch (e) {}
+            }
+        } catch (e) {}
     }
 
     Draw(container) {
