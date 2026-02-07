@@ -81,6 +81,19 @@ class UIObject {
             .then(r => r.ok ? r.json() : {})
             .then(json => {
                 UIObject._clientConfig = json || {};
+                // Apply some global CSS variables derived from client config so
+                // individual elements don't need inline styles for theme colors.
+                try {
+                    if (typeof document !== 'undefined') {
+                        const base = UIObject.getClientConfigValue('defaultColor', '#c0c0c0');
+                        const light = UIObject.brightenColor(base, 60);
+                        const dark = UIObject.brightenColor(base, -60);
+                        try { document.documentElement.style.setProperty('--input-field-button-border-light', light); } catch (e) {}
+                        try { document.documentElement.style.setProperty('--input-field-button-border-dark', dark); } catch (e) {}
+                        try { document.documentElement.style.setProperty('--tb-border-light', light); } catch (e) {}
+                        try { document.documentElement.style.setProperty('--tb-border-dark', dark); } catch (e) {}
+                    }
+                } catch (e) {}
                 return UIObject._clientConfig;
             })
             .catch(() => {
@@ -351,6 +364,22 @@ class FormInput extends UIObject {
                 try { this._ro.disconnect(); } catch (e) {}
                 this._ro = null;
             }
+        } catch (e) {}
+
+        try {
+            // cleanup observers/listeners attached to embedded buttons
+            try {
+                if (this._listBtn) {
+                    try { if (this._listBtn._ro && typeof this._listBtn._ro.disconnect === 'function') this._listBtn._ro.disconnect(); } catch (e) {}
+                    try { if (this._listBtn._win) window.removeEventListener('resize', this._listBtn._win); } catch (e) {}
+                }
+            } catch (e) {}
+            try {
+                if (this._selectBtn) {
+                    try { if (this._selectBtn._ro && typeof this._selectBtn._ro.disconnect === 'function') this._selectBtn._ro.disconnect(); } catch (e) {}
+                    try { if (this._selectBtn._win) window.removeEventListener('resize', this._selectBtn._win); } catch (e) {}
+                }
+            } catch (e) {}
         } catch (e) {}
 
         try { if (this.inputContainer && typeof this.inputContainer.remove === 'function') this.inputContainer.remove(); } catch (e) {}
@@ -2367,7 +2396,7 @@ class TextBox extends FormInput {
             this.inputContainer.classList.add('ui-input-container');
             this.inputContainer.style.display = 'flex';
             this.inputContainer.style.flexDirection = 'row';
-            this.inputContainer.style.alignItems = 'center';
+            this.inputContainer.style.alignItems = 'stretch';
             this.inputContainer.style.width = '100%';
             this.inputContainer.style.boxSizing = 'border-box';
             // Allow input container and inner input to shrink below content width
@@ -2428,28 +2457,31 @@ class TextBox extends FormInput {
                         sbtn.type = 'button';
                         sbtn.tabIndex = -1;
                         sbtn.textContent = '...';
-                        sbtn.style.flex = '0 0 22px';
-                        sbtn.style.height = '100%';
-                        sbtn.style.minWidth = '22px';
-                        sbtn.style.display = 'inline-flex';
-                        sbtn.style.alignItems = 'center';
-                        sbtn.style.justifyContent = 'center';
-                        sbtn.style.margin = '0';
-                        sbtn.style.padding = '0';
-                        sbtn.style.fontFamily = 'MS Sans Serif, sans-serif';
-                        sbtn.style.fontSize = '12px';
-                        sbtn.style.boxSizing = 'border-box';
-                        sbtn.style.cursor = 'default';
-                        const base = UIObject.getClientConfigValue('defaultColor', '#c0c0c0');
-                        const light = UIObject.brightenColor(base, 60);
-                        const dark = UIObject.brightenColor(base, -60);
-                        sbtn.style.borderTop = `2px solid ${light}`;
-                        sbtn.style.borderLeft = `2px solid ${light}`;
-                        sbtn.style.borderRight = `2px solid ${dark}`;
-                        sbtn.style.borderBottom = `2px solid ${dark}`;
+                        // Apply CSS class for static styling; colors provided globally by client config
+                        try { sbtn.classList.add('input-field-button'); } catch (e) {}
                         sbtn.addEventListener('click', (ev) => { try { ev.stopPropagation(); ev.preventDefault(); this.onSelectionStart(); } catch (_) {} });
                         this._selectBtn = sbtn;
                         this.inputContainer.appendChild(this._selectBtn);
+                        // Ensure button width equals computed height (do not change height)
+                        try {
+                            const syncBtn = (b) => {
+                                try {
+                                    const update = () => {
+                                        try {
+                                            const h = Math.round((b.offsetHeight || (b.getBoundingClientRect && b.getBoundingClientRect().height) || 0));
+                                            if (h > 0) b.style.width = h + 'px';
+                                        } catch (_) {}
+                                    };
+                                    update();
+                                    if (typeof ResizeObserver !== 'undefined') {
+                                        try { const ro = new ResizeObserver(update); ro.observe(b.parentElement || b); b._ro = ro; } catch(_) {}
+                                    }
+                                    const winHandler = () => update();
+                                    try { window.addEventListener('resize', winHandler); b._win = winHandler; } catch(_) {}
+                                } catch (_) {}
+                            };
+                            try { syncBtn(this._selectBtn); } catch (_) {}
+                        } catch (e) {}
                     }
                 }
             } catch (e) {}
@@ -2547,6 +2579,8 @@ class TextBox extends FormInput {
             try {
                 // remove stale button/popup if present and mode disabled
                 if (!this.listMode && this._listBtn) {
+                    try { if (this._listBtn._ro && typeof this._listBtn._ro.disconnect === 'function') this._listBtn._ro.disconnect(); } catch (_) {}
+                    try { if (this._listBtn._win) window.removeEventListener('resize', this._listBtn._win); } catch (_) {}
                     try { this._listBtn.remove(); } catch (_) {}
                     this._listBtn = null;
                     try { this._closeList && this._closeList(); } catch (_) {}
@@ -2561,40 +2595,12 @@ class TextBox extends FormInput {
                         // Create glyph in a child span and visually scale it so the
                         // symbol appears larger without affecting layout (transforms
                         // don't change document flow size).
-                        const glyph = document.createElement('span');
-                        glyph.textContent = '▾';
-                        glyph.style.display = 'inline-block';
-                        glyph.style.fontFamily = 'MS Sans Serif, sans-serif';
-                        glyph.style.fontSize = '11px';
-                        glyph.style.lineHeight = '1';
-                        glyph.style.transform = 'scale(1.25)';
-                        glyph.style.transformOrigin = 'center';
-                        glyph.style.pointerEvents = 'none';
-                        // Button sizing stays small so layout (height) doesn't change
-                        // make button slightly narrower while preserving height
-                        btn.style.flex = '0 0 18px';
-                        btn.style.height = '100%';
-                        btn.style.minWidth = '18px';
-                        btn.style.display = 'inline-flex';
-                        btn.style.alignItems = 'center';
-                        btn.style.justifyContent = 'center';
-                        btn.style.margin = '0';
-                        btn.style.padding = '0';
-                        btn.style.fontFamily = 'MS Sans Serif, sans-serif';
-                        btn.style.fontSize = '11px';
-                        // Use default cursor (avoid pointer/hand) to keep native text cursor on input
-                        btn.style.cursor = 'default';
-                        btn.style.boxSizing = 'border-box';
-                        btn.style.overflow = 'visible';
-                        btn.appendChild(glyph);
-                        // Win95-style raised button (use tbDark/tbLight derived colors)
-                        const base = UIObject.getClientConfigValue('defaultColor', '#c0c0c0');
-                        const light = UIObject.brightenColor(base, 60);
-                        const dark = UIObject.brightenColor(base, -60);
-                        btn.style.borderTop = `2px solid ${light}`;
-                        btn.style.borderLeft = `2px solid ${light}`;
-                        btn.style.borderRight = `2px solid ${dark}`;
-                        btn.style.borderBottom = `2px solid ${dark}`;
+                        // Use simple text content for glyph to keep markup minimal
+                        // and styling centralized in CSS (avoid extra span element).
+                        // Use CSS class for static styling; unified size handled by CSS
+                        try { btn.classList.add('input-field-button'); } catch (e) {}
+                        btn.textContent = '▾';
+                        // Win95-style raised button colors are provided globally by client config
 
                         // handlers
                         btn.addEventListener('click', (ev) => {
@@ -2610,6 +2616,26 @@ class TextBox extends FormInput {
                         } catch (_) {}
                          */
                         this.inputContainer.appendChild(this._listBtn);
+                        // Ensure button width equals computed height (do not change height)
+                        try {
+                            const syncBtn = (b) => {
+                                try {
+                                    const update = () => {
+                                        try {
+                                            const h = Math.round((b.offsetHeight || (b.getBoundingClientRect && b.getBoundingClientRect().height) || 0));
+                                            if (h > 0) b.style.width = h + 'px';
+                                        } catch (_) {}
+                                    };
+                                    update();
+                                    if (typeof ResizeObserver !== 'undefined') {
+                                        try { const ro = new ResizeObserver(update); ro.observe(b.parentElement || b); b._ro = ro; } catch(_) {}
+                                    }
+                                    const winHandler = () => update();
+                                    try { window.addEventListener('resize', winHandler); b._win = winHandler; } catch(_) {}
+                                } catch (_) {}
+                            };
+                            try { syncBtn(this._listBtn); } catch (_) {}
+                        } catch (e) {}
 
                         // Removed automatic preload — list must be provided from outside
                     }
@@ -4361,26 +4387,9 @@ class ComboBox extends FormInput {
                         sbtn.type = 'button';
                         sbtn.tabIndex = -1;
                         sbtn.textContent = '...';
-                        sbtn.style.width = '22px';
-                        sbtn.style.minWidth = '22px';
-                        sbtn.style.height = '100%';
-                        sbtn.style.display = 'flex';
-                        sbtn.style.alignItems = 'center';
-                        sbtn.style.justifyContent = 'center';
-                        sbtn.style.margin = '0';
-                        sbtn.style.padding = '0';
-                        sbtn.style.boxSizing = 'border-box';
-                        sbtn.style.cursor = 'default';
-                        sbtn.style.fontFamily = 'MS Sans Serif, sans-serif';
-                        sbtn.style.fontSize = '12px';
-                        sbtn.style.fontWeight = 'bold';
-                        const base = UIObject.getClientConfigValue('defaultColor', '#c0c0c0');
-                        const light = UIObject.brightenColor(base, 60);
-                        const dark = UIObject.brightenColor(base, -60);
-                        sbtn.style.borderTop = `2px solid ${light}`;
-                        sbtn.style.borderLeft = `2px solid ${light}`;
-                        sbtn.style.borderRight = `2px solid ${dark}`;
-                        sbtn.style.borderBottom = `2px solid ${dark}`;
+                        // Apply CSS class for static styling; colors provided globally by client config
+                        try { sbtn.classList.add('input-field-button'); } catch (e) {}
+                        // Colors are provided globally by client config
                         sbtn.addEventListener('click', (ev) => { try { ev.stopPropagation(); ev.preventDefault(); this.onSelectionStart(); } catch (_) {} });
                         // Insert now; arrow button will be appended after, so this will be to its left
                         this.element.appendChild(sbtn);
@@ -4655,7 +4664,7 @@ class CheckBox extends FormInput {
             this.inputContainer = document.createElement('div');
             this.inputContainer.style.display = 'flex';
             this.inputContainer.style.flexDirection = 'row';
-            this.inputContainer.style.alignItems = 'center';
+            this.inputContainer.style.alignItems = 'stretch';
             this.inputContainer.style.padding = '0';
             // If an explicit height was set on the input container (inline style),
             // keep width equal to that height so the control stays square.

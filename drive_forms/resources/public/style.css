@@ -1,5 +1,34 @@
 /* Centralized UI styles moved out of UI_classes.js */
 
+
+/* Selection button used inside input containers (small '...') */
+.input-field-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  padding: 0;
+  font-family: MS Sans Serif, sans-serif;
+  font-size: 12px;
+  box-sizing: border-box;
+  cursor: default;
+    /* Let button match the input container height so sizing adapts to input size */
+    flex: 0 0 auto;
+  /* stretch to container height and keep square aspect */
+  align-self: stretch;
+  height: auto;
+  aspect-ratio: 1 / 1;
+  width: auto; /* width will equal computed height because of aspect-ratio */
+  line-height: 1;
+  /* Borders use CSS variables set by JS to allow theming via client config */
+  border-top: 2px solid var(--input-field-button-border-light, #e0e0e0);
+  border-left: 2px solid var(--input-field-button-border-light, #e0e0e0);
+  border-right: 2px solid var(--input-field-button-border-dark, #808080);
+  border-bottom: 2px solid var(--input-field-button-border-dark, #808080);
+}
+
+/* Compact variant merged: both input buttons use unified `.input-field-button` sizing */
+
 /* Form / window */
 .ui-form {
   position: absolute;
@@ -47,7 +76,7 @@
 .ui-input-container {
   display:flex;
   flex-direction:row;
-  align-items:center;
+  align-items: stretch; /* allow children to fill container height so buttons match input */
   width:100%;
   box-sizing:border-box;
 }
@@ -61,6 +90,9 @@
   padding:2px 4px;
   outline:none;
   box-sizing:border-box;
+  /* let input stretch to fill container height (align-self) rather than forcing explicit height */
+  align-self: stretch;
+  height: auto;
 }
 
 /* Helper class: remove borders/background for input containers (used inside tables) */
@@ -366,6 +398,20 @@ input[type="checkbox"],
 }
 .ui-dynamictable table tbody tr.ui-table-row.active {
   background-color: #cdeeff !important;
+}
+
+/* Hide input buttons in non-active table rows (useful when rows are styled
+   gray for inactive state). This makes buttons invisible instead of gray. */
+.ui-dynamictable table tbody tr.ui-table-row:not(.active) .input-field-button,
+.ui-dynamictable table tbody tr.ui-table-row:not(.active) button.input-field-button {
+  display: none !important;
+}
+
+/* Hide input buttons in dynamic table rows when controls are disabled
+   (table logic sets `button.disabled = true` for inactive rows). */
+.ui-dynamictable table tbody tr.ui-table-row .input-field-button:disabled,
+.ui-dynamictable table tbody tr.ui-table-row button.input-field-button[disabled] {
+  display: none !important;
 }
 .ui-dynamictable table tbody tr.ui-table-row:focus {
   outline: none;
