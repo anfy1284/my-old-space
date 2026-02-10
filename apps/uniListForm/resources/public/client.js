@@ -19,10 +19,12 @@ try {
 
             const appForm = new DataForm(APP_NAME);
             appForm.setTitle(APP_NAME);
+            
             appForm.setWidth(800);
             appForm.setHeight(600);
             appForm.setX(100);
             appForm.setY(100);
+            
 
             function instanceOnOpen(dbTable) {
                 appForm.dbTable = dbTable || null;
