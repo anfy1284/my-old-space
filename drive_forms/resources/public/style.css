@@ -417,5 +417,80 @@ input[type="checkbox"],
   outline: none;
 }
 
+/* Windows 95/98 Retro Scrollbar Style */
+
+/* Базовые настройки для Firefox */
+* {
+  scrollbar-width: auto;
+  scrollbar-color: var(--color-mid) #efefef;
+}
+
+/* Настройки для Chrome, Edge, Safari */
+::-webkit-scrollbar {
+  width: 16px;
+  height: 16px;
+  background-color: #efefef;
+}
+
+/* Трек (дорожка) - имитация точечного узора Win95 через шахматный градиент */
+::-webkit-scrollbar-track {
+  background-color: #efefef;
+  background-image: url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAGXRFWHRTb2Z0d2FyZQBBZG9iZSBJbWFnZVJlYWR5ccllPAAAABZJREFUeNpi2r9//38gYGAEESAAEGAAasgD9R79X9MAAAAASUVORK5CYII=");
+}
+
+/* Ползунок (Thumb) с 3D рамкой */
+::-webkit-scrollbar-thumb {
+  background-color: var(--color-mid);
+  border: 1px solid var(--color-mid);
+  box-shadow: 
+    inset 1px 1px 0px var(--color-light), 
+    inset -1px -1px 0px #808080,
+    1px 1px 0px #000000;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: var(--color-mid);
+}
+
+/* Кнопки прокрутки */
+::-webkit-scrollbar-button:single-button {
+  background-color: var(--color-mid);
+  display: block;
+  border: 1px solid var(--color-mid);
+  box-shadow: 
+    inset 1px 1px 0px var(--color-light), 
+    inset -1px -1px 0px #808080,
+    1px 1px 0px #000000;
+  background-position: center;
+  background-repeat: no-repeat;
+  height: 16px;
+  width: 16px;
+}
+
+::-webkit-scrollbar-button:single-button:active {
+  box-shadow: 
+    inset 1px 1px 0px #000000, 
+    inset -1px -1px 0px var(--color-mid);
+}
+
+/* Стрелочки для кнопок (SVG Data URI) */
+::-webkit-scrollbar-button:vertical:decrement {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='8' height='8'><path d='M4 2 L1 5 L7 5 Z' fill='black'/></svg>");
+}
+::-webkit-scrollbar-button:vertical:increment {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='8' height='8'><path d='M4 6 L1 3 L7 3 Z' fill='black'/></svg>");
+}
+::-webkit-scrollbar-button:horizontal:decrement {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='8' height='8'><path d='M2 4 L5 1 L5 7 Z' fill='black'/></svg>");
+}
+::-webkit-scrollbar-button:horizontal:increment {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='8' height='8'><path d='M6 4 L3 1 L3 7 Z' fill='black'/></svg>");
+}
+
+/* Уголок между полосами */
+::-webkit-scrollbar-corner {
+  background-color: var(--color-mid);
+}
+
 
 

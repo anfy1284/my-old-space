@@ -3858,6 +3858,7 @@ class LegacyCheckbox extends FormInput {
             }
 
             this.element.onclick = () => {
+                if (this.readOnly) return;
                 this.setChecked(!this.checked);
                 this.onClick();
             };
@@ -4654,6 +4655,7 @@ class CheckBox extends FormInput {
             try { checkbox.name = checkbox.name || checkbox.id; } catch (_) {}
             checkbox.checked = this.checked;
             checkbox.disabled = this.readOnly;
+            checkbox._uiObject = this;
             // Position native input over custom box but keep it invisible so browser focus and keyboard work
             checkbox.style.position = 'absolute';
             checkbox.style.left = '0';
@@ -4751,15 +4753,17 @@ class CheckBox extends FormInput {
                 this.inputContainer.style.cursor = this.readOnly ? 'default' : 'pointer';
                 this.inputContainer.addEventListener('click', (e) => {
                     try {
-                        if (this.readOnly) return;
+                        if (e.__checkboxHandled) return;
                         const native = this.element.querySelector('input[type="checkbox"]');
+                        if (this.readOnly || (native && native.disabled)) return;
                         if (!native) return;
-                        // If clicked directly on the native checkbox, let the native event handle it
-                        if (e.target === native) return;
+                        // If clicked directly on the native checkbox or its label area, let the native event handle it
+                        if (e.target === native || (this.element && this.element.contains(e.target))) return;
                         // Toggle native checkbox and fire change event so listeners update state
                         native.checked = !native.checked;
                         const ev = new Event('change', { bubbles: true });
                         native.dispatchEvent(ev);
+                        e.__checkboxHandled = true;
                         // Also call onClick for legacy handlers
                         try { this.onClick(e); } catch (_) {}
                     } catch (_) {}
@@ -4789,10 +4793,12 @@ class CheckBox extends FormInput {
                     try { host.style.cursor = nativeCb.disabled ? host.style.cursor : (this.readOnly ? 'default' : 'pointer'); } catch (_) {}
                     host.addEventListener('click', (ev) => {
                         try {
-                            if (ev.target === nativeCb || nativeCb.contains(ev.target)) return;
+                            if (ev.__checkboxHandled) return;
+                            if (ev.target === nativeCb || nativeCb.contains(ev.target) || (this.element && this.element.contains(ev.target))) return;
                             if (this.readOnly || nativeCb.disabled) return;
                             nativeCb.checked = !nativeCb.checked;
                             nativeCb.dispatchEvent(new Event('change', { bubbles: true }));
+                            ev.__checkboxHandled = true;
                             try { this.onClick(ev); } catch (_) {}
                         } catch (_) {}
                     });
@@ -5282,11 +5288,24 @@ class Table extends UIObject {
             th.style.whiteSpace = 'nowrap';
             th.style.overflow = 'hidden';
             th.style.textOverflow = 'ellipsis';
-            th.textContent = col.caption || '';
+            
+            const titleSpan = document.createElement('span');
+            titleSpan.className = 'th-title';
+            const fld = col.data || i;
+            const curSort = (this.currentSort || []).find(s => s.field === fld);
+            titleSpan.textContent = (col.caption || '') + (curSort ? (curSort.order === 'asc' ? ' ▲' : ' ▼') : '');
+            th.appendChild(titleSpan);
+
+            th.addEventListener('mousedown', () => {
+                this._resizeOccurred = false;
+            });
 
             th.addEventListener('click', (e) => {
                 try { console.log('[DynamicTable] header click', col && col.data ? col.data : i, 'isResizing=', this.resizeState && this.resizeState.isResizing); } catch (e) {}
-                if (this.resizeState.isResizing) return;
+                if (this.resizeState.isResizing || this._resizeOccurred) {
+                    this._resizeOccurred = false;
+                    return;
+                }
                 const field = col.data || i;
                 let existing = this.currentSort.find(s => s.field === field);
                 if (!existing) {
@@ -5301,10 +5320,19 @@ class Table extends UIObject {
                     const colk = this.columns[k] || {};
                     const f = colk.data || k;
                     const si = this.currentSort.find(s => s.field === f);
-                    thk.textContent = colk.caption || '';
-                    if (si) thk.textContent += si.order === 'asc' ? ' ▲' : ' ▼';
+                    
+                    const span = thk.querySelector('.th-title');
+                    if (span) {
+                        span.textContent = colk.caption || '';
+                        if (si) span.textContent += si.order === 'asc' ? ' ▲' : ' ▼';
+                    }
                 }
-                try { if (typeof this._invokeRenderBodyRows === 'function') this._invokeRenderBodyRows(); } catch (e) {}
+                
+                if (typeof this.refresh === 'function') {
+                    this.refresh();
+                } else {
+                    try { if (typeof this._invokeRenderBodyRows === 'function') this._invokeRenderBodyRows(); } catch (e) {}
+                }
             });
 
             const resizeHandle = document.createElement('div');
@@ -5321,16 +5349,46 @@ class Table extends UIObject {
                     self.resizeState.isResizing = true;
                     self.resizeState.columnIndex = index;
                     self.resizeState.startX = ev.clientX;
-                    self.resizeState.startWidth = (self.columns[index] && self.columns[index].width) ? self.columns[index].width : (self.element ? (self.element.clientWidth / self.columns.length) : 100);
+                    
+                    const bcolgroup = getBcolgroup();
+                    const bodyTable = (bcolgroup && bcolgroup.parentElement && bcolgroup.parentElement.tagName.toLowerCase() === 'table') ? bcolgroup.parentElement : null;
+                    
+                    // Capture actual widths of ALL columns from the header cells (th)
+                    // and freeze them in pixels to prevent the browser from redistributing space.
+                    const headerThs = Array.from(htr.children);
+                    const startWidths = headerThs.map(th => th.offsetWidth);
+                    
+                    for (let k = 0; k < hcolgroup.children.length; k++) {
+                        const colW = startWidths[k] + 'px';
+                        if (hcolgroup.children[k]) hcolgroup.children[k].style.width = colW;
+                        if (bcolgroup && bcolgroup.children[k]) bcolgroup.children[k].style.width = colW;
+                    }
+
+                    // Set explicit pixel widths for both tables based on their current actual size
+                    const startTableWidth = headerTable.offsetWidth;
+                    headerTable.style.width = startTableWidth + 'px';
+                    if (bodyTable) bodyTable.style.width = bodyTable.offsetWidth + 'px';
+
+                    const startW = startWidths[index];
+                    self.resizeState.startWidth = startW;
 
                     const onMove = (me) => {
                         const dx = me.clientX - self.resizeState.startX;
-                        const newW = Math.max(30, self.resizeState.startWidth + dx);
-                        try { hcolgroup.children[index].style.width = newW + 'px'; } catch (e) {}
-                        try {
-                            const bg = getBcolgroup();
-                            if (bg && bg.children && bg.children[index]) bg.children[index].style.width = newW + 'px';
+                        if (Math.abs(dx) > 2) self._resizeOccurred = true;
+                        
+                        const newW = Math.max(30, startW + dx);
+                        const actualDelta = newW - startW;
+                        
+                        const newTableWidthPixels = (startTableWidth + actualDelta) + 'px';
+
+                        try { 
+                            if (hcolgroup.children[index]) hcolgroup.children[index].style.width = newW + 'px'; 
+                            headerTable.style.width = newTableWidthPixels;
+                            
+                            if (bcolgroup && bcolgroup.children[index]) bcolgroup.children[index].style.width = newW + 'px';
+                            if (bodyTable) bodyTable.style.width = newTableWidthPixels;
                         } catch (e) {}
+                        
                         try { self.columns[index].width = newW; } catch (e) {}
                     };
 
@@ -5551,10 +5609,13 @@ class Table extends UIObject {
                                 containerLocal.style.cursor = nativeCb.disabled ? 'default' : 'pointer';
                                 containerLocal.addEventListener('click', (ev) => {
                                     try {
-                                        if (ev.target === nativeCb) return;
+                                        if (ev.__checkboxHandled) return;
+                                        const label = nativeCb.closest ? nativeCb.closest('label') : null;
+                                        if (ev.target === nativeCb || nativeCb.contains(ev.target) || (label && label.contains(ev.target))) return;
                                         if (nativeCb.disabled) return;
                                         nativeCb.checked = !nativeCb.checked;
                                         nativeCb.dispatchEvent(new Event('change', { bubbles: true }));
+                                        ev.__checkboxHandled = true;
                                     } catch (_) {}
                                 });
                                 containerLocal.dataset.checkboxListener = '1';
@@ -5563,7 +5624,8 @@ class Table extends UIObject {
                                 containerLocal.addEventListener('click', (ev) => {
                                     try {
                                         if (ev.__checkboxHandled) return;
-                                        if (ev.target === nativeCb || nativeCb.contains(ev.target)) return;
+                                        const label = nativeCb.closest ? nativeCb.closest('label') : null;
+                                        if (ev.target === nativeCb || nativeCb.contains(ev.target) || (label && label.contains(ev.target))) return;
                                         if (nativeCb.disabled) return;
                                         nativeCb.checked = !nativeCb.checked;
                                         nativeCb.dispatchEvent(new Event('change', { bubbles: true }));
@@ -5834,11 +5896,36 @@ class Table extends UIObject {
                 if (colIndex >= 0) {
                     const colDef = this.columns[colIndex];
                     workingRows.sort((a, b) => {
-                        const va = a && Object.prototype.hasOwnProperty.call(a, colDef.data) ? a[colDef.data] : '';
-                        const vb = b && Object.prototype.hasOwnProperty.call(b, colDef.data) ? b[colDef.data] : '';
+                        const getVal = (row) => {
+                            if (!row) return '';
+                            // Try display value first (for FKs)
+                            const dispKey = '__' + colDef.data + '_display';
+                            if (Object.prototype.hasOwnProperty.call(row, dispKey)) return row[dispKey];
+                            
+                            let v = row[colDef.data];
+                            if (v === null || v === undefined) return '';
+                            // If it's an object, try to find a displayable string
+                            if (typeof v === 'object') {
+                                return v.display || v.name || v.title || v.caption || v.label || v.text || JSON.stringify(v);
+                            }
+                            return v;
+                        };
+                        const va = getVal(a);
+                        const vb = getVal(b);
+                        
                         if (va == vb) return 0;
-                        if (s.order === 'asc') return (va > vb) ? 1 : -1;
-                        return (va < vb) ? 1 : -1;
+                        
+                        // Numeric comparison if both are numbers
+                        if (typeof va === 'number' && typeof vb === 'number') {
+                            return s.order === 'asc' ? va - vb : vb - va;
+                        }
+                        
+                        // Default string comparison
+                        const sa = String(va).toLowerCase();
+                        const sb = String(vb).toLowerCase();
+                        if (sa == sb) return 0;
+                        if (s.order === 'asc') return (sa > sb) ? 1 : -1;
+                        return (sa < sb) ? 1 : -1;
                     });
                 }
             }
@@ -6406,6 +6493,15 @@ class DynamicTable extends Table {
                 try { console.error('[DynamicTable.loadData] preload lookup lists error', e); } catch(_){}
             }
             try { console.log('[DynamicTable.loadData] normalized columns count=', columns.length, 'captions=', columns.map(c=>c.caption).slice(0,50)); } catch(e) {}
+            
+            // Preserve manual column widths between refreshes
+            if (this.columns && this.columns.length > 0) {
+                columns.forEach(nc => {
+                    const oc = this.columns.find(ex => ex.data === nc.data);
+                    if (oc && oc.width) nc.width = oc.width;
+                });
+            }
+
             const rangeFrom = (data.range && (typeof data.range.from === 'number')) ? data.range.from : (typeof firstRow === 'number' ? firstRow : 0);
 
             this.totalRows = total;
