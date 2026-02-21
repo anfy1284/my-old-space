@@ -1654,6 +1654,95 @@ class DataForm extends Form {
         this._dataMap = {};
         this._datasetId = null;
         this.showLoading = false;
+        this.__currentRecord = null;
+        this._modified = false;
+        this._originalTitle = '';
+        this._closing = false; // guard against recursive close
+    }
+
+    // Override setTitle to keep track of the base (non-modified) title
+    setTitle(title) {
+        this._originalTitle = title || '';
+        if (this._modified) {
+            super.setTitle(title + ' *');
+        } else {
+            super.setTitle(title);
+        }
+    }
+
+    // Mark form as modified/unmodified and update title with "*"
+    setModified(val) {
+        const wasModified = this._modified;
+        this._modified = !!val;
+        if (this._modified && !wasModified) {
+            if (!this._originalTitle) this._originalTitle = super.getTitle() || '';
+            super.setTitle(this._originalTitle + ' *');
+        } else if (!this._modified && wasModified) {
+            if (this._originalTitle) super.setTitle(this._originalTitle);
+        }
+    }
+
+    // Override close to prompt save if modified
+    close() {
+        if (this._closing) { super.close(); return; }
+        if (!this._modified) { this._closing = true; super.close(); return; }
+        // Show confirmation dialog
+        const self = this;
+        if (typeof showConfirm === 'function') {
+            showConfirm('Данные были изменены. Сохранить изменения?', async () => {
+                // "Да" — save then close
+                try { await self.doAction('save'); } catch(e) { console.error(e); }
+                self._closing = true;
+                self._modified = false;
+                super.close.call(self);
+            }, () => {
+                // "Нет" — close without saving
+                self._closing = true;
+                self._modified = false;
+                super.close.call(self);
+            });
+        } else {
+            this._closing = true;
+            super.close();
+        }
+    }
+
+    set _currentRecord(val) {
+        this.__currentRecord = val;
+        // When current record changes, update all controls that are bound to data fields
+        if (val && typeof val === 'object') {
+            for (const key in this.controlsMap) {
+                const ctrl = this.controlsMap[key];
+                if (!ctrl) continue;
+                
+                // Find which field this control is bound to (if any)
+                // We stored it in dataset.field in renderItem
+                const fieldName = (ctrl.element && ctrl.element.dataset) ? ctrl.element.dataset.field : null;
+                if (fieldName && Object.prototype.hasOwnProperty.call(val, fieldName)) {
+                    let fieldVal = val[fieldName];
+                    let displayVal = undefined;
+                    
+                    // Check for display value variants (like __fieldname_display)
+                    const dispKey = '__' + fieldName + '_display';
+                    if (Object.prototype.hasOwnProperty.call(val, dispKey)) {
+                        displayVal = val[dispKey];
+                    } else if (fieldVal && typeof fieldVal === 'object' && fieldVal !== null) {
+                        displayVal = fieldVal.display || fieldVal.name || fieldVal.id;
+                        fieldVal = fieldVal.value !== undefined ? fieldVal.value : fieldVal.id;
+                    }
+                    
+                    if (typeof ctrl.setValue === 'function') {
+                        ctrl.setValue(fieldVal, displayVal);
+                    } else if (typeof ctrl.setText === 'function') {
+                        ctrl.setText(displayVal !== undefined ? displayVal : fieldVal);
+                    }
+                }
+            }
+        }
+    }
+
+    get _currentRecord() {
+        return this.__currentRecord;
     }
 
     async renderLayout(contentArea = null, layout = null) {
@@ -1674,19 +1763,54 @@ class DataForm extends Form {
         const createTextControl = (ControlCtor) => {
             const ctrl = new ControlCtor(contentArea, properties);
             let val = '';
+            let display = undefined;
             if (item.value !== null && item.value !== undefined) val = item.value;
             else if (item.data && this._dataMap && Object.prototype.hasOwnProperty.call(this._dataMap, item.data)) {
                 const rec = this._dataMap[item.data];
-                val = (rec && (rec.value !== undefined)) ? rec.value : (rec && rec !== undefined ? rec : '');
+                if (rec && rec.selection && rec.selection.display !== undefined) {
+                    val = (rec.selection.id !== undefined) ? rec.selection.id : (rec.value !== undefined ? rec.value : rec);
+                    display = rec.selection.display;
+                } else if (rec && rec.__display !== undefined) {
+                    val = (rec.value !== undefined ? rec.value : rec);
+                    display = rec.__display;
+                } else if (rec && typeof rec.value === 'object' && rec.value !== null) {
+                    display = rec.value.display || rec.value.name || rec.value.id || '';
+                    val = (rec.value.value !== undefined) ? rec.value.value : (rec.value.id !== undefined ? rec.value.id : rec.value);
+                } else {
+                    val = (rec && (rec.value !== undefined)) ? rec.value : (rec && rec !== undefined ? rec : '');
+                }
             }
-            try { if (item.properties && item.properties.__display !== undefined) { val = item.properties.__display; } } catch (e) {}
-            try { if (typeof ctrl.setText === 'function') ctrl.setText(String(val)); } catch (e) {}
+            try { if (item.properties && item.properties.__display !== undefined) { display = item.properties.__display; } } catch (e) {}
+            
+            try { 
+                if (typeof ctrl.setValue === 'function') ctrl.setValue(val, display);
+                else if (typeof ctrl.setText === 'function') ctrl.setText(String(display || val)); 
+            } catch (e) {}
+            
             try { if (typeof item.rows === 'number' && typeof ctrl.setRows === 'function') ctrl.setRows(item.rows); else if (properties && properties.rows && typeof ctrl.setRows === 'function') ctrl.setRows(properties.rows); } catch (e) {}
             try { if (typeof ctrl.setCaption === 'function') ctrl.setCaption(caption); } catch (e) {}
             ctrl.Draw(contentArea);
             try { if (item.data && ctrl.element) { ctrl.element.dataset.field = item.data; } } catch (e) {}
             try { if (ctrl.element) ctrl.element.style.width = '100%'; } catch (e) {}
-            if (item.name) this.controlsMap[item.name] = ctrl;
+            // Keep _dataMap in sync when user types
+            try {
+                if (item.data && ctrl.element && ctrl.element.addEventListener) {
+                    const fieldKey = item.data;
+                    const self = this;
+                    ctrl.element.addEventListener('input', () => {
+                        try {
+                            const newVal = (typeof ctrl.getValue === 'function') ? ctrl.getValue() : (ctrl.element ? ctrl.element.value : undefined);
+                            if (!self._dataMap) self._dataMap = {};
+                            if (!self._dataMap[fieldKey]) self._dataMap[fieldKey] = { name: fieldKey, value: newVal };
+                            else self._dataMap[fieldKey].value = newVal;
+                        } catch (_) {}
+                        // Mark form as modified
+                        try { if (typeof self.setModified === 'function') self.setModified(true); } catch (_) {}
+                    });
+                }
+            } catch (_) {}
+            const ctrlKey = item.name || item.data;
+            if (ctrlKey) this.controlsMap[ctrlKey] = ctrl;
             return ctrl;
         };
 
@@ -1701,12 +1825,24 @@ class DataForm extends Form {
             case 'emunList': {
                 const dataKey = item.data;
                 let val = '';
+                let display = undefined;
                 if (item.value !== null && item.value !== undefined) val = item.value;
                 else if (dataKey && this._dataMap && Object.prototype.hasOwnProperty.call(this._dataMap, dataKey)) {
                     const rec = this._dataMap[dataKey];
-                    val = (rec && (rec.value !== undefined)) ? rec.value : (rec && rec !== undefined ? rec : '');
+                    if (rec && rec.selection && rec.selection.display !== undefined) {
+                        val = (rec.selection.id !== undefined) ? rec.selection.id : (rec.value !== undefined ? rec.value : rec);
+                        display = rec.selection.display;
+                    } else if (rec && rec.__display !== undefined) {
+                        val = (rec.value !== undefined ? rec.value : rec);
+                        display = rec.__display;
+                    } else if (rec && typeof rec.value === 'object' && rec.value !== null) {
+                        display = rec.value.display || rec.value.name || rec.value.id || '';
+                        val = (rec.value.value !== undefined) ? rec.value.value : (rec.value.id !== undefined ? rec.value.id : rec.value);
+                    } else {
+                        val = (rec && (rec.value !== undefined)) ? rec.value : (rec && rec !== undefined ? rec : '');
+                    }
                 }
-                try { if (item.properties && item.properties.__display !== undefined) val = item.properties.__display; } catch (e) {}
+                try { if (item.properties && item.properties.__display !== undefined) display = item.properties.__display; } catch (e) {}
 
                 let listItems = [];
                 try {
@@ -1721,26 +1857,31 @@ class DataForm extends Form {
 
                 const propClone = Object.assign({}, properties, { listMode: true, listItems: listItems, readOnly: true });
                 const ctrl = new TextBox(contentArea, propClone);
-                try { if (typeof ctrl.setText === 'function') ctrl.setText(String(val)); } catch (e) {}
+                try { 
+                    if (typeof ctrl.setValue === 'function') ctrl.setValue(val, display);
+                    else if (typeof ctrl.setText === 'function') ctrl.setText(String(display || val)); 
+                } catch (e) {}
                 try { if (typeof ctrl.setCaption === 'function') ctrl.setCaption(caption); } catch (e) {}
                 ctrl.Draw(contentArea);
 
                 try {
                     if (item.data) {
                         const fieldKey = item.data;
+                        const formSelf = this;
                         const handler = (ev) => {
                             try {
                                 const newVal = (typeof ctrl.getText === 'function') ? ctrl.getText() : (ctrl.element ? ctrl.element.value : undefined);
-                                if (!this._dataMap) this._dataMap = {};
-                                if (!this._dataMap[fieldKey]) this._dataMap[fieldKey] = { name: fieldKey, value: newVal };
-                                else this._dataMap[fieldKey].value = newVal;
+                                if (!formSelf._dataMap) formSelf._dataMap = {};
+                                if (!formSelf._dataMap[fieldKey]) formSelf._dataMap[fieldKey] = { name: fieldKey, value: newVal };
+                                else formSelf._dataMap[fieldKey].value = newVal;
                             } catch (_) {}
+                            try { if (typeof formSelf.setModified === 'function') formSelf.setModified(true); } catch (_) {}
                         };
                         try { if (ctrl.element && ctrl.element.addEventListener) ctrl.element.addEventListener('input', handler); } catch (_) {}
                     }
                 } catch (_) {}
                 try { if (item.data && ctrl.element) ctrl.element.dataset.field = item.data; } catch (e) {}
-                if (item.name) this.controlsMap[item.name] = ctrl;
+                { const ctrlKey = item.name || item.data; if (ctrlKey) this.controlsMap[ctrlKey] = ctrl; }
                 break;
             }
             case 'textarea': {
@@ -1750,51 +1891,58 @@ class DataForm extends Form {
             case 'recordSelector': {
                 const dataKey = item.data;
                 let val = '';
+                let display = undefined;
                 if (item.value !== null && item.value !== undefined) val = item.value;
                 else if (dataKey && this._dataMap && Object.prototype.hasOwnProperty.call(this._dataMap, dataKey)) {
                     const rec = this._dataMap[dataKey];
-                    if (rec && typeof rec.value === 'object' && rec.value !== null) {
-                        const disp = (rec.value && rec.value.name) || (rec.value && rec.value.id) || '';
-                        val = disp;
+                    if (rec && rec.selection && rec.selection.display !== undefined) {
+                        val = (rec.selection.id !== undefined) ? rec.selection.id : (rec.value !== undefined ? rec.value : rec);
+                        display = rec.selection.display;
+                    } else if (rec && rec.__display !== undefined) {
+                        val = (rec.value !== undefined ? rec.value : rec);
+                        display = rec.__display;
+                    } else if (rec && typeof rec.value === 'object' && rec.value !== null) {
+                        display = (rec.value && rec.value.display) || (rec.value && rec.value.name) || (rec.value && rec.value.id) || '';
+                        val = (rec.value && rec.value.value !== undefined) ? rec.value.value : (rec.value && rec.value.id !== undefined ? rec.value.id : rec.value);
                     } else {
                         val = (rec && (rec.value !== undefined)) ? rec.value : (rec && rec !== undefined ? rec : '');
                     }
                 }
-                try { if (item.properties && item.properties.__display !== undefined) val = item.properties.__display; } catch (e) {}
+                try { if (item.properties && item.properties.__display !== undefined) display = item.properties.__display; } catch (e) {}
 
                 const propClone = Object.assign({}, properties || {}, { readOnly: false });
-                let ctrl = new TextBox(contentArea, propClone);
-                try { if (typeof ctrl.setText === 'function') ctrl.setText(String(val)); } catch (e) {}
-                try { if (typeof ctrl.setCaption === 'function') ctrl.setCaption(caption); } catch (e) {}
-                ctrl.Draw(contentArea);
-
                 const propClone2 = Object.assign({}, propClone);
                 if (properties && properties.selection) propClone2.selection = properties.selection;
                 propClone2.showSelectionButton = true;
-                try { if (typeof ctrl.destroy === 'function') ctrl.destroy(); } catch (_) {}
+                
                 const ctrlSel = new TextBox(contentArea, propClone2);
-                try { if (typeof ctrlSel.setText === 'function') ctrlSel.setText(String(val)); } catch (e) {}
+                try { 
+                    if (typeof ctrlSel.setValue === 'function') ctrlSel.setValue(val, display);
+                    else if (typeof ctrlSel.setText === 'function') ctrlSel.setText(String(display || val)); 
+                } catch (e) {}
                 try { if (typeof ctrlSel.setCaption === 'function') ctrlSel.setCaption(caption); } catch (e) {}
-                try { ctrlSel.Draw(contentArea); } catch (e) { ctrl.Draw(contentArea); }
-                ctrl = ctrlSel;
+                try { ctrlSel.Draw(contentArea); } catch (e) {}
+                const ctrl = ctrlSel;
 
                 try {
                     if (item.data) {
                         const fieldKey = item.data;
+                        const formSelf = this;
                         const handler = (ev) => {
                             try {
-                                const newVal = (typeof ctrl.getText === 'function') ? ctrl.getText() : (ctrl.element ? ctrl.element.value : undefined);
-                                if (!this._dataMap) this._dataMap = {};
-                                if (!this._dataMap[fieldKey]) this._dataMap[fieldKey] = { name: fieldKey, value: newVal };
-                                else this._dataMap[fieldKey].value = newVal;
+                                const newVal = (typeof ctrl.getValue === 'function') ? ctrl.getValue() : (typeof ctrl.getText === 'function' ? ctrl.getText() : (ctrl.element ? ctrl.element.value : undefined));
+                                if (!formSelf._dataMap) formSelf._dataMap = {};
+                                if (!formSelf._dataMap[fieldKey]) formSelf._dataMap[fieldKey] = { name: fieldKey, value: newVal };
+                                else formSelf._dataMap[fieldKey].value = newVal;
                             } catch (_) {}
+                            try { if (typeof formSelf.setModified === 'function') formSelf.setModified(true); } catch (_) {}
                         };
                         try { if (ctrl.element && ctrl.element.addEventListener) ctrl.element.addEventListener('input', handler); } catch (_) {}
                     }
                 } catch (_) {}
 
                 try { if (item.data && ctrl.element) ctrl.element.dataset.field = item.data; } catch (e) {}
-                if (item.name) this.controlsMap[item.name] = ctrl;
+                { const ctrlKey = item.name || item.data; if (ctrlKey) this.controlsMap[ctrlKey] = ctrl; }
                 break;
             }
             case 'checkbox': {
@@ -1809,7 +1957,16 @@ class DataForm extends Form {
                 cb.setCaption(caption);
                 cb.Draw(contentArea);
                 try { if (item.data && cb.element) cb.element.dataset.field = item.data; } catch (e) {}
-                if (item.name) this.controlsMap[item.name] = cb;
+                // Track checkbox changes for dirty flag
+                try {
+                    if (item.data && cb.element) {
+                        const formSelf = this;
+                        cb.element.addEventListener('change', () => {
+                            try { if (typeof formSelf.setModified === 'function') formSelf.setModified(true); } catch (_) {}
+                        });
+                    }
+                } catch (_) {}
+                { const ctrlKey = item.name || item.data; if (ctrlKey) this.controlsMap[ctrlKey] = cb; }
                 break;
             }
             case 'group': {
@@ -1995,6 +2152,55 @@ class DataForm extends Form {
             console.error('[DataForm] applyChanges error', e);
             throw e;
         }
+    }
+
+    collectData() {
+        const data = {};
+        for (const key in this.controlsMap) {
+            const ctrl = this.controlsMap[key];
+            if (!ctrl) continue;
+            
+            const fieldName = (ctrl.element && ctrl.element.dataset) ? ctrl.element.dataset.field : null;
+            if (fieldName) {
+                let val = null;
+                if (typeof ctrl.getValue === 'function') {
+                    val = ctrl.getValue();
+                } else if (typeof ctrl.getText === 'function') {
+                    val = ctrl.getText();
+                } else if (ctrl.element && ctrl.element.value !== undefined) {
+                    val = ctrl.element.value;
+                }
+                data[fieldName] = val;
+            }
+        }
+        return data;
+    }
+
+    async doAction(action, params) {
+        if (action === 'save') {
+            const data = this.collectData();
+            console.log('[DataForm] Saving data:', data);
+            try {
+                const res = await this.applyChanges(data);
+                if (res && res.ok) {
+                    // success — reset modified flag, no alert needed
+                    this._modified = false;
+                } else {
+                    const errMsg = (res && res.error ? res.error : 'Неизвестная ошибка');
+                    if (typeof showAlert === 'function') showAlert('Ошибка сохранения: ' + errMsg);
+                    else alert('Ошибка сохранения: ' + errMsg);
+                }
+            } catch (e) {
+                if (typeof showAlert === 'function') showAlert('Ошибка сохранения: ' + e.message);
+                else alert('Ошибка сохранения: ' + e.message);
+            }
+            return;
+        }
+        if (action === 'cancel') {
+            this.close();
+            return;
+        }
+        return super.doAction(action, params);
     }
 
     async Draw(parent) {
@@ -2324,6 +2530,27 @@ class TextBox extends FormInput {
         this._listPopup = null;
         this._listOpen = false;
         this._selectBtn = null;
+    }
+
+    setValue(val, display) {
+        this.rawValue = val;
+        // if val is an object with name/display, use it
+        let displayVal = display;
+        if (displayVal === undefined && val && typeof val === 'object') {
+            displayVal = val.__display || val.name || val.id || String(val);
+        }
+        if (displayVal === undefined) displayVal = val;
+        
+        this.setText(displayVal);
+    }
+
+    getValue() {
+        // For selection controls, rawValue holds the FK ID which differs from displayed text
+        if (this.showSelectionButton && this.rawValue !== undefined && this.rawValue !== null) {
+            return this.rawValue;
+        }
+        // For regular text/number inputs, return what the user actually typed
+        return this.getText();
     }
 
     setText(text) {
@@ -3244,9 +3471,14 @@ class TextBox extends FormInput {
             const display = (selectedRecord && (selectedRecord[displayField] !== undefined)) ? selectedRecord[displayField] : (selectedRecord && (selectedRecord.name || selectedRecord.id)) || '';
 
             try {
-                if (typeof this.setText === 'function') this.setText(String(display));
-                else if (this.element) this.element.value = String(display);
-                console.log('[TextBox.handleSelection] Updated TextBox:', textBoxId, 'with value:', display);
+                // If it's a selection, prioritize storing the ID
+                const val = (selectedRecord && selectedRecord.id !== undefined) ? selectedRecord.id : selectedRecord;
+                if (typeof this.setValue === 'function') this.setValue(val, display);
+                else {
+                    if (typeof this.setText === 'function') this.setText(String(display));
+                    else if (this.element) this.element.value = String(display);
+                }
+                console.log('[TextBox.handleSelection] Updated TextBox:', textBoxId, 'with value:', display, 'id:', val);
             } catch (_) {}
 
             try { if (this.element) this.element.dispatchEvent(new Event('input', { bubbles: true })); } catch (_) {}
@@ -4136,9 +4368,9 @@ class AlertForm extends ModalForm {
     }
 }
 
-class ConfirmForm1 extends ModalForm {
+class ConfirmForm extends ModalForm {
     constructor(message, onOk, onCancel) {
-        super('Confirm', 360, 170);
+        super('Подтверждение', 400, 180);
         this.message = message;
         this.onOk = onOk;
         this.onCancel = onCancel;
@@ -4160,7 +4392,7 @@ class ConfirmForm1 extends ModalForm {
         UIObject.styleElement(lblMessage, 10, 10, this.width - 20, this.height - 80, 13);
 
         const btnOk = new Button(this.contentArea);
-        btnOk.setCaption('OK');
+        btnOk.setCaption('Да');
         btnOk.Draw(this.contentArea);
         btnOk.onClick = () => {
             this.close();
@@ -4168,7 +4400,7 @@ class ConfirmForm1 extends ModalForm {
         };
 
         const btnCancel = new Button(this.contentArea);
-        btnCancel.setCaption('Cancel');
+        btnCancel.setCaption('Нет');
         btnCancel.Draw(this.contentArea);
         btnCancel.onClick = () => {
             this.close();
@@ -4586,6 +4818,14 @@ class CheckBox extends FormInput {
             if (checkbox) return checkbox.checked;
         }
         return this.checked;
+    }
+
+    setValue(value) {
+        this.setChecked(value);
+    }
+
+    getValue() {
+        return this.getChecked();
     }
 
     setReadOnly(value) {
@@ -5971,7 +6211,27 @@ class Table extends UIObject {
                     if (row && (row.id !== undefined && row.id !== null)) {
                         const tableName = this.tableName || (this.appForm && (this.appForm.dbTable || this.dataKey)) || '';
                         if (typeof window !== 'undefined' && window.MySpace && typeof window.MySpace.open === 'function') {
-                            try { window.MySpace.open('uniRecordForm', { tableName, recordID: row.id }); } catch (e) {}
+                            const self = this;
+                            (async () => {
+                                try {
+                                    const instId = await window.MySpace.open('uniRecordForm', { tableName, recordID: row.id });
+                                    if (instId) {
+                                        // Listen for the form being destroyed to refresh table data
+                                        const onFormDestroyed = (ev) => {
+                                            try {
+                                                const inst = window.MySpace.getInstance(instId);
+                                                const destroyedForm = ev && ev.detail && ev.detail.form;
+                                                // Match: the destroyed form is the one belonging to our instance
+                                                if (inst && inst.form && destroyedForm === inst.form) {
+                                                    window.removeEventListener('form-destroyed', onFormDestroyed);
+                                                    try { self.refresh(); } catch(e) {}
+                                                }
+                                            } catch(e) {}
+                                        };
+                                        window.addEventListener('form-destroyed', onFormDestroyed);
+                                    }
+                                } catch(e) {}
+                            })();
                         }
                     }
                 } catch (e) {}

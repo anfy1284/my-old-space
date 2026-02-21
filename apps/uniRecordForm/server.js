@@ -5,6 +5,7 @@ const memoryStore = require('../../drive_root/memory_store');
 const { dataApp } = require('../../drive_forms/dataApp');
 const { read } = require('fs');
 const config = require('./config.json');
+const globalServerContext = require('../../drive_root/globalServerContext');
 try { const dbg = memoryStore.debugKeysSync('datasets'); console.log('[recordEditor] memoryStore init; datasetsCount=', dbg.count); } catch (e) {}
 
 // use shared.storeDataset for dataset persistence
@@ -39,9 +40,14 @@ async function getLayoutWithData(params) {
         if (params && params.tableName) {
             try {
                 const spec = await generateFormSpec(params.tableName, params);
-                const payload = { layout: spec.layout || [], data: spec.data || [], params: params || {} };
-                const datasetId = dataApp.storeDataset(payload);
-                return { layout: payload.layout, data: payload.data, datasetId };
+                const datasetId = spec.datasetId || dataApp.storeDataset({ 
+                    layout: spec.layout || [], 
+                    data: spec.data || [], 
+                    params: params || {},
+                    table: params.tableName,
+                    id: params.recordID || params.recordId || params.id
+                });
+                return { layout: spec.layout, data: spec.data, datasetId };
             } catch (e) {
                 // fallthrough to default behaviour on error
                 console.error('[uniRecordForm/getLayoutWithData] generateFormSpec error:', e && e.message || e);
@@ -51,7 +57,13 @@ async function getLayoutWithData(params) {
         const layout = getLayout(params);
         const data = getData(params);
         // Store the returned payload in server memory and expose a datasetId
-        const payload = { layout: layout || [], data: data || [], params: params || {} };
+        const payload = { 
+            layout: layout || [], 
+            data: data || [], 
+            params: params || {},
+            table: params && (params.tableName || params.table),
+            id: params && (params.recordID || params.recordId || params.id)
+        };
         const datasetId = dataApp.storeDataset(payload);
         return { layout: payload.layout, data: payload.data, datasetId };
     } catch (e) {
@@ -61,38 +73,53 @@ async function getLayoutWithData(params) {
 
 async function applyChanges(datasetId, changes) {
     try {
-        console.log('[recordEditor] applyChanges called. process.pid=', process && process.pid ? process.pid : 'no-pid', 'module.id=', module && module.id ? module.id : 'no-module-id');
-        // Accept RPC that may pass params object as first argument (framework passes params and sessionID separately)
-        // If the first argument looks like a payload object, unpack it.
+        console.log('[uniRecordForm] applyChanges called.');
         if (datasetId && typeof datasetId === 'object' && (datasetId.datasetId !== undefined || datasetId.changes !== undefined)) {
             const payload = datasetId;
             datasetId = payload.datasetId;
             changes = payload.changes;
         }
 
-        try {
-            const dbg = memoryStore.debugKeysSync ? memoryStore.debugKeysSync('datasets') : { count: 0, keys: [] };
-            console.log('[recordEditor] memoryStore datasets count=', dbg.count, 'keysSample=', dbg.keys);
-        } catch (e) { console.log('[recordEditor] memoryStore inspect error', e); }
-        console.log('[recordEditor] incoming datasetId=', datasetId);
+        console.log('[uniRecordForm] incoming datasetId=', datasetId, 'changes=', JSON.stringify(changes));
 
         let dsObj = null;
         try {
-            // Delegate dataset retrieval to dataApp helper (handles sync/async store backends)
             dsObj = await dataApp.getDataset(datasetId);
-            console.log('[recordEditor] dataset present=', !!dsObj);
-        } catch (e) { console.log('[recordEditor] dataset presence check error', e); }
+            console.log('[uniRecordForm] dataset present=', !!dsObj);
+        } catch (e) { console.log('[uniRecordForm] dataset retrieval error', e); }
 
-        console.log('[recordEditor] changes payload keys=', changes && typeof changes === 'object' ? Object.keys(changes) : typeof changes);
-        // For now, only log changes. In future this should validate and apply to stored dataset.
         if (!datasetId) {
-            console.warn('[recordEditor] applyChanges: missing datasetId');
+            return { ok: false, error: 'missing datasetId' };
         } else if (!dsObj) {
-            console.warn('[recordEditor] applyChanges: unknown datasetId', datasetId);
+            return { ok: false, error: 'unknown datasetId: ' + datasetId };
+        }
+
+        const tableName = dsObj.table || (dsObj.params && (dsObj.params.tableName || dsObj.params.table));
+        const recordId = dsObj.id || (dsObj.params && (dsObj.params.recordID || dsObj.params.recordId || dsObj.params.id));
+
+        if (!tableName) {
+            return { ok: false, error: 'No table context found in dataset' };
+        }
+
+        const modelName = globalServerContext.getModelNameForTable(tableName) || tableName;
+        const Model = globalServerContext.modelsDB[modelName];
+
+        if (!Model) {
+            return { ok: false, error: 'Model not found for table: ' + tableName + ' (model: ' + modelName + ')' };
+        }
+
+        if (recordId) {
+            // Update existing record
+            console.log(`[uniRecordForm] Updating ${tableName} id=${recordId} with`, changes);
+            await Model.update(changes, { where: { id: recordId } });
+        } else {
+            // Create new record
+            console.log(`[uniRecordForm] Creating new ${tableName} with`, changes);
+            await Model.create(changes);
         }
         return { ok: true };
     } catch (e) {
-        console.error('[recordEditor] applyChanges error:', e);
+        console.error('[uniRecordForm] applyChanges error:', e);
         return { ok: false, error: String(e) };
     }
 }
@@ -181,12 +208,11 @@ async function generateFormSpec(tableName, params) {
 
         // Attempt to load record by ID if provided
         let record = null;
+        const recordId = params && (params.recordID || params.recordId || params.id);
+
         try {
-            // Get globalCtx WITHOUT deleting cache - use parent process's version
-            const mainModulePath = require.main.filename;
-            const mainDir = require('path').dirname(mainModulePath);
-            const globalCtxPath = require('path').join(mainDir, 'node_modules', 'my-old-space', 'drive_root', 'globalServerContext.js');
-            const globalCtx = require(globalCtxPath);
+            // Get globalCtx
+            const globalCtx = require('../../drive_root/globalServerContext');
             
             const modelName = globalCtx.getModelNameForTable(tableName) || tableName;
             console.log('[generateFormSpec] modelName:', modelName);
@@ -194,7 +220,6 @@ async function generateFormSpec(tableName, params) {
             console.log('[generateFormSpec] available models:', Object.keys(models));
             const Model = models[modelName];
             console.log('[generateFormSpec] Model found:', !!Model);
-            const recordId = params && (params.recordID || params.recordId || params.id);
             console.log('[generateFormSpec] recordId extracted:', recordId);
             if (Model && recordId !== undefined && recordId !== null) {
                 try {
@@ -263,7 +288,7 @@ async function generateFormSpec(tableName, params) {
 
         const controls = fields.map(f => {
             const ctrlType = mapInputTypeToControl(f.inputType || f.input || 'textbox');
-            const ctrl = { type: ctrlType, data: f.name, caption: f.caption || f.name };
+            const ctrl = { type: ctrlType, name: f.name, data: f.name, caption: f.caption || f.name };
             if (f.properties) ctrl.properties = f.properties;
             if (f.options) ctrl.options = f.options;
             return ctrl;
@@ -274,7 +299,14 @@ async function generateFormSpec(tableName, params) {
             { type: 'group', caption: 'Действия', orientation: 'horizontal', layout: [ { type: 'button', action: 'save', caption: 'Сохранить' }, { type: 'button', action: 'cancel', caption: 'Отмена' } ] }
         ];
 
-        return { data, layout };
+        const datasetId = dataApp.storeDataset({
+            table: tableName,
+            id: recordId,
+            params: params,
+            time: Date.now()
+        });
+
+        return { data, layout, datasetId };
     } catch (e) {
         console.error('[uniRecordForm/generateFormSpec] failed:', e && e.message || e);
         return { data: [], layout: [] };
