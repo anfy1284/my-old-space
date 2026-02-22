@@ -11,7 +11,9 @@
     "drive_forms/",
     "drive_root/",
     "main_server.js",
-    "server.config.json"
+    "server.config.json",
+    "АРХИТЕКТУРА_ПРОЕКТА.md",
+    "ИНСТРУКЦИИ_ДЛЯ_AI.md"    
   ],
   "keywords": ["framework", "core", "my-old-space"],
   "author": "Andrey",
