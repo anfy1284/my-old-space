@@ -23,3 +23,6 @@ logs/
 # Build output
 dist/
 build/
+# Allow Markdown files to be tracked
+!*.md
+!**/*.md
