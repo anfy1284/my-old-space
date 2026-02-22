@@ -303,6 +303,20 @@ try {
                         try { if (typeof this.onOpen === 'function') this.onOpen(params); } catch (e) { console.error(e); }
                         return;
                     }
+                    if (action === 'recordAdd') {
+                        try {
+                            const tableName = appForm.dbTable || (params && params.tableName) || '';
+                            if (!tableName) {
+                                if (typeof showAlert === 'function') showAlert('Не указана таблица!');
+                                return;
+                            }
+                            console.log('[recordAdd] Opening uniRecordForm for new record, tableName:', tableName);
+                            if (window.MySpace && typeof window.MySpace.open === 'function') {
+                                window.MySpace.open('uniRecordForm', { tableName: tableName });
+                            }
+                        } catch (e) { console.error('[recordAdd] error:', e); }
+                        return;
+                    }
                     if (action === 'recordOpen') {
                         try {
                             console.log('[recordOpen] Getting current row...');

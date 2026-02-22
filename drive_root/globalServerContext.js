@@ -751,7 +751,8 @@ async function getDynamicTableData(options) {
 
     // Count total rows
     const t2 = Date.now();
-    const totalRows = await Model.count({ where });
+    const dbGW = require('./dbGateway');
+    const totalRows = await dbGW.execute({ operation: 'count', table: Model.tableName, where, context: { userId } });
     console.log(`[PERF] Model.count: ${Date.now() - t2}ms`);
 
     // Calculate range with buffer (limited by server config)
@@ -765,14 +766,19 @@ async function getDynamicTableData(options) {
 
     // Fetch data
     const t3 = Date.now();
-    const data = await Model.findAll({
+    const data = await dbGW.execute({
+        operation: 'read',
+        table: Model.tableName,
         where,
-        order: order.length > 0 ? order : [['id', 'ASC']],
-        offset: requestFirstRow,
-        limit: requestCount,
-        raw: true
+        options: {
+            order: order.length > 0 ? order : [['id', 'ASC']],
+            offset: requestFirstRow,
+            limit: requestCount,
+            raw: true
+        },
+        context: { userId }
     });
-    console.log(`[PERF] Model.findAll: ${Date.now() - t3}ms`);
+    console.log(`[PERF] Model.findAll via dbGateway: ${Date.now() - t3}ms`);
 
     // Resolve foreign keys
     const t4 = Date.now();
@@ -845,17 +851,14 @@ async function resolveTableForeignKeys(modelName, dataArray, fields) {
                 continue;
             }
 
-            // Find target model
-            const targetModel = Object.values(modelsDB).find(m => m.tableName === fkField.foreignKey.table);
-            console.log(`[FK] Target model for table ${fkField.foreignKey.table}:`, targetModel ? 'found' : 'NOT FOUND');
-            if (!targetModel) {
-                resolvedRow[`__${fkField.name}_display`] = `(unknown: ${fkValue})`;
-                continue;
-            }
+            // Find target model via dbGateway
+            const fkTableName = fkField.foreignKey.table;
+            const fkDbGW = require('./dbGateway');
+            console.log(`[FK] Resolving FK for table ${fkTableName}`);
 
             // Fetch display value
             try {
-                const targetRow = await targetModel.findByPk(fkValue, { raw: true });
+                const targetRow = await fkDbGW.execute({ operation: 'findByPk', table: fkTableName, where: { id: fkValue }, options: { raw: true } });
                 console.log(`[FK] Found target row:`, targetRow);
                 if (targetRow) {
                     const displayValue = targetRow[fkField.foreignKey.displayField] || targetRow.id.toString();
@@ -929,6 +932,7 @@ async function commitTableEdits(editSessionId) {
 
     // Use transaction
     const transaction = await sequelize.transaction();
+    const commitDbGW = require('./dbGateway');
 
     try {
         for (const [rowId, fieldChanges] of session.changes.entries()) {
@@ -938,9 +942,12 @@ async function commitTableEdits(editSessionId) {
                     updateData[fieldName] = value;
                 }
 
-                await model.update(updateData, {
+                await commitDbGW.execute({
+                    operation: 'update',
+                    table: model.tableName,
+                    data: updateData,
                     where: { id: rowId },
-                    transaction
+                    options: { transaction }
                 });
 
                 successCount++;
@@ -1035,14 +1042,20 @@ async function getLookupList(options) {
     visibleRows = Math.max(0, Math.min(visibleRows || 20, 1000));
     firstRow = Math.max(0, firstRow || 0);
 
-    const totalRows = await Model.count();
+    const lookupDbGW = require('./dbGateway');
+    const totalRows = await lookupDbGW.execute({ operation: 'count', table: tableName || Model.tableName, context: { userId } });
 
-    const rows = await Model.findAll({
-        attributes: ['id', displayField],
-        offset: firstRow,
-        limit: visibleRows,
-        order: [['id', 'ASC']],
-        raw: true
+    const rows = await lookupDbGW.execute({
+        operation: 'read',
+        table: tableName || Model.tableName,
+        options: {
+            attributes: ['id', displayField],
+            offset: firstRow,
+            limit: visibleRows,
+            order: [['id', 'ASC']],
+            raw: true
+        },
+        context: { userId }
     });
 
     // Normalize to simple objects with id and display

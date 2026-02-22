@@ -4,6 +4,10 @@ const fs = require('fs');
 const path = require('path');
 const globalRoot = require('../drive_root/globalServerContext');
 
+// Initialize dbGateway forms-level middleware
+require('./dbGateway');
+console.log('[drive_forms/init] dbGateway forms middleware initialized');
+
 async function runAppInits() {
 	try {
 		const localAppsPath = path.join(__dirname, 'apps.json');

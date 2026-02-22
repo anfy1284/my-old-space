@@ -108,14 +108,15 @@ async function applyChanges(datasetId, changes) {
             return { ok: false, error: 'Model not found for table: ' + tableName + ' (model: ' + modelName + ')' };
         }
 
+        const applyDbGW = require('../../drive_root/dbGateway');
         if (recordId) {
             // Update existing record
             console.log(`[uniRecordForm] Updating ${tableName} id=${recordId} with`, changes);
-            await Model.update(changes, { where: { id: recordId } });
+            await applyDbGW.execute({ operation: 'update', table: tableName, data: changes, where: { id: recordId }, context: { appName: 'uniRecordForm' } });
         } else {
             // Create new record
             console.log(`[uniRecordForm] Creating new ${tableName} with`, changes);
-            await Model.create(changes);
+            await applyDbGW.execute({ operation: 'create', table: tableName, data: changes, context: { appName: 'uniRecordForm' } });
         }
         return { ok: true };
     } catch (e) {
@@ -224,7 +225,8 @@ async function generateFormSpec(tableName, params) {
             if (Model && recordId !== undefined && recordId !== null) {
                 try {
                     console.log('[generateFormSpec] Fetching record with id:', recordId);
-                    record = await Model.findByPk(recordId, { raw: true });
+                    const specDbGW = require('../../drive_root/dbGateway');
+                    record = await specDbGW.execute({ operation: 'findByPk', table: tableName, where: { id: recordId }, options: { raw: true }, context: { appName: 'uniRecordForm' } });
                     console.log('[generateFormSpec] Fetched record:', record);
                 } catch (e) {
                     console.error('[generateFormSpec] Model.findByPk error:', e && e.message || e);
@@ -266,14 +268,11 @@ async function generateFormSpec(tableName, params) {
                     const targetTable = f.properties.selection.table || f.properties.selection.tableName || f.foreignKey && f.foreignKey.table;
                     const displayField = f.properties.selection.displayField || f.foreignKey && f.foreignKey.displayField || 'name';
                     if (targetTable) {
-                        const targetModelName = globalCtx.getModelNameForTable(targetTable) || targetTable;
-                        const targetModel = (globalCtx.modelsDB || {})[targetModelName];
-                        if (targetModel) {
-                            const trg = await targetModel.findByPk(item.value, { raw: true });
-                            if (trg) {
-                                // Provide selection object for recordSelector controls
-                                item.selection = { id: trg.id, display: trg[displayField] || String(trg.id) };
-                            }
+                        const fkDbGW = require('../../drive_root/dbGateway');
+                        const trg = await fkDbGW.execute({ operation: 'findByPk', table: targetTable, where: { id: item.value }, options: { raw: true }, context: { appName: 'uniRecordForm' } });
+                        if (trg) {
+                            // Provide selection object for recordSelector controls
+                            item.selection = { id: trg.id, display: trg[displayField] || String(trg.id) };
                         }
                     }
                 } catch (e) {
