@@ -22,6 +22,24 @@ function start(options = {}) {
     // Также устанавливаем переменную окружения для дочерних процессов (createDB.js)
     process.env.PROJECT_ROOT = options.rootPath;
     console.log(`[Framework] PROJECT_ROOT environment variable set: ${process.env.PROJECT_ROOT}`);
+    // Автозагрузка project-level dbGateway (если есть) — регистрирует app-level middleware
+    try {
+      const fs = require('fs');
+      const projDbGatewayPath = path.join(options.rootPath, 'dbGateway.js');
+      if (fs.existsSync(projDbGatewayPath)) {
+        require(projDbGatewayPath);
+        console.log('[Framework] Project dbGateway loaded:', projDbGatewayPath);
+      } else {
+        // fallback: try loading from process.cwd() in case start() was called from project root
+        const fallbackPath = path.join(process.cwd(), 'dbGateway.js');
+        if (fs.existsSync(fallbackPath)) {
+          require(fallbackPath);
+          console.log('[Framework] Project dbGateway loaded from CWD:', fallbackPath);
+        }
+      }
+    } catch (e) {
+      console.warn('[Framework] Failed loading project dbGateway:', e && e.message || e);
+    }
   } else {
     console.warn(`[Framework] WARNING: rootPath not provided in start() options!`);
   }
