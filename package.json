@@ -21,6 +21,8 @@
   "dependencies": {
     "dotenv": "^16.0.0",
     "selfsigned": "^2.0.0",
-    "sequelize": "^6.0.0"
+    "sequelize": "^6.0.0",
+    "ws": "^8.1.0",
+    "yauzl": "^2.10.0"
   }
 }
