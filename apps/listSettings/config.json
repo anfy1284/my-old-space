@@ -1,0 +1,10 @@
+{
+    "name": "listSettings",
+    "title": "Настройки списка",
+    "icon": "settings.png",
+    "type": "DataForm",
+    "description": "Универсальный модуль настройки отображения списков и таблиц",
+    "version": "1.0.0",
+    "autoStart": true,
+    "access": ["admin", "user", "public"]
+}

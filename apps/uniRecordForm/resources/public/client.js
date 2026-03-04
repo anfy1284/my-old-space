@@ -78,9 +78,7 @@ try {
                         try { if (typeof this.onOpen === 'function') this.onOpen(params); } catch (e) { console.error(e); }
                         return;
                     }
-                    if (typeof appForm.doAction === 'function') {
-                        try { appForm.doAction(action, params); } catch (e) { console.error(e); }
-                    }
+                    // Avoid recursion: handled by appForm.doAction directly
                 },
                 destroy() {
                     try { if (typeof appForm.destroy === 'function') appForm.destroy(); } catch (e) {}

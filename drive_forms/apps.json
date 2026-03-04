@@ -44,6 +44,10 @@
         {
             "name": "uniRecordForm",
             "path": "/uniRecordForm"
+        },
+        {
+            "name": "listSettings",
+            "path": "/listSettings"
         }
     ]
 }

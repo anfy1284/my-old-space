@@ -1637,8 +1637,95 @@ if (typeof window !== 'undefined') {
 // Implemented as prototype assignment to avoid placing a bare method at top-level.
 Form.prototype.doAction = function(action, params) {
     try {
+        // --- СТАНДАРТНОЕ ПОВЕДЕНИЕ (если задан флаг isStandard) ---
+        // Обработка стандартных действий непосредственно во фреймворке
+        if (params && params.isStandard) {
+            console.log('[Form] handle standard action:', action, params);
+            
+            if (action === 'cancel') {
+                try { if (typeof this.close === 'function') return this.close(); } catch (e) {}
+            }
+            
+            if (action === 'recordAdd') {
+                try {
+                    const tableName = this.dbTable || (params && params.tableName) || '';
+                    if (!tableName) {
+                        if (typeof showAlert === 'function') showAlert('Не указана таблица!');
+                        return;
+                    }
+                    if (window.MySpace && typeof window.MySpace.open === 'function') {
+                        return window.MySpace.open('uniRecordForm', { tableName: tableName });
+                    }
+                } catch (e) { console.error('[Form] recordAdd error:', e); }
+                return;
+            }
+
+            if (action === 'recordOpen') {
+                try {
+                    const row = (typeof this.getCurrentRow === 'function') ? this.getCurrentRow() : null;
+                    if (!row || !row.id) {
+                        if (typeof showAlert === 'function') showAlert('Выберите запись');
+                        return;
+                    }
+                    const tableName = this.dbTable || (params && params.tableName) || '';
+                    if (window.MySpace && typeof window.MySpace.open === 'function') {
+                        return window.MySpace.open('uniRecordForm', { tableName, recordID: row.id });
+                    }
+                } catch (e) { console.error('[Form] recordOpen error:', e); }
+                return;
+            }
+
+            if (action === 'recordDelete') {
+                try {
+                    const row = (typeof this.getCurrentRow === 'function') ? this.getCurrentRow() : null;
+                    if (!row || !row.id) {
+                        if (typeof showAlert === 'function') showAlert('Выберите запись для удаления');
+                        return;
+                    }
+                    const tableName = this.dbTable || (params && params.tableName) || '';
+                    const self = this;
+                    if (typeof window.showConfirm === 'function') {
+                        window.showConfirm('Вы действительно хотите удалить эту запись?', async (res) => {
+                            if (res === 'yes') {
+                                try {
+                                    const result = await callServerMethod('uniRecordForm', 'applyChanges', { 
+                                        datasetId: { table: tableName, id: row.id }, 
+                                        changes: { _deleted: true } 
+                                    });
+                                    if (result && result.ok) {
+                                        if (self.table && typeof self.table.refresh === 'function') self.table.refresh();
+                                    } else {
+                                        if (typeof showAlert === 'function') showAlert('Ошибка удаления: ' + (result.error || 'неизвестная ошибка'));
+                                    }
+                                } catch(e) { console.error(e); }
+                            }
+                        });
+                    }
+                } catch (e) { console.error('[Form] recordDelete error:', e); }
+                return;
+            }
+
+            if (action === 'listSettings') {
+                try {
+                    const appName = this.appName || (params && params.appName) || '';
+                    const title = this.title || (params && params.title) || '';
+                    console.log('[Form] Action listSettings triggered for:', appName);
+                    if (window.MySpace && typeof window.MySpace.open === 'function') {
+                        return window.MySpace.open('listSettings', { appName: appName, title: title });
+                    } else {
+                        console.error('[Form] window.MySpace.open is not available');
+                    }
+                } catch (e) { console.error('[Form] listSettings error:', e); }
+                return true; // Возвращаем true, чтобы прервать дальнейшую обработку
+            }
+            
+            // Если действие было помечено как стандартное, но не обработано выше, 
+            // всё равно пробуем передать его в нативный onAction (как fallback)
+        }
+
         if (this.instance && typeof this.instance.onAction === 'function') {
-            return this.instance.onAction(action, params);
+            const res = this.instance.onAction(action, params);
+            if (res) return res;
         }
     } catch (e) {
         try { console.error('[Form] doAction forwarding error', e); } catch (_) {}
@@ -1982,8 +2069,13 @@ class DataForm extends Form {
             case 'button': {
                 let btn = null;
                 try {
+                    const btnProps = Object.assign({}, properties || {}, { 
+                        action: item.action, 
+                        params: item.params || {},
+                        isStandard: (item.isStandard !== undefined) ? item.isStandard : true // По умолчанию считаем кнопки стандартными
+                    });
                     if (typeof Button === 'function') {
-                        try { btn = new Button(contentArea, properties); } catch (e) { btn = new Button(); }
+                        btn = new Button(contentArea, btnProps);
                     }
                 } catch (e) { btn = null; }
 
@@ -2234,23 +2326,26 @@ class DataForm extends Form {
 
 class Button extends UIObject {
 
-    constructor(parentElement = null) {
+    constructor(parentElement = null, properties = {}) {
         super();
-        this.caption = '';
-        this.icon = null; // Path to icon file
-        this.showIcon = false;
-        this.showText = true;
-        this.tooltip = ''; // Custom tooltip text
-        this.x = 0;
-        this.y = 0;
-        this.z = 0;
+        this.caption = properties.caption || '';
+        this.icon = properties.icon || null;
+        this.showIcon = properties.showIcon || false;
+        this.showText = (properties.showText !== undefined) ? properties.showText : true;
+        this.tooltip = properties.tooltip || '';
+        this.action = properties.action || null;
+        this.params = properties.params || {};
+        this.isStandard = (properties.isStandard !== undefined) ? properties.isStandard : false;
+
+        this.x = (properties.x !== undefined) ? properties.x : 0;
+        this.y = (properties.y !== undefined) ? properties.y : 0;
+        this.z = (properties.z !== undefined) ? properties.z : 0;
+        this.width = properties.width || 0;
+        this.height = properties.height || 0;
+
         this.tooltipTimeout = null;
         this.tooltipElement = null;
-        if (parentElement) {
-            this.parentElement = parentElement;
-        } else {
-            this.parentElement = null;
-        }
+        this.parentElement = parentElement || null;
     }
 
     setCaption(caption) {
@@ -3681,6 +3776,15 @@ class Group extends UIObject {
                 // Keep provided height if explicitly set
                 if (this.height) this.element.style.height = this.height + 'px';
                 this.element.style.boxSizing = this.element.style.boxSizing || 'border-box';
+            }
+
+            // Render children if any
+            if (this.children && this.children.length > 0) {
+                this.children.forEach(child => {
+                    if (child && typeof child.Draw === 'function') {
+                        child.Draw(this.element);
+                    }
+                });
             }
 
             // box-sizing/padding handled via CSS
@@ -5442,6 +5546,9 @@ class Table extends UIObject {
         // Internal handlers and state for managing row/cell activation
         this._docClickHandler = null;
         this._docKeyHandler = null;
+
+        this.showToolbar = properties.showToolbar || true;
+        this.tableName = properties.tableName || '';
     }
 
     // Data helpers: encapsulate all _dataMap access for Table
@@ -6271,6 +6378,35 @@ class Table extends UIObject {
             wrapper.style.boxSizing = 'border-box';
             wrapper.style.display = 'flex';
             wrapper.style.flexDirection = 'column';
+
+            if (this.showToolbar) {
+                const toolbarLayout = {
+                    type: 'group',
+                    caption: 'Действия',
+                    orientation: 'horizontal',
+                    layout: [
+                        { type: 'button', action: 'select', caption: 'Выбрать', params: { isStandard: true } },
+                        { type: 'button', action: 'cancel', caption: 'Отмена', params: { isStandard: true } },
+                        { type: 'button', action: 'recordOpen', caption: 'Открыть', params: { isStandard: true } },
+                        { type: 'button', action: 'recordAdd', caption: 'Добавить', params: { isStandard: true } },
+                        { type: 'button', action: 'recordDelete', caption: 'Удалить', params: { isStandard: true } },
+                        { type: 'button', action: 'listSettings', caption: 'Настройки', params: { isStandard: true } }
+                    ]
+                };
+
+                if (this.appForm && typeof this.appForm.renderItem === 'function') {
+                    // Use DataForm's systematic rendering
+                    this.appForm.renderItem(toolbarLayout, wrapper).then(() => {
+                        const tbEl = wrapper.lastElementChild;
+                        if (tbEl) {
+                            tbEl.style.flex = '0 0 auto';
+                            tbEl.style.margin = '4px';
+                            // Ensure it's at the top
+                            wrapper.insertBefore(tbEl, wrapper.firstChild);
+                        }
+                    });
+                }
+            }
 
             // Header container (fixed) - styled like DynamicTable
             const headerContainer = document.createElement('div');

@@ -51,6 +51,28 @@ const globalServerContext = require('../globalServerContext');
 const { processDefaultValues } = globalServerContext;
 const { normalizeType, compareSchemas, syncUniqueConstraints } = require('./migrationUtils');
 
+/**
+ * Хук для вызова пользовательских обработчиков событий (events_handler.js)
+ */
+async function triggerProjectEvent(eventName, context = {}) {
+  try {
+    const projectRoot = process.env.PROJECT_ROOT;
+    if (!projectRoot) return;
+    
+    const handlerPath = path.join(projectRoot, 'events_handler.js');
+    if (fs.existsSync(handlerPath)) {
+      // Используем динамический импорт для поддержки ES модулей (если handler так написан) 
+      // или require если это обычный node модуль.
+      const handler = require(handlerPath).default || require(handlerPath);
+      if (handler && typeof handler[eventName] === 'function') {
+        await handler[eventName](context);
+      }
+    }
+  } catch (e) {
+    console.error(`[events_handler] Error triggering event "${eventName}":`, e.message);
+  }
+}
+
 // Set projectRoot in globalServerContext for this process
 if (projectRoot) {
   globalServerContext.setProjectRoot(projectRoot);
@@ -801,6 +823,13 @@ async function createAll() {
     } catch (e) {
       console.error('[MIGRATION] ensureNameColumns failed:', e.message);
     }
+
+    // Call user event handler after full database init
+    await triggerProjectEvent('onDatabasePostInit', { 
+        sequelize, 
+        projectRoot: process.env.PROJECT_ROOT,
+        level: LEVEL
+    });
 
   } catch (error) {
     // Rollback transaction on error (if created)

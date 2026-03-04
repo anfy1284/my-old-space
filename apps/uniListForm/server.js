@@ -19,7 +19,6 @@ function getData(params) {
 function getLayout(params) {
     // params may be used to customise layout depending on how app is opened
     let layout = [
-        { type: 'group', caption: 'Действия', orientation: 'horizontal', layout: [ { type: 'button', action: 'select', caption: 'Выбрать' }, { type: 'button', action: 'cancel', caption: 'Отмена' }, { type: 'button', action: 'recordOpen', caption: 'Открыть' }, { type: 'button', action: 'recordAdd', caption: 'Добавить' } ] },
         {           
             type: 'table',
             caption: 'Организации (БД)',
