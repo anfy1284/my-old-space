@@ -425,8 +425,14 @@ async function createAll() {
         const tempTableName = `${def.tableName}_temp_backup`;
         console.log(`[MIGRATION] Backing up ${def.tableName} to ${tempTableName}`);
         if (isSqlite) {
+          try {
+            await sequelize.query(`DROP TABLE IF EXISTS "${tempTableName}"`);
+          } catch (e) {}
           await sequelize.query(`CREATE TABLE "${tempTableName}" AS SELECT * FROM "${def.tableName}"`);
         } else {
+          try {
+            await sequelize.query(`DROP TABLE IF EXISTS "${tempTableName}"`, { transaction });
+          } catch (e) {}
           await sequelize.query(`CREATE TABLE "${tempTableName}" AS SELECT * FROM "${def.tableName}"`, { transaction });
         }
       }

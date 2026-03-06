@@ -11,37 +11,27 @@ module.exports = {
         return {
             layout: [
                 {
-                    type: "group",
-                    caption: "Основные параметры",
-                    orientation: "vertical",
-                    layout: [
+                    type: "tabs",
+                    tabs: [
                         {
-                            type: "textbox",
-                            caption: "Имя конфигурации (заглушка)",
-                            data: "dummy_name"
+                            caption: "Поля",
+                            layout: [
+                                {
+                                    type: "group",
+                                    caption: "Настройка колонок",
+                                    layout: []
+                                }
+                            ]
                         },
                         {
-                            type: "checkbox",
-                            caption: "Показывать скрытые записи",
-                            data: "show_hidden"
-                        }
-                    ]
-                },
-                {
-                    type: "group",
-                    orientation: "horizontal",
-                    layout: [
-                        {
-                            type: "button",
-                            caption: "Сохранить",
-                            action: "save",
-                            isStandard: false // Обработка в client.js
-                        },
-                        {
-                            type: "button",
-                            caption: "Отмена",
-                            action: "cancel",
-                            isStandard: true
+                            caption: "Фильтры",
+                            layout: [
+                                {
+                                    type: "group",
+                                    caption: "Условия фильтрации",
+                                    layout: []
+                                }
+                            ]
                         }
                     ]
                 }

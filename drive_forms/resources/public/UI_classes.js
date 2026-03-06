@@ -6626,9 +6626,15 @@ class Tabs extends UIObject {
         } } catch (e) {}
     }
 
-    async _renderTab(tab) {
+    async _renderTab(tab, btn) {
         try {
             if (!this._content) return;
+            // Highlight active tab button
+            if (this._header) {
+                this._header.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+            }
+            if (btn) btn.classList.add('active');
+
             this._content.innerHTML = '';
             if (tab && Array.isArray(tab.layout) && this.appForm && typeof this.appForm.renderLayout === 'function') {
                 await this.appForm.renderLayout(this._content, tab.layout);
@@ -6642,14 +6648,9 @@ class Tabs extends UIObject {
         if (!this.element) {
             const wrapper = document.createElement('div');
             wrapper.classList.add('ui-tabs');
-            wrapper.style.boxSizing = 'border-box';
-            wrapper.style.width = '100%';
 
             const header = document.createElement('div');
             header.classList.add('ui-tabs-header');
-            header.style.display = 'flex';
-            header.style.gap = '6px';
-            header.style.marginBottom = '8px';
 
             const content = document.createElement('div');
             content.classList.add('ui-tabs-content');
@@ -6669,10 +6670,14 @@ class Tabs extends UIObject {
                     try { btn.type = 'button'; } catch (e) {}
                     btn.textContent = t.caption || ('Tab ' + (idx + 1));
                     btn.tabIndex = -1;
-                    btn.addEventListener('click', async () => { try { await this._renderTab(t); } catch (e) {} });
+                    btn.addEventListener('click', async () => { try { await this._renderTab(t, btn); } catch (e) {} });
                     this._header.appendChild(btn);
+                    if (idx === 0) {
+                        this._activeTab = t;
+                        this._activeBtn = btn;
+                    }
                 });
-                if (this.tabs.length > 0) this._renderTab(this.tabs[0]);
+                if (this.tabs.length > 0) this._renderTab(this._activeTab, this._activeBtn);
             } catch (e) {
                 // ignore
             }

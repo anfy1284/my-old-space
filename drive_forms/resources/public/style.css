@@ -492,5 +492,71 @@ input[type="checkbox"],
   background-color: var(--color-mid);
 }
 
+/* --- Tabs Win95 --- */
+.ui-tabs {
+    display: flex;
+    flex-direction: column;
+    padding: 6px;
+}
+
+.ui-tabs-header {
+    display: flex;
+    flex-direction: row;
+    align-items: flex-end;
+    padding-left: 2px;
+    z-index: 2;
+}
+
+.ui-tabs-header button {
+    font-family: MS Sans Serif, sans-serif;
+    font-size: 11px;
+    background-color: var(--color-mid);
+    border: none;
+    padding: 3px 8px;
+    margin-right: 2px;
+    position: relative;
+    outline: none;
+    border-top: 1px solid var(--color-light);
+    border-left: 1px solid var(--color-light);
+    border-right: 1px solid var(--color-dark);
+    border-bottom: 1px solid var(--color-mid);
+    border-radius: 2px 2px 0 0;
+    cursor: default;
+}
+
+.ui-tabs-header button.active {
+    padding-top: 5px;
+    padding-bottom: 4px;
+    margin-top: -2px;
+    z-index: 3;
+    border-bottom: 1px solid var(--color-mid);
+}
+
+.ui-tabs-content {
+    background-color: var(--color-mid);
+    border-top: 1px solid var(--color-light);
+    border-left: 1px solid var(--color-light);
+    border-right: 1px solid var(--color-dark);
+    border-bottom: 1px solid var(--color-dark);
+    padding: 8px;
+    margin-top: -1px;
+    position: relative;
+    z-index: 1;
+    min-height: 100px;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Второй контур для 3D эффекта вкладок */
+.ui-tabs-content::after {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    pointer-events: none;
+    border-right: 1px solid #000;
+    border-bottom: 1px solid #000;
+}
+
+
 
 
