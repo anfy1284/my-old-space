@@ -1,5 +1,11 @@
 {
-  "Messenger_Chats": [
-    { "id": 1, "userId": 1, "name": "Local chat", "description": "Локальный чат", "isActive": true }
-  ]
+    "Messenger_Chats": [
+        {
+            "userId": "000000000-organizations-0001",
+            "name": "Local chat",
+            "description": "Локальный чат",
+            "isActive": true,
+            "UID": "000000000-messenger_chats-0001"
+        }
+    ]
 }

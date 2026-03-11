@@ -96,16 +96,13 @@ const UserSystem = sequelize.define(userSystemDef.name, Object.fromEntries(
 async function getUserAccessRole(user) {
   if (!user) return 'nologged';
   // Find first user_systems record for user
-  const userSystem = await UserSystem.findOne({ where: { userId: user.id }, order: [['id', 'ASC']] });
+  const userId = user.UID;
+  const userSystem = await UserSystem.findOne({ where: { userId }, order: [['UID', 'ASC']] });
   if (!userSystem || !userSystem.roleId) {
-    console.log(`[getUserAccessRole] No userSystem or roleId found for user ${user.id}`);
+    console.log(`[getUserAccessRole] No userSystem or roleId found for user ${userId}`);
     return null;
   }
-  const role = await AccessRole.findOne({ where: { id: userSystem.roleId } });
-  if (!role) {
-    console.log(`[getUserAccessRole] Role not found for roleId ${userSystem.roleId}`);
-    return null;
-  }
+  const role = await AccessRole.findOne({ where: { UID: userSystem.roleId } });
   return role ? role.name : null;
 }
 

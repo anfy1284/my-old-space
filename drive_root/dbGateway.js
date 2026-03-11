@@ -64,10 +64,12 @@ async function executor(request) {
         }
 
         case 'findByPk': {
-            const id = (where && where.id) || data;
-            if (id == null) throw new Error('[dbGateway] findByPk requires where.id or data');
+            const id = (where && where.UID) || data;
+            if (id == null) throw new Error('[dbGateway] findByPk requires where.UID or data');
             const queryOpts = { ...options };
-            return await Model.findByPk(id, queryOpts);
+
+            // Only use UID for findByPk replacement
+            return await Model.findOne({ where: { UID: id }, ...queryOpts });
         }
 
         case 'findOne': {
@@ -84,12 +86,47 @@ async function executor(request) {
 
         case 'create': {
             if (!data) throw new Error('[dbGateway] create requires data');
+
+            // Очистка пустых строк только для внешних ключей (чтобы избежать ошибок FK в Postgres)
+            if (Model && Model.rawAttributes) {
+                Object.keys(data).forEach(k => {
+                    const attr = Model.rawAttributes[k];
+                    if (data[k] === "" && attr && attr.references) {
+                        data[k] = null;
+                    }
+                });
+            }
+
+            if (!data.UID) {
+                try {
+                    const util = require('./db/utilites');
+                    // Используем каноничное имя модели Model.name, чтобы хэш совпадал 
+                    // независимо от того, как было передано имя таблицы (users или Users).
+                    data.UID = util.generateUID(Model.name);
+                } catch(e) {
+                    const time = Date.now().toString(36).padStart(9, '0').slice(-9);
+                    const hash = '0000000';
+                    const random = require('crypto').randomBytes(6).readUIntBE(0, 6).toString(36).padStart(7, '0').slice(-7);
+                    data.UID = `${time}-${hash}-${random}`;
+                }
+            }
             return await Model.create(data, options);
         }
 
         case 'update': {
             if (!data) throw new Error('[dbGateway] update requires data');
             if (!where) throw new Error('[dbGateway] update requires where');
+
+            // Очистка пустых строк только для внешних ключей (чтобы избежать ошибок FK в Postgres)
+            if (Model && Model.rawAttributes) {
+                Object.keys(data).forEach(k => {
+                    const attr = Model.rawAttributes[k];
+                    if (data[k] === "" && attr && attr.references) {
+                        data[k] = null;
+                    }
+                });
+            }
+
             return await Model.update(data, { where, ...options });
         }
 

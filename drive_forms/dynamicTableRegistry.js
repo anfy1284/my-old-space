@@ -146,7 +146,7 @@ function registerDynamicTableMethods(appName, config = {}) {
             });
 
             try {
-                console.log(`[${appName}/getDynamicTableData] modelName=${modelName} tableName=${tableName} sessionUser=${user && user.id}`);
+                console.log(`[${appName}/getDynamicTableData] modelName=${modelName} tableName=${tableName} sessionUser=${user && user.UID}`);
                 try { console.log(`[${appName}/getDynamicTableData] raw keys=`, raw ? Object.keys(raw) : null); } catch(e) {}
                 try { console.log(`[${appName}/getDynamicTableData] raw.fields=`, raw && raw.fields ? raw.fields : (fieldConfig || null)); } catch(e) {}
                 try { console.log(`[${appName}/getDynamicTableData] rows.length=`, raw && raw.rows ? raw.rows.length : (raw && raw.data ? raw.data.length : 0)); } catch(e) {}

@@ -25,9 +25,9 @@ async function getSettings(params, sessionID) {
             include: [{
                 model: modelsDB.UserSettingsTypes,
                 as: 'type',
-                attributes: ['id', 'name', 'valueTableName']
+                attributes: ['UID', 'name', 'valueTableName']
             }],
-            order: [['id', 'ASC']]
+            order: [['UID', 'ASC']]
         });
 
         // Build fields array
@@ -35,7 +35,7 @@ async function getSettings(params, sessionID) {
         for (const field of settingsFields) {
             const typeId = field.typeId;
             const fieldData = {
-                id: field.id,
+                id: field.UID || field.id,
                 name: field.name, // Original name for data keys
                 displayName: field.displayName, // Display name for UI labels
                 typeId: typeId
@@ -106,7 +106,7 @@ async function saveSettings(params, sessionID) {
             include: [{
                 model: modelsDB.UserSettingsTypes,
                 as: 'type',
-                attributes: ['id', 'name', 'valueTableName']
+                attributes: ['UID', 'name', 'valueTableName']
             }]
         });
 

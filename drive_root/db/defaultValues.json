@@ -1,85 +1,85 @@
 {
-  "users": [
-    {
-      "id": 1,
-      "name": "admin",
-      "email": "admin@example.com",
-      "password": "admin123"
-    }
-  ],
-  "user_settings_types": [
-    {
-      "id": 1,
-      "name": "string",
-      "valueTableName": "user_settings_string_values"
-    },
-    {
-      "id": 2,
-      "name": "number",
-      "valueTableName": "user_settings_number_values"
-    },
-    {
-      "id": 3,
-      "name": "boolean",
-      "valueTableName": "user_settings_boolean_values"
-    },
-    {
-      "id": 4,
-      "name": "date",
-      "valueTableName": "user_settings_date_values"
-    },
-    {
-      "id": 5,
-      "name": "enum",
-      "valueTableName": "user_settings_string_values"
-    }
-  ],
-  "user_settings_fields": [
-    {
-      "id": 1,
-      "name": "Theme",
-      "displayName": "Тема",
-      "typeId": 5,
-      "options": [
-        "Classic",
-        "Dark",
-        "Blue",
-        "Matrix"
-      ]
-    },
-    {
-      "id": 2,
-      "name": "ShowNotifications",
-      "displayName": "Показывать уведомления",
-      "typeId": 3
-    },
-    {
-      "id": 3,
-      "name": "FontSize",
-      "displayName": "Размер шрифта",
-      "typeId": 2
-    },
-    {
-      "id": 4,
-      "name": "ProfileName",
-      "displayName": "Имя профиля",
-      "typeId": 1
-    },
-    {
-      "id": 5,
-      "name": "StartMenuIconSize",
-      "displayName": "Размер иконок меню",
-      "typeId": 5,
-      "options": [
-        "Small",
-        "Large"
-      ]
-    },
-    {
-      "id": 6,
-      "name": "Birthday",
-      "displayName": "День рождения",
-      "typeId": 4
-    }
-  ]
+    "users": [
+        {
+            "name": "admin",
+            "email": "admin@example.com",
+            "password": "admin123",
+            "UID": "000000000-organizations-0001"
+        }
+    ],
+    "user_settings_types": [
+        {
+            "name": "string",
+            "valueTableName": "user_settings_string_values",
+            "UID": "000000000-roles-0001"
+        },
+        {
+            "name": "number",
+            "valueTableName": "user_settings_number_values",
+            "UID": "000000000-roles-0002"
+        },
+        {
+            "name": "boolean",
+            "valueTableName": "user_settings_boolean_values",
+            "UID": "000000000-roles-0003"
+        },
+        {
+            "name": "date",
+            "valueTableName": "user_settings_date_values",
+            "UID": "000000000-roles-0004"
+        },
+        {
+            "name": "enum",
+            "valueTableName": "user_settings_string_values",
+            "UID": "000000000-roles-0005"
+        }
+    ],
+    "user_settings_fields": [
+        {
+            "name": "Theme",
+            "displayName": "Тема",
+            "typeId": "000000000-roles-0005",
+            "options": [
+                "Classic",
+                "Dark",
+                "Blue",
+                "Matrix"
+            ],
+            "UID": "000000000-users-0001"
+        },
+        {
+            "name": "ShowNotifications",
+            "displayName": "Показывать уведомления",
+            "typeId": "000000000-roles-0003",
+            "UID": "000000000-users-0002"
+        },
+        {
+            "name": "FontSize",
+            "displayName": "Размер шрифта",
+            "typeId": "000000000-roles-0002",
+            "UID": "000000000-users-0003"
+        },
+        {
+            "name": "ProfileName",
+            "displayName": "Имя профиля",
+            "typeId": "000000000-roles-0001",
+            "UID": "000000000-users-0004"
+        },
+        {
+            "name": "StartMenuIconSize",
+            "displayName": "Размер иконок меню",
+            "typeId": "000000000-roles-0005",
+            "options": [
+                "Small",
+                "Large"
+            ],
+            "UID": "000000000-users-0005"
+        },
+        {
+            "name": "Birthday",
+            "displayName": "День рождения",
+            "typeId": "000000000-roles-0004",
+            "UID": "000000000-users-0006"
+        }
+    ]
 }

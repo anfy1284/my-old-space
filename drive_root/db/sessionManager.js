@@ -11,12 +11,26 @@ const modelsDef = dbConfig.models;
 const sessionDef = modelsDef.find(m => m.name === 'Sessions');
 const userDef = modelsDef.find(m => m.name === 'Users');
 
+const { generateUID } = require('./utilites');
+
 const Session = sequelize.define(sessionDef.name, Object.fromEntries(
-  Object.entries(sessionDef.fields).map(([k, v]) => [k, { ...v, type: Sequelize.DataTypes[v.type] }])
+  Object.entries(sessionDef.fields).map(([k, v]) => {
+      const fieldDef = { ...v, type: Sequelize.DataTypes[v.type] };
+      if (fieldDef.defaultValue === 'GENERATE_UID') {
+          fieldDef.defaultValue = () => generateUID('Session');
+      }
+      return [k, fieldDef];
+  })
 ), { ...sessionDef.options, tableName: sessionDef.tableName });
 
 const User = sequelize.define(userDef.name, Object.fromEntries(
-  Object.entries(userDef.fields).map(([k, v]) => [k, { ...v, type: Sequelize.DataTypes[v.type] }])
+  Object.entries(userDef.fields).map(([k, v]) => {
+      const fieldDef = { ...v, type: Sequelize.DataTypes[v.type] };
+      if (fieldDef.defaultValue === 'GENERATE_UID') {
+          fieldDef.defaultValue = () => generateUID('User');
+      }
+      return [k, fieldDef];
+  })
 ), { ...userDef.options, tableName: userDef.tableName });
 
 // Session cache: Map<sessionId, { userId, isGuest, sessionId }>

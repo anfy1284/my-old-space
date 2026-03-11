@@ -4,10 +4,10 @@
             "name": "Systems",
             "tableName": "systems",
             "fields": {
-                "id": {
-                    "type": "INTEGER",
+                "UID": {
+                    "type": "STRING",
                     "primaryKey": true,
-                    "autoIncrement": true
+                    "defaultValue": "GENERATE_UID"
                 },
                 "name": {
                     "type": "STRING",
@@ -31,10 +31,10 @@
             "name": "AccessRoles",
             "tableName": "access_roles",
             "fields": {
-                "id": {
-                    "type": "INTEGER",
+                "UID": {
+                    "type": "STRING",
                     "primaryKey": true,
-                    "autoIncrement": true
+                    "defaultValue": "GENERATE_UID"
                 },
                 "name": {
                     "type": "STRING",
@@ -49,33 +49,33 @@
             "name": "UserSystems",
             "tableName": "user_systems",
             "fields": {
-                "id": {
-                    "type": "INTEGER",
+                "UID": {
+                    "type": "STRING",
                     "primaryKey": true,
-                    "autoIncrement": true
+                    "defaultValue": "GENERATE_UID"
                 },
                 "userId": {
-                    "type": "INTEGER",
+                    "type": "STRING",
                     "allowNull": false,
                     "references": {
                         "model": "users",
-                        "key": "id"
+                        "key": "UID"
                     }
                 },
                 "systemId": {
-                    "type": "INTEGER",
+                    "type": "STRING",
                     "allowNull": false,
                     "references": {
                         "model": "systems",
-                        "key": "id"
+                        "key": "UID"
                     }
                 },
                 "roleId": {
-                    "type": "INTEGER",
+                    "type": "STRING",
                     "allowNull": true,
                     "references": {
                         "model": "access_roles",
-                        "key": "id"
+                        "key": "UID"
                     }
                 }
             }

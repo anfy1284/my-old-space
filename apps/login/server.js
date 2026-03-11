@@ -74,9 +74,9 @@ async function login(params, sessionID) {
         // Update session
         const session = await global.modelsDB.Sessions.findOne({ where: { sessionId: sessionID } });
         if (session) {
-            await session.update({ userId: user.id });
+            await session.update({ userId: user.UID });
         } else {
-            await global.modelsDB.Sessions.create({ sessionId: sessionID, userId: user.id });
+            await global.modelsDB.Sessions.create({ sessionId: sessionID, userId: user.UID });
         }
 
         return { success: true };

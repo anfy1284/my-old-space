@@ -111,8 +111,8 @@ async function applyChanges(datasetId, changes) {
         const applyDbGW = require('../../drive_root/dbGateway');
         if (recordId) {
             // Update existing record
-            console.log(`[uniRecordForm] Updating ${tableName} id=${recordId} with`, changes);
-            await applyDbGW.execute({ operation: 'update', table: tableName, data: changes, where: { id: recordId }, context: { appName: 'uniRecordForm' } });
+            console.log(`[uniRecordForm] Updating ${tableName} UID=${recordId} with`, changes);
+            await applyDbGW.execute({ operation: 'update', table: tableName, data: changes, where: { UID: recordId }, context: { appName: 'uniRecordForm' } });
         } else {
             // Create new record
             console.log(`[uniRecordForm] Creating new ${tableName} with`, changes);
@@ -226,7 +226,7 @@ async function generateFormSpec(tableName, params) {
                 try {
                     console.log('[generateFormSpec] Fetching record with id:', recordId);
                     const specDbGW = require('../../drive_root/dbGateway');
-                    record = await specDbGW.execute({ operation: 'findByPk', table: tableName, where: { id: recordId }, options: { raw: true }, context: { appName: 'uniRecordForm' } });
+                    record = await specDbGW.execute({ operation: 'findByPk', table: tableName, where: { UID: recordId }, options: { raw: true }, context: { appName: 'uniRecordForm' } });
                     console.log('[generateFormSpec] Fetched record:', record);
                 } catch (e) {
                     console.error('[generateFormSpec] Model.findByPk error:', e && e.message || e);
@@ -269,10 +269,10 @@ async function generateFormSpec(tableName, params) {
                     const displayField = f.properties.selection.displayField || f.foreignKey && f.foreignKey.displayField || 'name';
                     if (targetTable) {
                         const fkDbGW = require('../../drive_root/dbGateway');
-                        const trg = await fkDbGW.execute({ operation: 'findByPk', table: targetTable, where: { id: item.value }, options: { raw: true }, context: { appName: 'uniRecordForm' } });
+                        const trg = await fkDbGW.execute({ operation: 'findByPk', table: targetTable, where: { UID: item.value }, options: { raw: true }, context: { appName: 'uniRecordForm' } });
                         if (trg) {
                             // Provide selection object for recordSelector controls
-                            item.selection = { id: trg.id, display: trg[displayField] || String(trg.id) };
+                            item.selection = { id: trg.UID, display: trg[displayField] || String(trg.UID) };
                         }
                     }
                 } catch (e) {

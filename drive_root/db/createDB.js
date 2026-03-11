@@ -152,7 +152,7 @@ async function ensureDatabase() {
   const dbName = dbSettings.database;
   const res = await adminClient.query('SELECT 1 FROM pg_database WHERE datname = $1', [dbName]);
   if (res.rowCount === 0) {
-    await adminClient.query(`CREATE DATABASE "${dbName}" WITH ENCODING 'UTF8' LC_COLLATE='C.UTF-8' LC_CTYPE='C.UTF-8'`);
+    await adminClient.query(`CREATE DATABASE "${dbName}"`);
     console.log(`Database ${dbName} created.`);
   } else {
     console.log(`Database ${dbName} already exists.`);
@@ -273,6 +273,14 @@ async function createAll() {
   const mergedModelsDef = mergeModelDefinitions(allModelsDef);
   console.log(`[MIGRATION] Total models after merge: ${mergedModelsDef.length}`);
 
+  // Call user event handler to modify models before DB creation
+  await triggerProjectEvent('onModelsPostCollect', {
+      mergedModelsDef,
+      allAssociations,
+      sequelize,
+      projectRoot: process.env.PROJECT_ROOT
+  });
+
   // Build dependency graph based on fields.references to determine create order
   function computeCreateOrder(modelsDefs) {
     const nameByTable = new Map(); // tableName -> def
@@ -344,11 +352,19 @@ async function createAll() {
     for (const [field, opts] of Object.entries(def.fields)) {
       const type = Sequelize.DataTypes[opts.type];
       fields[field] = { ...opts, type };
+        if (fields[field].defaultValue === "GENERATE_UID" || (typeof fields[field].defaultValue === 'function' && fields[field].defaultValue.name === 'uidGenerator')) {
+          fields[field].defaultValue = function() {
+            const crypto = require('crypto');
+            const time = Date.now().toString(36);
+            const hash = crypto.createHash('md5').update(time + Math.random().toString()).digest('hex').substring(0, 8);
+            const random = Math.random().toString(36).substring(2, 8);
+            return `${time}-${hash}-${random}`;
+          };
+          }
     }
     models[def.name] = sequelize.define(def.name, fields, { ...def.options, tableName: def.tableName });
   }
-  
-  // Apply associations
+
   for (const assoc of allAssociations) {
     const sourceModel = models[assoc.source];
     const targetModel = models[assoc.target];
@@ -461,13 +477,31 @@ async function createAll() {
       // C. Recreate/Sync ALL Tables 
       // Sync ALL models to ensure cascading drops are healed (FKs restored)
       console.log(`[MIGRATION] Re-syncing all tables structure...`);
-      for (const def of createOrderDefs) {
-        if (isSqlite) {
-          await models[def.name].sync();
-          await syncUniqueConstraints(sequelize, null, def.tableName, def.fields);
-        } else {
-          await models[def.name].sync({ transaction });
-          await syncUniqueConstraints(sequelize, transaction, def.tableName, def.fields);
+
+      let pendingModels = [...createOrderDefs];
+      let maxAttempts = createOrderDefs.length * 2;
+      while (pendingModels.length > 0 && maxAttempts > 0) {
+        maxAttempts--;
+        const currentBatch = [...pendingModels];
+        pendingModels = [];
+        for (const def of currentBatch) {
+          try {
+            if (isSqlite) {
+              await models[def.name].sync();
+              await syncUniqueConstraints(sequelize, null, def.tableName, def.fields);
+            } else {
+              await sequelize.query(`SAVEPOINT sync_table_${def.tableName}`, { transaction });
+              await models[def.name].sync({ transaction });
+              await syncUniqueConstraints(sequelize, transaction, def.tableName, def.fields);
+            }
+          } catch (e) {
+            if (!isSqlite) await sequelize.query(`ROLLBACK TO SAVEPOINT sync_table_${def.tableName}`, { transaction });
+            pendingModels.push(def); // Skip and retry later
+          }
+        }
+        if (pendingModels.length === currentBatch.length) {
+          console.error(`[MIGRATION] Cyclic dependency or unresolvable error. Tables left: ${pendingModels.map(m => m.tableName).join(', ')}`);
+          break;
         }
       }
 
@@ -609,8 +643,30 @@ async function createAll() {
 
     } else {
       console.log('[MIGRATION] No schema changes requiring migration. Ensuring all tables exist...');
-      for (const def of createOrderDefs) {
-        await models[def.name].sync({ transaction });
+      
+      let pendingModels = [...createOrderDefs];
+      let maxAttempts = createOrderDefs.length * 2;
+      while (pendingModels.length > 0 && maxAttempts > 0) {
+        maxAttempts--;
+        const currentBatch = [...pendingModels];
+        pendingModels = [];
+        for (const def of currentBatch) {
+          try {
+            if (isSqlite) {
+              await models[def.name].sync();
+            } else {
+              await sequelize.query(`SAVEPOINT sync_table_no_mig_${def.tableName}`, { transaction });
+              await models[def.name].sync({ transaction });
+            }
+          } catch (e) {
+            if (!isSqlite) await sequelize.query(`ROLLBACK TO SAVEPOINT sync_table_no_mig_${def.tableName}`, { transaction });
+            pendingModels.push(def);
+          }
+        }
+        if (pendingModels.length === currentBatch.length) {
+          console.error(`[MIGRATION] Cyclic dependency or unresolvable error. Tables left: ${pendingModels.map(m => m.tableName).join(', ')}`);
+          break;
+        }
       }
 
       // Fill defaultValues for new installation
@@ -627,7 +683,7 @@ async function createAll() {
           if (!Model) continue;
 
           for (const record of records) {
-            const defaultValueId = record.id;
+            const defaultValueId = record.UID;
             if (defaultValueId === undefined) continue;
 
             let data = { ...record };
@@ -652,10 +708,10 @@ async function createAll() {
                 level: lvlName,
                 defaultValueId: defaultValueId,
                 tableName: entity,
-                recordId: newRecord.id
+                recordId: newRecord.UID
               }, { transaction });
               await sequelize.query('RELEASE SAVEPOINT fill_default', { transaction });
-              console.log(`[MIGRATION] Added: ${entity}[${newRecord.id}] (defaultValueId=${defaultValueId}, level=${lvlName})`);
+              console.log(`[MIGRATION] Added: ${entity}[${newRecord.UID}] (defaultValueId=${defaultValueId}, level=${lvlName})`);
             } catch (err) {
               await sequelize.query('ROLLBACK TO SAVEPOINT fill_default', { transaction });
               // May already exist, skip
@@ -677,8 +733,8 @@ async function createAll() {
       for (const [entity, records] of Object.entries(lvlValues)) {
         if (Array.isArray(records)) {
           records.forEach(record => {
-            if (record.id !== undefined) {
-              currentLevelIds.add(record.id);
+            if (record.UID !== undefined) {
+              currentLevelIds.add(record.UID);
             }
           });
         }
@@ -696,7 +752,7 @@ async function createAll() {
           const modelDef = mergedModelsDef.find(m => m.tableName === defValue.tableName);
           if (modelDef && models[modelDef.name]) {
             await models[modelDef.name].destroy({
-              where: { id: defValue.recordId },
+              where: { UID: defValue.recordId },
               transaction
             });
             console.log(`[MIGRATION] Removed obsolete record: ${defValue.tableName}[${defValue.recordId}] (defaultValueId=${defValue.defaultValueId}, level=${lvlName})`);
@@ -716,7 +772,7 @@ async function createAll() {
         if (!Model) continue;
 
         for (const record of records) {
-          const defaultValueId = record.id;
+          const defaultValueId = record.UID;
           if (defaultValueId === undefined) continue;
 
           let data = { ...record };
@@ -736,9 +792,9 @@ async function createAll() {
 
           // Check if record with this ID already exists (from backup)
           let existingRecord = null;
-          if (data.id) {
+          if (data.UID) {
             existingRecord = await Model.findOne({
-              where: { id: data.id },
+              where: { UID: data.UID },
               transaction
             });
           }
@@ -748,10 +804,10 @@ async function createAll() {
             if (existingRecord) {
               // Record exists - update ONLY fields from defaultValues config
               const updateData = { ...data };
-              delete updateData.id; // Don't update ID
+              delete updateData.UID; // Don't update ID
 
               await existingRecord.update(updateData, { transaction });
-              console.log(`[MIGRATION] Updated predefined fields in: ${entity}[${existingRecord.id}] (defaultValueId=${defaultValueId}, level=${lvlName})`);
+              console.log(`[MIGRATION] Updated predefined fields in: ${entity}[${existingRecord.UID}] (defaultValueId=${defaultValueId}, level=${lvlName})`);
 
               // Register in DefaultValues table
               const defEntry = await DefaultValuesModel.findOne({
@@ -763,13 +819,13 @@ async function createAll() {
                   level: lvlName,
                   defaultValueId: defaultValueId,
                   tableName: entity,
-                  recordId: existingRecord.id
+                  recordId: existingRecord.UID
                 }, { transaction });
               }
             } else {
               // Record doesn't exist - create new
               const newRecord = await Model.create(data, { transaction });
-              console.log(`[MIGRATION] Created new predefined record: ${entity}[${newRecord.id}] (defaultValueId=${defaultValueId}, level=${lvlName})`);
+              console.log(`[MIGRATION] Created new predefined record: ${entity}[${newRecord.UID}] (defaultValueId=${defaultValueId}, level=${lvlName})`);
 
               // Register in DefaultValues table (check if not already registered)
               const defEntry = await DefaultValuesModel.findOne({
@@ -781,7 +837,7 @@ async function createAll() {
                   level: lvlName,
                   defaultValueId: defaultValueId,
                   tableName: entity,
-                  recordId: newRecord.id
+                  recordId: newRecord.UID
                 }, { transaction });
               }
             }

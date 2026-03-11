@@ -1,26 +1,26 @@
 {
-  "systems": [
-    {
-      "id": 1,
-      "name": "mySpace"
-    }
-  ],
-  "access_roles": [
-    {
-      "id": 2,
-      "name": "admin"
-    },
-    {
-      "id": 3,
-      "name": "public"
-    },
-    {
-      "id": 4,
-      "name": "nologged"
-    },
-    {
-      "id": 5,
-      "name": "user"
-    }
-  ]
+    "systems": [
+        {
+            "name": "mySpace",
+            "UID": "000000000-sys_forms-0001"
+        }
+    ],
+    "access_roles": [
+        {
+            "name": "admin",
+            "UID": "000000000-sys_forms-0002"
+        },
+        {
+            "name": "public",
+            "UID": "000000000-sys_forms-0003"
+        },
+        {
+            "name": "nologged",
+            "UID": "000000000-sys_forms-0004"
+        },
+        {
+            "name": "user",
+            "UID": "000000000-sys_forms-0005"
+        }
+    ]
 }

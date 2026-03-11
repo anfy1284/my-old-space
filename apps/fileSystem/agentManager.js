@@ -13,7 +13,7 @@ class ConnectionManager {
         try {
             const AgentModel = global.modelsDB.FileSystem_Agents;
             if (AgentModel) {
-                await AgentModel.update({ status: true, lastSeen: new Date() }, { where: { id: agentId } });
+                await AgentModel.update({ status: true, lastSeen: new Date() }, { where: { UID: agentId } });
             }
         } catch (e) {
             console.error('Error updating agent status:', e);
@@ -26,7 +26,7 @@ class ConnectionManager {
         try {
             const AgentModel = global.modelsDB.FileSystem_Agents;
             if (AgentModel) {
-                await AgentModel.update({ status: false, lastSeen: new Date() }, { where: { id: agentId } });
+                await AgentModel.update({ status: false, lastSeen: new Date() }, { where: { UID: agentId } });
             }
         } catch (e) {
             console.error('Error updating agent status:', e);
@@ -92,7 +92,7 @@ class AgentManager extends EventEmitter {
                                 return;
                             }
 
-                            const agent = await AgentModel.findOne({ where: { id: agent_id } });
+                            const agent = await AgentModel.findOne({ where: { UID: agent_id } });
 
                             if (!agent) {
                                 console.warn(`[AgentManager] Auth failed: Agent ${agent_id} not found in DB`);

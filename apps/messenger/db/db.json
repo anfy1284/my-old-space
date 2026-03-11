@@ -4,17 +4,18 @@
             "name": "Messenger_Chats",
             "tableName": "Messenger_Chats",
             "fields": {
-                "id": {
-                    "type": "INTEGER",
-                    "primaryKey": true,
-                    "autoIncrement": true
+                "UID": {
+                    "type": "STRING",
+                    "allowNull": false,
+                    "defaultValue": "GENERATE_UID",
+                    "primaryKey": true
                 },
                 "userId": {
-                    "type": "INTEGER",
+                    "type": "STRING",
                     "allowNull": false,
                     "references": {
                         "model": "users",
-                        "key": "id"
+                        "key": "UID"
                     }
                 },
                 "name": {
@@ -39,25 +40,20 @@
             "name": "Messenger_Messages",
             "tableName": "Messenger_Messages",
             "fields": {
-                "id": {
-                    "type": "INTEGER",
-                    "primaryKey": true,
-                    "autoIncrement": true
-                },
                 "chatId": {
-                    "type": "INTEGER",
+                    "type": "STRING",
                     "allowNull": false,
                     "references": {
                         "model": "Messenger_Chats",
-                        "key": "id"
+                        "key": "UID"
                     }
                 },
                 "userId": {
-                    "type": "INTEGER",
+                    "type": "STRING",
                     "allowNull": false,
                     "references": {
                         "model": "users",
-                        "key": "id"
+                        "key": "UID"
                     }
                 },
                 "content": {
@@ -73,6 +69,11 @@
                     "type": "BOOLEAN",
                     "allowNull": false,
                     "defaultValue": false
+                },
+                "UID": {
+                    "type": "STRING",
+                    "primaryKey": true,
+                    "defaultValue": "GENERATE_UID"
                 }
             },
             "options": {
@@ -83,25 +84,20 @@
             "name": "Messenger_ChatMembers",
             "tableName": "Messenger_ChatMembers",
             "fields": {
-                "id": {
-                    "type": "INTEGER",
-                    "primaryKey": true,
-                    "autoIncrement": true
-                },
                 "chatId": {
-                    "type": "INTEGER",
+                    "type": "STRING",
                     "allowNull": false,
                     "references": {
                         "model": "Messenger_Chats",
-                        "key": "id"
+                        "key": "UID"
                     }
                 },
                 "userId": {
-                    "type": "INTEGER",
+                    "type": "STRING",
                     "allowNull": false,
                     "references": {
                         "model": "users",
-                        "key": "id"
+                        "key": "UID"
                     }
                 },
                 "role": {
@@ -121,6 +117,11 @@
                     "type": "BOOLEAN",
                     "allowNull": false,
                     "defaultValue": true
+                },
+                "UID": {
+                    "type": "STRING",
+                    "primaryKey": true,
+                    "defaultValue": "GENERATE_UID"
                 }
             },
             "options": {

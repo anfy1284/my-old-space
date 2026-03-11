@@ -10,9 +10,19 @@ if (!global.messengerSseClients) {
 }
 const sseClients = global.messengerSseClients;
 
+/**
+ * Resolves a chatId (either numerical id or string UID) to a numerical ID.
+ * @param {string|number} id - The id to resolve
+ * @returns {Promise<number|null>} - The numerical ID or null if not found
+ */
+async function resolveChatId(id) {
+    if (!id) return null;
+    return id;
+}
+
 eventBus.on('userCreated', async (user, { systems, roles, sessionID } = {}) => {
     // Event input data validation
-    if (!user || typeof user !== 'object' || !user.id) {
+    if (!user || typeof user !== 'object' || !user.UID) {
         console.error('[messenger] userCreated: invalid user object', user);
         return;
     }
@@ -27,14 +37,14 @@ eventBus.on('userCreated', async (user, { systems, roles, sessionID } = {}) => {
         await sequelize.transaction(async (t) => {
             // 1. Create private chats with each existing user
             const existingUsers = await modelsDB.Users.findAll({
-                where: { id: { [require('sequelize').Op.ne]: user.id } },
+                where: { UID: { [require('sequelize').Op.ne]: user.UID } },
                 transaction: t
             });
 
             for (const existingUser of existingUsers) {
                 // Check if chat already exists between these users
                 const memberships = await modelsDB.Messenger_ChatMembers.findAll({
-                    where: { userId: [user.id, existingUser.id] },
+                    where: { userId: [user.UID, existingUser.UID] },
                     transaction: t
                 });
 
@@ -48,7 +58,7 @@ eventBus.on('userCreated', async (user, { systems, roles, sessionID } = {}) => {
                 let hasPrivate = false;
                 for (const members of chatMap.values()) {
                     const set = new Set(members);
-                    if (set.has(user.id) && set.has(existingUser.id) && set.size === 2) {
+                    if (set.has(user.UID) && set.has(existingUser.UID) && set.size === 2) {
                         hasPrivate = true;
                         break;
                     }
@@ -69,15 +79,15 @@ eventBus.on('userCreated', async (user, { systems, roles, sessionID } = {}) => {
             if (localChat) {
                 // Check if already in chat
                 const existing = await modelsDB.Messenger_ChatMembers.findOne({
-                    where: { chatId: localChat.id, userId: user.id },
+                    where: { chatId: localChat.UID, userId: user.UID },
                     transaction: t
                 });
 
                 if (!existing) {
                     try {
                         await modelsDB.Messenger_ChatMembers.create({
-                            chatId: localChat.id,
-                            userId: user.id,
+                            chatId: localChat.UID,
+                            userId: user.UID,
                             role: 'member',
                             customName: 'Local chat',
                             joinedAt: new Date(),
@@ -114,7 +124,7 @@ async function loadChats(params, sessionID) {
     try {
         // Find all chats where user is a member
         const memberships = await modelsDB.Messenger_ChatMembers.findAll({
-            where: { userId: user.id, isActive: true },
+            where: { userId: user.UID, isActive: true },
             include: [{
                 model: modelsDB.Messenger_Chats,
                 as: 'chat',
@@ -124,7 +134,7 @@ async function loadChats(params, sessionID) {
         });
 
         const chats = memberships.map(m => ({
-            chatId: m.chatId,
+            chatId: m.chat.UID,
             name: m.customName || m.chat.name,
             role: m.role,
             joinedAt: m.joinedAt
@@ -138,10 +148,11 @@ async function loadChats(params, sessionID) {
 }
 
 async function loadMessages(params, sessionID) {
-    const { chatId } = params || {};
+    const { chatId: rawChatId } = params || {};
+    const chatId = await resolveChatId(rawChatId);
 
     if (!chatId) {
-        return { error: 'chatId not specified' };
+        return { error: 'chatId not specified or invalid' };
     }
 
     if (!modelsDB || !modelsDB.Messenger_Messages || !modelsDB.Messenger_ChatMembers) {
@@ -157,7 +168,7 @@ async function loadMessages(params, sessionID) {
     try {
         // Check if user is in chat
         const membership = await modelsDB.Messenger_ChatMembers.findOne({
-            where: { chatId, userId: user.id, isActive: true }
+            where: { chatId, userId: user.UID, isActive: true }
         });
 
         if (!membership) {
@@ -170,14 +181,14 @@ async function loadMessages(params, sessionID) {
             include: [{
                 model: modelsDB.Users,
                 as: 'author',
-                attributes: ['id', 'name']
+                attributes: ['UID', 'name']
             }],
             order: [['createdAt', 'ASC']],
             limit: 100 // Last 100 messages
         });
 
         const formattedMessages = messages.map(m => ({
-            id: m.id,
+            id: m.UID || m.id,
             content: m.content,
             authorId: m.userId,
             authorName: m.author ? m.author.name : 'Unknown',
@@ -194,10 +205,9 @@ async function loadMessages(params, sessionID) {
 
 // SSE subscription to chat updates
 function subscribeToChat(params, sessionID, req, res) {
-    let { chatId } = params || {};
-    chatId = parseInt(chatId); // Cast to number
+    let { chatId: rawChatId } = params || {};
 
-    if (!chatId) {
+    if (!rawChatId) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: 'chatId not specified' }));
         return { _handled: true };
@@ -212,6 +222,13 @@ function subscribeToChat(params, sessionID, req, res) {
     // Async access check and SSE setup
     (async () => {
         try {
+            const chatId = await resolveChatId(rawChatId);
+            if (!chatId) {
+                res.writeHead(400, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: 'Invalid chatId' }));
+                return;
+            }
+
             // Get user
             const user = await global.getUserBySessionID(sessionID);
             if (!user) {
@@ -222,7 +239,7 @@ function subscribeToChat(params, sessionID, req, res) {
 
             // Check access
             const membership = await modelsDB.Messenger_ChatMembers.findOne({
-                where: { chatId, userId: user.id, isActive: true }
+                where: { chatId, userId: user.UID, isActive: true }
             });
 
             if (!membership) {
@@ -244,7 +261,7 @@ function subscribeToChat(params, sessionID, req, res) {
             if (!sseClients.has(chatId)) {
                 sseClients.set(chatId, new Set());
             }
-            const client = { res, userId: user.id, clientId };
+            const client = { res, userId: user.UID, clientId };
             sseClients.get(chatId).add(client);
 
             console.log(`[messenger] [${new Date().toISOString()}] SSE: user ${user.name} subscribed to chat ${chatId} (client: ${clientId})`);
@@ -311,13 +328,13 @@ function broadcastMessage(chatId, message) {
 }
 
 async function sendMessage(params, sessionID) {
-    let { chatId, content } = params || {};
-    chatId = parseInt(chatId); // Cast to number
-    console.log('[messenger] sendMessage called:', { chatId, content, sessionID });
+    let { chatId: rawChatId, content } = params || {};
+    const chatId = await resolveChatId(rawChatId);
+    console.log('[messenger] sendMessage called:', { chatId, rawChatId, content, sessionID });
     console.log('[messenger] sendMessage: sseClients keys at start:', Array.from(sseClients.keys()), 'size for chatId:', sseClients.get(chatId)?.size);
 
     if (!chatId) {
-        return { error: 'chatId not specified' };
+        return { error: 'chatId not specified or invalid' };
     }
 
     if (!content || typeof content !== 'string' || content.trim().length === 0) {
@@ -340,7 +357,7 @@ async function sendMessage(params, sessionID) {
         const result = await sequelize.transaction(async (t) => {
             // Check if user is in chat
             const membership = await modelsDB.Messenger_ChatMembers.findOne({
-                where: { chatId, userId: user.id, isActive: true },
+                where: { chatId, userId: user.UID, isActive: true },
                 transaction: t
             });
 
@@ -351,16 +368,16 @@ async function sendMessage(params, sessionID) {
             // Create message
             const message = await modelsDB.Messenger_Messages.create({
                 chatId,
-                userId: user.id,
+                userId: user.UID,
                 content: content.trim(),
                 isRead: false,
                 isDelivered: true
             }, { transaction: t });
 
             return {
-                id: message.id,
+                id: message.UID || message.id,
                 content: message.content,
-                authorId: user.id,
+                authorId: user.UID,
                 authorName: user.name,
                 createdAt: message.createdAt
             };
@@ -387,7 +404,7 @@ async function sendMessage(params, sessionID) {
 // transaction: if passed, uses this transaction, otherwise creates new one
 async function createTwoUserChat(params, sessionID, transaction) {
     const { user1, user2 } = params || {};
-    if (!user1 || !user2 || user1.id === user2.id) {
+    if (!user1 || !user2 || user1.UID === user2.UID) {
         throw new Error('Two different users required: user1 and user2 (sequelize model objects)');
     }
     if (!modelsDB || !modelsDB.Messenger_Chats || !modelsDB.Messenger_ChatMembers) {
@@ -399,7 +416,7 @@ async function createTwoUserChat(params, sessionID, transaction) {
     const createChat = async (t) => {
         // Create chat, owner is first user
         const chat = await modelsDB.Messenger_Chats.create({
-            userId: user1.id,
+            userId: user1.UID,
             name: `Dialog: ${user1.name} ↔ ${user2.name}`,
             description: 'Private dialog of two users',
             isActive: true,
@@ -407,8 +424,8 @@ async function createTwoUserChat(params, sessionID, transaction) {
 
         // Add both members with personal names (customName)
         await modelsDB.Messenger_ChatMembers.create({
-            chatId: chat.id,
-            userId: user1.id,
+            chatId: chat.UID || chat.id,
+            userId: user1.UID,
             role: 'owner',
             customName: user2.name,
             joinedAt: new Date(),
@@ -416,15 +433,15 @@ async function createTwoUserChat(params, sessionID, transaction) {
         }, { transaction: t });
 
         await modelsDB.Messenger_ChatMembers.create({
-            chatId: chat.id,
-            userId: user2.id,
+            chatId: chat.UID || chat.id,
+            userId: user2.UID,
             role: 'member',
             customName: user1.name,
             joinedAt: new Date(),
             isActive: true,
         }, { transaction: t });
 
-        return { chatId: chat.id };
+        return { chatId: chat.UID || chat.id };
     };
 
     // If transaction passed, use it; otherwise create new

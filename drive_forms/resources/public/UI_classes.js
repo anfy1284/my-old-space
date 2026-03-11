@@ -1663,13 +1663,13 @@ Form.prototype.doAction = function(action, params) {
             if (action === 'recordOpen') {
                 try {
                     const row = (typeof this.getCurrentRow === 'function') ? this.getCurrentRow() : null;
-                    if (!row || !row.id) {
+                    if (!row || !row.UID) {
                         if (typeof showAlert === 'function') showAlert('Выберите запись');
                         return;
                     }
                     const tableName = this.dbTable || (params && params.tableName) || '';
                     if (window.MySpace && typeof window.MySpace.open === 'function') {
-                        return window.MySpace.open('uniRecordForm', { tableName, recordID: row.id });
+                        return window.MySpace.open('uniRecordForm', { tableName, recordID: row.UID });
                     }
                 } catch (e) { console.error('[Form] recordOpen error:', e); }
                 return;
@@ -1678,7 +1678,7 @@ Form.prototype.doAction = function(action, params) {
             if (action === 'recordDelete') {
                 try {
                     const row = (typeof this.getCurrentRow === 'function') ? this.getCurrentRow() : null;
-                    if (!row || !row.id) {
+                    if (!row || !row.UID) {
                         if (typeof showAlert === 'function') showAlert('Выберите запись для удаления');
                         return;
                     }
@@ -1689,7 +1689,7 @@ Form.prototype.doAction = function(action, params) {
                             if (res === 'yes') {
                                 try {
                                     const result = await callServerMethod('uniRecordForm', 'applyChanges', { 
-                                        datasetId: { table: tableName, id: row.id }, 
+                                        datasetId: { table: tableName, id: row.UID }, 
                                         changes: { _deleted: true } 
                                     });
                                     if (result && result.ok) {
@@ -1814,8 +1814,8 @@ class DataForm extends Form {
                     if (Object.prototype.hasOwnProperty.call(val, dispKey)) {
                         displayVal = val[dispKey];
                     } else if (fieldVal && typeof fieldVal === 'object' && fieldVal !== null) {
-                        displayVal = fieldVal.display || fieldVal.name || fieldVal.id;
-                        fieldVal = fieldVal.value !== undefined ? fieldVal.value : fieldVal.id;
+                        displayVal = fieldVal.display || fieldVal.name || fieldVal.UID;
+                        fieldVal = fieldVal.value !== undefined ? fieldVal.value : fieldVal.UID;
                     }
                     
                     if (typeof ctrl.setValue === 'function') {
@@ -1855,14 +1855,14 @@ class DataForm extends Form {
             else if (item.data && this._dataMap && Object.prototype.hasOwnProperty.call(this._dataMap, item.data)) {
                 const rec = this._dataMap[item.data];
                 if (rec && rec.selection && rec.selection.display !== undefined) {
-                    val = (rec.selection.id !== undefined) ? rec.selection.id : (rec.value !== undefined ? rec.value : rec);
+                    val = (rec.selection.UID !== undefined) ? rec.selection.UID : (rec.value !== undefined ? rec.value : rec);
                     display = rec.selection.display;
                 } else if (rec && rec.__display !== undefined) {
                     val = (rec.value !== undefined ? rec.value : rec);
                     display = rec.__display;
                 } else if (rec && typeof rec.value === 'object' && rec.value !== null) {
-                    display = rec.value.display || rec.value.name || rec.value.id || '';
-                    val = (rec.value.value !== undefined) ? rec.value.value : (rec.value.id !== undefined ? rec.value.id : rec.value);
+                    display = rec.value.display || rec.value.name || rec.value.UID || '';
+                    val = (rec.value.value !== undefined) ? rec.value.value : (rec.value.UID !== undefined ? rec.value.UID : rec.value);
                 } else {
                     val = (rec && (rec.value !== undefined)) ? rec.value : (rec && rec !== undefined ? rec : '');
                 }
@@ -1917,14 +1917,14 @@ class DataForm extends Form {
                 else if (dataKey && this._dataMap && Object.prototype.hasOwnProperty.call(this._dataMap, dataKey)) {
                     const rec = this._dataMap[dataKey];
                     if (rec && rec.selection && rec.selection.display !== undefined) {
-                        val = (rec.selection.id !== undefined) ? rec.selection.id : (rec.value !== undefined ? rec.value : rec);
+                        val = (rec.selection.UID !== undefined) ? rec.selection.UID : (rec.value !== undefined ? rec.value : rec);
                         display = rec.selection.display;
                     } else if (rec && rec.__display !== undefined) {
                         val = (rec.value !== undefined ? rec.value : rec);
                         display = rec.__display;
                     } else if (rec && typeof rec.value === 'object' && rec.value !== null) {
-                        display = rec.value.display || rec.value.name || rec.value.id || '';
-                        val = (rec.value.value !== undefined) ? rec.value.value : (rec.value.id !== undefined ? rec.value.id : rec.value);
+                        display = rec.value.display || rec.value.name || rec.value.UID || '';
+                        val = (rec.value.value !== undefined) ? rec.value.value : (rec.value.UID !== undefined ? rec.value.UID : rec.value);
                     } else {
                         val = (rec && (rec.value !== undefined)) ? rec.value : (rec && rec !== undefined ? rec : '');
                     }
@@ -1983,14 +1983,14 @@ class DataForm extends Form {
                 else if (dataKey && this._dataMap && Object.prototype.hasOwnProperty.call(this._dataMap, dataKey)) {
                     const rec = this._dataMap[dataKey];
                     if (rec && rec.selection && rec.selection.display !== undefined) {
-                        val = (rec.selection.id !== undefined) ? rec.selection.id : (rec.value !== undefined ? rec.value : rec);
+                        val = (rec.selection.UID !== undefined) ? rec.selection.UID : (rec.value !== undefined ? rec.value : rec);
                         display = rec.selection.display;
                     } else if (rec && rec.__display !== undefined) {
                         val = (rec.value !== undefined ? rec.value : rec);
                         display = rec.__display;
                     } else if (rec && typeof rec.value === 'object' && rec.value !== null) {
-                        display = (rec.value && rec.value.display) || (rec.value && rec.value.name) || (rec.value && rec.value.id) || '';
-                        val = (rec.value && rec.value.value !== undefined) ? rec.value.value : (rec.value && rec.value.id !== undefined ? rec.value.id : rec.value);
+                        display = (rec.value && rec.value.display) || (rec.value && rec.value.name) || (rec.value && rec.value.UID) || '';
+                        val = (rec.value && rec.value.value !== undefined) ? rec.value.value : (rec.value && rec.value.UID !== undefined ? rec.value.UID : rec.value);
                     } else {
                         val = (rec && (rec.value !== undefined)) ? rec.value : (rec && rec !== undefined ? rec : '');
                     }
@@ -2632,7 +2632,7 @@ class TextBox extends FormInput {
         // if val is an object with name/display, use it
         let displayVal = display;
         if (displayVal === undefined && val && typeof val === 'object') {
-            displayVal = val.__display || val.name || val.id || String(val);
+            displayVal = val.__display || val.name || val.UID || String(val);
         }
         if (displayVal === undefined) displayVal = val;
         
@@ -3519,7 +3519,7 @@ class TextBox extends FormInput {
             const setSelected = (rec) => {
                 try {
                     const displayField = selMeta.displayField || 'name';
-                    const display = (rec && (rec[displayField] !== undefined)) ? rec[displayField] : (rec && rec.name) || (rec && rec.id) || '';
+                    const display = (rec && (rec[displayField] !== undefined)) ? rec[displayField] : (rec && rec.name) || (rec && rec.UID) || '';
                     try { if (typeof this.setText === 'function') this.setText(String(display)); } catch (_) { try { if (this.element) this.element.value = display; } catch(_){} }
                     try { if (this.element) this.element.dispatchEvent(new Event('input', { bubbles: true })); } catch (_) {}
                 } catch (e) {}
@@ -3563,17 +3563,17 @@ class TextBox extends FormInput {
             console.log('[TextBox.handleSelection] Called for TextBox:', textBoxId, 'with record:', selectedRecord);
             const selMeta = this.selection || {};
             const displayField = selMeta.displayField || 'name';
-            const display = (selectedRecord && (selectedRecord[displayField] !== undefined)) ? selectedRecord[displayField] : (selectedRecord && (selectedRecord.name || selectedRecord.id)) || '';
+            const display = (selectedRecord && (selectedRecord[displayField] !== undefined)) ? selectedRecord[displayField] : (selectedRecord && (selectedRecord.name || selectedRecord.UID)) || '';
 
             try {
-                // If it's a selection, prioritize storing the ID
-                const val = (selectedRecord && selectedRecord.id !== undefined) ? selectedRecord.id : selectedRecord;
+                // If it's a selection, prioritize storing the UID
+                const val = (selectedRecord && selectedRecord.UID !== undefined) ? selectedRecord.UID : selectedRecord;
                 if (typeof this.setValue === 'function') this.setValue(val, display);
                 else {
                     if (typeof this.setText === 'function') this.setText(String(display));
                     else if (this.element) this.element.value = String(display);
                 }
-                console.log('[TextBox.handleSelection] Updated TextBox:', textBoxId, 'with value:', display, 'id:', val);
+                console.log('[TextBox.handleSelection] Updated TextBox:', textBoxId, 'with value:', display, 'UID:', val);
             } catch (_) {}
 
             try { if (this.element) this.element.dispatchEvent(new Event('input', { bubbles: true })); } catch (_) {}
@@ -5820,7 +5820,7 @@ class Table extends UIObject {
                 // Prefer primitive id/value for the actual cell value so editors store ID internally
                 let primitiveVal = undefined;
                 if (rawVal.value !== undefined && typeof rawVal.value !== 'object') primitiveVal = rawVal.value;
-                else if (rawVal.id !== undefined && (typeof rawVal.id === 'string' || typeof rawVal.id === 'number')) primitiveVal = rawVal.id;
+                else if (rawVal.UID !== undefined && (typeof rawVal.UID === 'string' || typeof rawVal.UID === 'number')) primitiveVal = rawVal.UID;
 
                 if (primitiveVal !== undefined) {
                     cellItem.value = primitiveVal;
@@ -6315,13 +6315,13 @@ class Table extends UIObject {
                 try {
                     const rows = this.data_getRows ? this.data_getRows(this.dataKey) : [];
                     const row = Array.isArray(rows) ? rows[rowIndex] : null;
-                    if (row && (row.id !== undefined && row.id !== null)) {
+                    if (row && (row.UID !== undefined && row.UID !== null)) {
                         const tableName = this.tableName || (this.appForm && (this.appForm.dbTable || this.dataKey)) || '';
                         if (typeof window !== 'undefined' && window.MySpace && typeof window.MySpace.open === 'function') {
                             const self = this;
                             (async () => {
                                 try {
-                                    const instId = await window.MySpace.open('uniRecordForm', { tableName, recordID: row.id });
+                                    const instId = await window.MySpace.open('uniRecordForm', { tableName, recordID: row.UID });
                                     if (instId) {
                                         // Listen for the form being destroyed to refresh table data
                                         const onFormDestroyed = (ev) => {
@@ -6849,7 +6849,7 @@ class DynamicTable extends Table {
                             const rpcApp = ls.app || ls.appName || this.appName || null;
                             const table = ls.table || ls.tableName || null;
                             if (rpcApp && table) {
-                                const idField = ls.idField || 'id';
+                                const idField = ls.idField || 'UID';
                                 const displayField = ls.displayField || 'name';
                                 const limit = (typeof ls.limit === 'number' && ls.limit > 0) ? ls.limit : (ls.limit ? (ls.limit|0) : 100);
                                 const key = `${rpcApp}::${table}::${idField}::${displayField}::${limit}`;
@@ -6859,7 +6859,7 @@ class DynamicTable extends Table {
                                             const resp = await callServerMethod(rpcApp, 'getLookupList', { tableName: table, firstRow: 0, visibleRows: limit });
                                             const rawRows = resp && (resp.rows || resp.data || resp.items) ? (resp.rows || resp.data || resp.items) : [];
                                             return (rawRows || []).map(r => {
-                                                const val = (r && (r[idField] !== undefined)) ? r[idField] : (r && r.id);
+                                                const val = (r && (r[idField] !== undefined)) ? r[idField] : (r && r.UID);
                                                 const cap = (r && (r.display !== undefined)) ? r.display : ((r && (r[displayField] !== undefined)) ? r[displayField] : ((r && r.name) || (val !== undefined ? String(val) : '')));
                                                 return { value: val, caption: cap };
                                             });

@@ -4,21 +4,21 @@
             "name": "FileSystem_Files",
             "tableName": "FileSystem_Files",
             "fields": {
-                "id": {
-                    "type": "INTEGER",
+                "UID": {
+                    "type": "STRING",
                     "primaryKey": true,
-                    "autoIncrement": true
+                    "defaultValue": "GENERATE_UID"
                 },
                 "name": {
                     "type": "STRING",
                     "allowNull": false
                 },
                 "parentId": {
-                    "type": "INTEGER",
+                    "type": "STRING",
                     "allowNull": true,
                     "references": {
                         "model": "FileSystem_Files",
-                        "key": "id"
+                        "key": "UID"
                     }
                 },
                 "isFolder": {
@@ -36,11 +36,11 @@
                     "allowNull": true
                 },
                 "ownerId": {
-                    "type": "INTEGER",
+                    "type": "STRING",
                     "allowNull": false,
                     "references": {
                         "model": "users",
-                        "key": "id"
+                        "key": "UID"
                     }
                 },
                 "agentId": {
@@ -69,9 +69,10 @@
             "name": "FileSystem_Agents",
             "tableName": "FileSystem_Agents",
             "fields": {
-                "id": {
+                "UID": {
                     "type": "STRING",
-                    "primaryKey": true
+                    "primaryKey": true,
+                    "defaultValue": "GENERATE_UID"
                 },
                 "token": {
                     "type": "STRING",

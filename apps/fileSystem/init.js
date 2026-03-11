@@ -13,7 +13,7 @@ const global = require('../../drive_root/globalServerContext');
             const AgentModel = global.modelsDB.FileSystem_Agents;
             if (AgentModel) {
                 const [agent, created] = await AgentModel.findOrCreate({
-                    where: { id: agentId },
+                    where: { UID: agentId },
                     defaults: {
                         token: token,
                         status: false,

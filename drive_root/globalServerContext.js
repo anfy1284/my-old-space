@@ -67,11 +67,19 @@ function generateModelsFromDefs(modelDefs) {
     // Second pass: create Sequelize models
     for (const def of mergedDefs.values()) {
         try {
+            const fields = Object.fromEntries(
+                Object.entries(def.fields).map(([k, v]) => {
+                    const fieldDef = { ...v, type: DataTypes[v.type] };
+                    if (fieldDef.defaultValue === 'GENERATE_UID') {
+                        fieldDef.defaultValue = () => require('./db/utilites').generateUID(def.name);
+                    }
+                    return [k, fieldDef];
+                })
+            );
+
             models[def.name] = sequelize.define(
                 def.name,
-                Object.fromEntries(
-                    Object.entries(def.fields).map(([k, v]) => [k, { ...v, type: DataTypes[v.type] }])
-                ),
+                fields,
                 { ...def.options, tableName: def.tableName }
             );
         } catch (e) {
@@ -291,12 +299,12 @@ async function getUserBySessionID(sessionID) {
         console.log(`[getUserBySessionID] Session found but no userId. SessionID: ${sessionID}`);
         return null;
     }
-    const user = await User.findOne({ where: { id: session.userId } });
+    const user = await User.findOne({ where: { UID: session.userId } });
     if (!user) {
         console.log(`[getUserBySessionID] User not found for userId: ${session.userId}`);
         return null; // return null if user not found
     }
-    console.log(`[getUserBySessionID] Found user: ${user.name} (${user.id})`);
+    console.log(`[getUserBySessionID] Found user: ${user.name} (${user.UID})`);
     return user.get({ plain: true });
 }
 
@@ -314,13 +322,14 @@ function processDefaultValues(data, level) {
 
         // Check id uniqueness within the level (all tables)
         for (const record of records) {
-            if (record.id !== undefined) {
-                if (allIds.has(record.id)) {
-                    console.log(`[defaultValues] INFO: Duplicate id=${record.id} in table "${entity}" (id must be unique within level "${level}") - skipping duplication check`);
+            const recordId = record.UID;
+            if (recordId !== undefined) {
+                if (allIds.has(recordId)) {
+                    console.log(`[defaultValues] INFO: Duplicate recordId=${recordId} in table "${entity}" (UID must be unique within level "${level}") - skipping duplication check`);
                 }
-                allIds.add(record.id);
+                allIds.add(recordId);
             } else {
-                console.warn(`[defaultValues] WARNING: Record in "${entity}" has no id field`);
+                console.warn(`[defaultValues] WARNING: Record in "${entity}" has no UID field`);
             }
         }
 
@@ -365,7 +374,7 @@ async function loadDefaultValuesFromDB() {
             }
 
             // Load record from DB
-            const record = await modelDef.findByPk(recordId);
+            const record = await modelDef.findOne({ where: { UID: recordId } });
             if (!record) {
                 console.warn(`[defaultValues] Record ${tableName}[${recordId}] not found (level=${level}, defaultValueId=${defaultValueId})`);
                 continue;
@@ -464,7 +473,7 @@ async function createNewUser(sessionID, name, systems, roles, isGuest = false, g
         
         const user = await modelsDB.Users.create(userData, { transaction: t });
 
-        console.log('[createNewUser] User created with ID:', user.id);
+        console.log('[createNewUser] User created with UID:', user.UID);
 
         const roleRecords = [];
         for (const roleName of Array.isArray(roles) ? roles : [roles]) {
@@ -489,16 +498,16 @@ async function createNewUser(sessionID, name, systems, roles, isGuest = false, g
 
         for (const roleRec of roleRecords) {
             for (const systemRec of systemRecords) {
-                await modelsDB.UserSystems.create({ userId: user.id, roleId: roleRec.id, systemId: systemRec.id }, { transaction: t });
+                await modelsDB.UserSystems.create({ userId: user.UID, roleId: roleRec.UID, systemId: systemRec.UID }, { transaction: t });
             }
         }
 
         if (sessionID) {
             let session = await modelsDB.Sessions.findOne({ where: { sessionId: sessionID }, transaction: t });
             if (!session) {
-                await modelsDB.Sessions.create({ sessionId: sessionID, userId: user.id }, { transaction: t });
+                await modelsDB.Sessions.create({ sessionId: sessionID, userId: user.UID }, { transaction: t });
             } else {
-                await session.update({ userId: user.id }, { transaction: t });
+                await session.update({ userId: user.UID }, { transaction: t });
             }
         }
 
@@ -523,7 +532,7 @@ async function createGuestUser(sessionID, systems, roles) {
                 [Op.like]: 'Guest_%'
             }
         },
-        order: [['id', 'DESC']],
+        order: [['UID', 'DESC']],
         raw: true
     });
 
@@ -627,7 +636,7 @@ async function getTableMetadata(modelName) {
 
         // Calculate column width based on type and caption
         let width = 100;
-        if (typeKey === 'INTEGER' && fieldName === 'id') width = 80;
+        if (typeKey === 'INTEGER' && fieldName === 'UID') width = 80;
         else if (typeKey === 'INTEGER') width = 100;
         else if (typeKey === 'STRING') width = Math.max(150, Math.min(300, caption.length * 10 + 100));
         else if (typeKey === 'BOOLEAN') width = 80;
@@ -646,12 +655,12 @@ async function getTableMetadata(modelName) {
                     displayField = Object.keys(targetAttrs).find(k => {
                         const t = targetAttrs[k].type.key || targetAttrs[k].type.constructor.key;
                         return t === 'STRING';
-                    }) || 'id';
+                    }) || 'UID';
                 }
 
                 foreignKey = {
                     table: attr.references.model,
-                    field: attr.references.key || 'id',
+                    field: attr.references.key || 'UID',
                     displayField: displayField
                 };
             }
@@ -663,6 +672,8 @@ async function getTableMetadata(modelName) {
             type: typeKey,
             width: width,
             foreignKey: foreignKey,
+            isPrimary: !!attr.primaryKey,
+            isUID: fieldName === 'UID',
             editable: false  // All fields readonly for now
         });
     }
@@ -771,7 +782,7 @@ async function getDynamicTableData(options) {
         table: Model.tableName,
         where,
         options: {
-            order: order.length > 0 ? order : [['id', 'ASC']],
+            order: order.length > 0 ? order : [['UID', 'ASC']],
             offset: requestFirstRow,
             limit: requestCount,
             raw: true
@@ -858,10 +869,10 @@ async function resolveTableForeignKeys(modelName, dataArray, fields) {
 
             // Fetch display value
             try {
-                const targetRow = await fkDbGW.execute({ operation: 'findByPk', table: fkTableName, where: { id: fkValue }, options: { raw: true } });
+                const targetRow = await fkDbGW.execute({ operation: 'findByPk', table: fkTableName, where: { UID: fkValue }, options: { raw: true } });
                 console.log(`[FK] Found target row:`, targetRow);
                 if (targetRow) {
-                    const displayValue = targetRow[fkField.foreignKey.displayField] || targetRow.id.toString();
+                    const displayValue = targetRow[fkField.foreignKey.displayField] || targetRow.UID.toString();
                     resolvedRow[`__${fkField.name}_display`] = displayValue;
                     console.log(`[FK] Set __${fkField.name}_display = ${displayValue}`);
                 } else {
@@ -946,7 +957,7 @@ async function commitTableEdits(editSessionId) {
                     operation: 'update',
                     table: model.tableName,
                     data: updateData,
-                    where: { id: rowId },
+                    where: { UID: rowId },
                     options: { transaction }
                 });
 
@@ -1025,18 +1036,18 @@ async function getLookupList(options) {
     const Model = modelsDB[modelName];
     if (!Model) throw new Error(`Model ${modelName} not found in modelsDB`);
 
-    // Determine display field: prefer 'name', fallback to first STRING attribute, then 'id'
+// Determine display field: prefer 'name', fallback to first STRING attribute, then 'UID' or 'id'
     const attrs = Model.rawAttributes || {};
     let displayField = 'name';
     if (!attrs[displayField]) {
         displayField = Object.keys(attrs).find(k => {
             try {
-                const t = attrs[k].type.key || attrs[k].type.constructor.key;
+                const t = attrs[k].type ? (attrs[k].type.key || attrs[k].type.constructor.key) : '';
                 return t === 'STRING';
             } catch (e) {
                 return false;
             }
-        }) || 'id';
+        }) || 'UID';
     }
 
     visibleRows = Math.max(0, Math.min(visibleRows || 20, 1000));
@@ -1045,25 +1056,27 @@ async function getLookupList(options) {
     const lookupDbGW = require('./dbGateway');
     const totalRows = await lookupDbGW.execute({ operation: 'count', table: tableName || Model.tableName, context: { userId } });
 
+    const keyField = 'UID';
+
     const rows = await lookupDbGW.execute({
         operation: 'read',
         table: tableName || Model.tableName,
         options: {
-            attributes: ['id', displayField],
+            attributes: [keyField, displayField],
             offset: firstRow,
             limit: visibleRows,
-            order: [['id', 'ASC']],
+            order: [[keyField, 'ASC']],
             raw: true
         },
         context: { userId }
     });
 
     // Normalize to simple objects with id and display
-    const data = rows.map(r => ({ id: r.id, display: r[displayField] }));
+const data = rows.map(r => ({ UID: r[keyField], display: r[displayField] }));
 
-    return {
-        totalRows,
-        fields: [ { name: 'id' }, { name: displayField } ],
+      return {
+          totalRows,
+          fields: [ { name: 'UID' }, { name: displayField } ],
         data,
         range: { from: firstRow, to: firstRow + data.length - 1 }
     };

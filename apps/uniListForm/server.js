@@ -107,7 +107,9 @@ async function buildTableFieldsFromModel(tableName) {
             const typeKey = f.type || '';
             let inputType = 'textbox';
             if (f.foreignKey) inputType = 'recordSelector';
-            else if (typeKey === 'INTEGER') inputType = (f.name === 'id') ? 'number' : 'number';
+            else if (typeKey === 'INTEGER' || typeKey === 'STRING') {
+                inputType = 'textbox';
+            }
             else if (typeKey === 'BOOLEAN') inputType = 'checkbox';
             else if (typeKey === 'DATE' || typeKey === 'DATEONLY') inputType = 'date';
 
@@ -122,11 +124,13 @@ async function buildTableFieldsFromModel(tableName) {
             };
 
             if (f.foreignKey) {
+                // If the target table has a UID field, we should use it as the idField
+                const targetIdField = f.foreignKey.field || 'UID';
                 field.properties = {
-                    selection: { table: f.foreignKey.table, idField: f.foreignKey.field || 'id', displayField: f.foreignKey.displayField || 'name' },
+                    selection: { table: f.foreignKey.table, idField: targetIdField, displayField: f.foreignKey.displayField || 'name' },
                     showSelectionButton: true,
                     listMode: true,
-                    listSource: { app: config.name, table: f.foreignKey.table, idField: f.foreignKey.field || 'id', displayField: f.foreignKey.displayField || 'name', limit: 50 }
+                    listSource: { app: config.name, table: f.foreignKey.table, idField: targetIdField, displayField: f.foreignKey.displayField || 'name', limit: 50 }
                 };
             }
 

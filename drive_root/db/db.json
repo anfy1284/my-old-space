@@ -4,17 +4,17 @@
             "name": "DefaultValues",
             "tableName": "default_values",
             "fields": {
-                "id": {
-                    "type": "INTEGER",
+                "UID": {
+                    "type": "STRING",
                     "primaryKey": true,
-                    "autoIncrement": true
+                    "defaultValue": "GENERATE_UID"
                 },
                 "level": {
                     "type": "STRING",
                     "allowNull": false
                 },
                 "defaultValueId": {
-                    "type": "INTEGER",
+                    "type": "STRING",
                     "allowNull": false
                 },
                 "tableName": {
@@ -22,7 +22,7 @@
                     "allowNull": false
                 },
                 "recordId": {
-                    "type": "INTEGER",
+                    "type": "STRING",
                     "allowNull": false
                 }
             },
@@ -44,10 +44,10 @@
             "name": "Users",
             "tableName": "users",
             "fields": {
-                "id": {
-                    "type": "INTEGER",
+                "UID": {
+                    "type": "STRING",
                     "primaryKey": true,
-                    "autoIncrement": true
+                    "defaultValue": "GENERATE_UID"
                 },
                 "email": {
                     "type": "STRING",
@@ -96,21 +96,21 @@
             "name": "Sessions",
             "tableName": "sessions",
             "fields": {
-                "id": {
-                    "type": "INTEGER",
+                "UID": {
+                    "type": "STRING",
                     "primaryKey": true,
-                    "autoIncrement": true
+                    "defaultValue": "GENERATE_UID"
                 },
                 "sessionId": {
                     "type": "STRING",
                     "allowNull": false
                 },
                 "userId": {
-                    "type": "INTEGER",
+                    "type": "STRING",
                     "allowNull": true,
                     "references": {
                         "model": "users",
-                        "key": "id"
+                        "key": "UID"
                     }
                 },
                 "isGuest": {
@@ -127,10 +127,10 @@
             "name": "UserSettingsTypes",
             "tableName": "user_settings_types",
             "fields": {
-                "id": {
-                    "type": "INTEGER",
+                "UID": {
+                    "type": "STRING",
                     "primaryKey": true,
-                    "autoIncrement": true
+                    "defaultValue": "GENERATE_UID"
                 },
                 "name": {
                     "type": "STRING",
@@ -150,10 +150,10 @@
             "name": "UserSettingsFields",
             "tableName": "user_settings_fields",
             "fields": {
-                "id": {
-                    "type": "INTEGER",
+                "UID": {
+                    "type": "STRING",
                     "primaryKey": true,
-                    "autoIncrement": true
+                    "defaultValue": "GENERATE_UID"
                 },
                 "name": {
                     "type": "STRING",
@@ -165,11 +165,11 @@
                     "allowNull": false
                 },
                 "typeId": {
-                    "type": "INTEGER",
+                    "type": "STRING",
                     "allowNull": false,
                     "references": {
                         "model": "user_settings_types",
-                        "key": "id"
+                        "key": "UID"
                     }
                 },
                 "options": {
@@ -186,25 +186,25 @@
             "name": "UserSettingsStringValues",
             "tableName": "user_settings_string_values",
             "fields": {
-                "id": {
-                    "type": "INTEGER",
+                "UID": {
+                    "type": "STRING",
                     "primaryKey": true,
-                    "autoIncrement": true
+                    "defaultValue": "GENERATE_UID"
                 },
                 "userId": {
-                    "type": "INTEGER",
+                    "type": "STRING",
                     "allowNull": false,
                     "references": {
                         "model": "users",
-                        "key": "id"
+                        "key": "UID"
                     }
                 },
                 "settingsFieldId": {
-                    "type": "INTEGER",
+                    "type": "STRING",
                     "allowNull": false,
                     "references": {
                         "model": "user_settings_fields",
-                        "key": "id"
+                        "key": "UID"
                     }
                 },
                 "value": {
@@ -229,25 +229,25 @@
             "name": "UserSettingsNumberValues",
             "tableName": "user_settings_number_values",
             "fields": {
-                "id": {
-                    "type": "INTEGER",
+                "UID": {
+                    "type": "STRING",
                     "primaryKey": true,
-                    "autoIncrement": true
+                    "defaultValue": "GENERATE_UID"
                 },
                 "userId": {
-                    "type": "INTEGER",
+                    "type": "STRING",
                     "allowNull": false,
                     "references": {
                         "model": "users",
-                        "key": "id"
+                        "key": "UID"
                     }
                 },
                 "settingsFieldId": {
-                    "type": "INTEGER",
+                    "type": "STRING",
                     "allowNull": false,
                     "references": {
                         "model": "user_settings_fields",
-                        "key": "id"
+                        "key": "UID"
                     }
                 },
                 "value": {
@@ -272,25 +272,25 @@
             "name": "UserSettingsBooleanValues",
             "tableName": "user_settings_boolean_values",
             "fields": {
-                "id": {
-                    "type": "INTEGER",
+                "UID": {
+                    "type": "STRING",
                     "primaryKey": true,
-                    "autoIncrement": true
+                    "defaultValue": "GENERATE_UID"
                 },
                 "userId": {
-                    "type": "INTEGER",
+                    "type": "STRING",
                     "allowNull": false,
                     "references": {
                         "model": "users",
-                        "key": "id"
+                        "key": "UID"
                     }
                 },
                 "settingsFieldId": {
-                    "type": "INTEGER",
+                    "type": "STRING",
                     "allowNull": false,
                     "references": {
                         "model": "user_settings_fields",
-                        "key": "id"
+                        "key": "UID"
                     }
                 },
                 "value": {
@@ -315,25 +315,25 @@
             "name": "UserSettingsDateValues",
             "tableName": "user_settings_date_values",
             "fields": {
-                "id": {
-                    "type": "INTEGER",
+                "UID": {
+                    "type": "STRING",
                     "primaryKey": true,
-                    "autoIncrement": true
+                    "defaultValue": "GENERATE_UID"
                 },
                 "userId": {
-                    "type": "INTEGER",
+                    "type": "STRING",
                     "allowNull": false,
                     "references": {
                         "model": "users",
-                        "key": "id"
+                        "key": "UID"
                     }
                 },
                 "settingsFieldId": {
-                    "type": "INTEGER",
+                    "type": "STRING",
                     "allowNull": false,
                     "references": {
                         "model": "user_settings_fields",
-                        "key": "id"
+                        "key": "UID"
                     }
                 },
                 "value": {
