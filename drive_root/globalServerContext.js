@@ -64,6 +64,35 @@ function generateModelsFromDefs(modelDefs) {
         }
     }
     
+    // Inject UID systematically into all models for the runtime (if missing)
+    for (const def of mergedDefs.values()) {
+        if (!def.fields) def.fields = {};
+        
+        // Remove old primary keys
+        for (const [fieldName, fieldDef] of Object.entries(def.fields)) {
+            if (fieldName !== 'UID' && fieldDef.primaryKey) {
+                delete fieldDef.primaryKey;
+            }
+        }
+        
+        // Inject UID as the sole primary key
+        if (!def.fields.UID) {
+            def.fields.UID = {
+                type: "STRING",
+                allowNull: false,
+                primaryKey: true,
+                defaultValue: "GENERATE_UID"
+            };
+        } else {
+            def.fields.UID.primaryKey = true;
+            def.fields.UID.allowNull = false;
+            def.fields.UID.type = "STRING";
+            if (!def.fields.UID.defaultValue) {
+                def.fields.UID.defaultValue = "GENERATE_UID";
+            }
+        }
+    }
+    
     // Second pass: create Sequelize models
     for (const def of mergedDefs.values()) {
         try {

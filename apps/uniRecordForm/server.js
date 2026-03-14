@@ -166,10 +166,10 @@ async function buildTableFieldsFromModel(tableName) {
 
             if (f.foreignKey) {
                 field.properties = {
-                    selection: { table: f.foreignKey.table, idField: f.foreignKey.field || 'id', displayField: f.foreignKey.displayField || 'name' },
+                    selection: { table: f.foreignKey.table, idField: f.foreignKey.field || 'UID', displayField: f.foreignKey.displayField || 'name' },
                     showSelectionButton: true,
                     listMode: true,
-                    listSource: { app: config.name, table: f.foreignKey.table, idField: f.foreignKey.field || 'id', displayField: f.foreignKey.displayField || 'name', limit: 50 }
+                    listSource: { app: config.name, table: f.foreignKey.table, idField: f.foreignKey.field || 'UID', displayField: f.foreignKey.displayField || 'name', limit: 50 }
                 };
             }
 

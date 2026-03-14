@@ -34,38 +34,15 @@ module.exports = {
             }
         }
 
-        const missingFieldsTables = [];
-
         for (const def of mergedModelsDef) {
-            // Валидация наличия хотя бы одного из обязательных реквизитов
-            if (requiredFields.length > 0 && !excludedTables.includes(def.tableName)) {
-                const hasRequiredField = requiredFields.some(field => def.fields && def.fields[field]);
-                if (!hasRequiredField) {
-                    missingFieldsTables.push(def.tableName);
-                }
-            }
-        }
-
-        if (missingFieldsTables.length > 0) {
-            console.error('\x1b[31m%s\x1b[0m', '----------------------------------------------------------');
-            console.error('\x1b[31m%s\x1b[0m', '[FRAMEWORK ERROR] Ошибка валидации обязательных реквизитов!');
-            console.error('\x1b[31m%s\x1b[0m', `Таблицы должны содержать хотя бы один из: ${requiredFields.join(', ')}`);
-            console.error('\x1b[31m%s\x1b[0m', 'Следующие таблицы не прошли проверку:');
-            missingFieldsTables.forEach(table => console.error('\x1b[31m%s\x1b[0m', ` - ${table}`));
-            console.error('\x1b[31m%s\x1b[0m', 'Исправьте модели или исключите таблицы. Остановка сервера...');
-            console.error('\x1b[31m%s\x1b[0m', '----------------------------------------------------------');
-            process.exit(1);
-        }
-
-        for (const def of mergedModelsDef) {
-            // Удаляем старые primaryKey у всех полей
+            // 1. Удаляем старые primaryKey у всех полей
             for (const [fieldName, fieldDef] of Object.entries(def.fields || {})) {
                 if (fieldName !== 'UID' && fieldDef.primaryKey) {
                     delete fieldDef.primaryKey;
                 }
             }
 
-            // Энжектим UID как единственный Primary Key  
+            // 2. Энжектим UID как единственный Primary Key (для ВСЕХ таблиц)
             if (!def.fields) def.fields = {};
             
             // Функция генерации UID
@@ -99,6 +76,29 @@ module.exports = {
                 }
             }
         }
+
+        // 3. Валидация наличия хотя бы одного из обязательных реквизитов ПОСЛЕ инъекции UID
+        const missingFieldsTables = [];
+        for (const def of mergedModelsDef) {
+            if (requiredFields.length > 0 && !excludedTables.includes(def.tableName)) {
+                const hasRequiredField = requiredFields.some(field => def.fields && def.fields[field]);
+                if (!hasRequiredField) {
+                    missingFieldsTables.push(def.tableName);
+                }
+            }
+        }
+
+        if (missingFieldsTables.length > 0) {
+            console.error('\x1b[31m%s\x1b[0m', '----------------------------------------------------------');
+            console.error('\x1b[31m%s\x1b[0m', '[FRAMEWORK ERROR] Ошибка валидации обязательных реквизитов!');
+            console.error('\x1b[31m%s\x1b[0m', `Таблицы должны содержать хотя бы один из: ${requiredFields.join(', ')}`);
+            console.error('\x1b[31m%s\x1b[0m', 'Следующие таблицы не прошли проверку:');
+            missingFieldsTables.forEach(table => console.error('\x1b[31m%s\x1b[0m', ` - ${table}`));
+            console.error('\x1b[31m%s\x1b[0m', 'Исправьте модели или исключите таблицы. Остановка сервера...');
+            console.error('\x1b[31m%s\x1b[0m', '----------------------------------------------------------');
+            process.exit(1);
+        }
+
         console.log('[Framework events_handler] Models post-collect hook executed. UID injected.');
     },
 
