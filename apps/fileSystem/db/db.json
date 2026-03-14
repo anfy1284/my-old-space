@@ -59,6 +59,15 @@
                 "metadata": {
                     "type": "JSON",
                     "allowNull": true
+                },
+                "userId": {
+                    "type": "STRING",
+                    "allowNull": true,
+                    "references": {
+                        "model": "users",
+                        "key": "UID"
+                    },
+                    "caption": "Пользователь"
                 }
             },
             "options": {
@@ -73,6 +82,15 @@
                     "type": "STRING",
                     "primaryKey": true,
                     "defaultValue": "GENERATE_UID"
+                },
+                "userId": {
+                    "type": "STRING",
+                    "allowNull": true,
+                    "references": {
+                        "model": "users",
+                        "key": "UID"
+                    },
+                    "caption": "Пользователь"
                 },
                 "token": {
                     "type": "STRING",

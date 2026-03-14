@@ -52,20 +52,29 @@ const { processDefaultValues } = globalServerContext;
 const { normalizeType, compareSchemas, syncUniqueConstraints } = require('./migrationUtils');
 
 /**
- * Хук для вызова пользовательских обработчиков событий (events_handler.js)
+ * Хук для вызова пользовательских обработчиков событий
  */
 async function triggerProjectEvent(eventName, context = {}) {
   try {
     const projectRoot = process.env.PROJECT_ROOT;
-    if (!projectRoot) return;
     
-    const handlerPath = path.join(projectRoot, 'events_handler.js');
-    if (fs.existsSync(handlerPath)) {
-      // Используем динамический импорт для поддержки ES модулей (если handler так написан) 
-      // или require если это обычный node модуль.
-      const handler = require(handlerPath).default || require(handlerPath);
-      if (handler && typeof handler[eventName] === 'function') {
-        await handler[eventName](context);
+    // 1. Сначала вызываем обработчики фреймворка
+    const frameworkHandlerPath = path.resolve(__dirname, '../../events_handler.js');
+    if (fs.existsSync(frameworkHandlerPath)) {
+      const frameworkHandler = require(frameworkHandlerPath).default || require(frameworkHandlerPath);
+      if (frameworkHandler && typeof frameworkHandler[eventName] === 'function') {
+        await frameworkHandler[eventName](context);
+      }
+    }
+
+    // 2. Затем вызываем обработчики проекта
+    if (projectRoot) {
+      const projectHandlerPath = path.join(projectRoot, 'events_handler.js');
+      if (fs.existsSync(projectHandlerPath)) {
+        const projectHandler = require(projectHandlerPath).default || require(projectHandlerPath);
+        if (projectHandler && typeof projectHandler[eventName] === 'function') {
+          await projectHandler[eventName](context);
+        }
       }
     }
   } catch (e) {
