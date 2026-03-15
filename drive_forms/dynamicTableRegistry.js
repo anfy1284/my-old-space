@@ -142,7 +142,7 @@ function registerDynamicTableMethods(appName, config = {}) {
                 sort: sort || [],
                 filters: filters || [],
                 fieldConfig: fieldConfig,
-                userId: user.id
+                userId: user.UID
             });
 
             try {
@@ -210,7 +210,7 @@ function registerDynamicTableMethods(appName, config = {}) {
 
             if (!modelName) throw new Error('Unknown table: ' + tableName);
 
-            const raw = await globalServerContext.getLookupList({ modelName, firstRow, visibleRows, userId: user.id });
+            const raw = await globalServerContext.getLookupList({ modelName, firstRow, visibleRows, userId: user.UID });
 
             const rows = raw && (raw.rows || raw.data) || [];
             const fields = raw && raw.fields || [{ name: 'id' }, { name: 'display' }];

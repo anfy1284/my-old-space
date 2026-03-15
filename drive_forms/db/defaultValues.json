@@ -22,5 +22,13 @@
             "name": "user",
             "UID": "000000000-sys_forms-0005"
         }
+    ],
+    "user_systems": [
+        {
+            "userId": "000000000-organizations-0001",
+            "systemId": "000000000-sys_forms-0001",
+            "roleId": "000000000-sys_forms-0002",
+            "UID": "000000000-sys_forms-0006"
+        }
     ]
 }

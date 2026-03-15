@@ -63,7 +63,7 @@ function registerDynamicTableMethods(appName, config = {}) {
                 sort: sort || [],
                 filters: filters || [],
                 fieldConfig: fieldConfig,
-                userId: user.id  // Pass userId for edit session
+                userId: user.UID  // Pass userId for edit session
             });
         },
         
