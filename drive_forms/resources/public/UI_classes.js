@@ -380,6 +380,17 @@ class FormInput extends UIObject {
                     try { if (this._selectBtn._win) window.removeEventListener('resize', this._selectBtn._win); } catch (e) {}
                 }
             } catch (e) {}
+            try {
+                if (this._dateBtn) {
+                    try { if (this._dateBtn._ro && typeof this._dateBtn._ro.disconnect === 'function') this._dateBtn._ro.disconnect(); } catch (e) {}
+                    try { if (this._dateBtn._win) window.removeEventListener('resize', this._dateBtn._win); } catch (e) {}
+                }
+            } catch (e) {}
+            try {
+                if (this._calOpen && typeof this._closeCalendar === 'function') this._closeCalendar();
+                else if (this._calPopup) { try { this._calPopup.remove(); } catch (_) {} this._calPopup = null; }
+                if (this._calKeyCapture) { try { document.removeEventListener('keydown', this._calKeyCapture, true); } catch (_) {} this._calKeyCapture = null; }
+            } catch (e) {}
         } catch (e) {}
 
         try { if (this.inputContainer && typeof this.inputContainer.remove === 'function') this.inputContainer.remove(); } catch (e) {}
@@ -394,6 +405,8 @@ class FormInput extends UIObject {
         try { this._labelInstance = null; } catch (e) {}
         try { this._listBtn = null; } catch (e) {}
         try { this._selectBtn = null; } catch (e) {}
+        try { this._dateBtn = null; } catch (e) {}
+        try { this._calPopup = null; } catch (e) {}
     }
 }
 
@@ -1909,6 +1922,12 @@ class DataForm extends Form {
                 createTextControl(TextBox);
                 break;
             }
+            case 'date': {
+                // Date input: TextBox with isDate=true
+                properties.isDate = true;
+                createTextControl(TextBox);
+                break;
+            }
             case 'emunList': {
                 const dataKey = item.data;
                 let val = '';
@@ -2625,9 +2644,21 @@ class TextBox extends FormInput {
         this._listPopup = null;
         this._listOpen = false;
         this._selectBtn = null;
+        // Date input mode: when true, input edits dates in dd.mm.yyyy format
+        if (typeof this.isDate === 'undefined') this.isDate = false;
+        this._dateBtn = null;
+        this._calPopup = null;
+        this._calOpen = false;
+        this._dd = '';        // day part (0-2 digits as string)
+        this._mm = '';        // month part (0-2 digits as string)
+        this._yyyy = '';      // year part (0-4 digits as string)
+        this._dateSection = 0; // 0=day, 1=month, 2=year
+        this._calYear = null;
+        this._calMonth = null;
     }
 
     setValue(val, display) {
+        if (this.isDate) { this._setDateFromAny(val); return; }
         this.rawValue = val;
         // if val is an object with name/display, use it
         let displayVal = display;
@@ -2640,6 +2671,7 @@ class TextBox extends FormInput {
     }
 
     getValue() {
+        if (this.isDate) { return this._getDateISO(); }
         // For selection controls, rawValue holds the FK ID which differs from displayed text
         if (this.showSelectionButton && this.rawValue !== undefined && this.rawValue !== null) {
             return this.rawValue;
@@ -2649,6 +2681,7 @@ class TextBox extends FormInput {
     }
 
     setText(text) {
+        if (this.isDate) { this._setDateFromAny(text); return; }
         this.text = (text === null || text === undefined) ? '' : String(text);
         if (this.element) {
             try {
@@ -2666,6 +2699,7 @@ class TextBox extends FormInput {
     }
 
     getText() {
+        if (this.isDate) { return this._getDateDisplay(); }
         return this.element ? this.element.value : this.text;
     }
 
@@ -2724,9 +2758,18 @@ class TextBox extends FormInput {
             // Password support: if requested, use password type
             this.element.type = this.isPassword ? 'password' : 'text';
             // Initialize displayed text via setText so listMode can show caption
-            try { this.setText(this.text); } catch (_) { try { this.element.value = this.text; } catch (_) {} }
-            this.element.placeholder = this.placeholder;
-            this.element.readOnly = this.readOnly;
+            if (this.isDate) {
+                // For date mode, render current date parts (may already be set via setValue before Draw)
+                this.element.readOnly = false;
+                const dd = (this._dd || '').padEnd(2, ' ');
+                const mm = (this._mm || '').padEnd(2, ' ');
+                const yyyy = (this._yyyy || '').padEnd(4, ' ');
+                this.element.value = dd + '.' + mm + '.' + yyyy;
+            } else {
+                try { this.setText(this.text); } catch (_) { try { this.element.value = this.text; } catch (_) {} }
+                this.element.placeholder = this.placeholder;
+                this.element.readOnly = this.readOnly;
+            }
             // If we have a host container, use it; otherwise element will be appended to container below
             if (this.containerElement) {
                 // If absolute positioning is desired when no parentElement is set on the control,
@@ -2829,6 +2872,43 @@ class TextBox extends FormInput {
                 }
             } catch (e) {}
 
+            // Calendar button: for date picker mode, a button identical in style to "..." and "▾"
+            try {
+                if (this.isDate && !this._dateBtn) {
+                    const calBtn = document.createElement('button');
+                    calBtn.type = 'button';
+                    calBtn.tabIndex = -1;
+                    calBtn.textContent = '▾';
+                    calBtn.title = 'Выбрать дату';
+                    try { calBtn.classList.add('input-field-button'); } catch (e) {}
+                    calBtn.addEventListener('click', (ev) => {
+                        try { ev.stopPropagation(); ev.preventDefault(); this._toggleCalendar && this._toggleCalendar(); } catch (_) {}
+                    });
+                    this._dateBtn = calBtn;
+                    this.inputContainer.appendChild(this._dateBtn);
+                    try {
+                        const syncCalBtn = (b) => {
+                            try {
+                                const update = () => {
+                                    try {
+                                        const h = Math.round((b.offsetHeight || (b.getBoundingClientRect && b.getBoundingClientRect().height) || 0));
+                                        if (h > 0) b.style.width = h + 'px';
+                                    } catch (_) {}
+                                };
+                                update();
+                                if (typeof ResizeObserver !== 'undefined') {
+                                    try { const ro = new ResizeObserver(update); ro.observe(b.parentElement || b); b._ro = ro; } catch(_) {}
+                                }
+                                const winHandler = () => update();
+                                try { window.addEventListener('resize', winHandler); b._win = winHandler; } catch(_) {}
+                            } catch (_) {}
+                        };
+                        syncCalBtn(this._dateBtn);
+                    } catch (e) {}
+                    // For date mode: set monospace-like letter-spacing so dd.mm.yyyy renders evenly
+                    try { this.element.style.letterSpacing = '0.5px'; } catch (_) {}
+                }
+            } catch (e) {}
 
             // Adaptive layout: if container is wide enough, place label left and input right (row).
             // If narrow, stack label above input (column).
@@ -3221,6 +3301,7 @@ class TextBox extends FormInput {
             // Events
             this.element.addEventListener('input', (e) => {
                 try {
+                    if (this.isDate) return; // date mode is driven entirely by keydown
                     if (this.digitsOnly) {
                         let v = (e.target.value || '');
                         let sign = '';
@@ -3284,6 +3365,18 @@ class TextBox extends FormInput {
                     // focus behavior remains consistent and focus handlers run.
                     try { if (this.element && typeof this.element.focus === 'function') this.element.focus(); } catch (_) {}
 
+                    if (this.isDate) {
+                        // Determine which date section was clicked based on cursor position
+                        try {
+                            const pos = this.element.selectionStart || 0;
+                            if (pos <= 2) { this._dateSection = 0; }
+                            else if (pos <= 5) { this._dateSection = 1; }
+                            else { this._dateSection = 2; }
+                            this._setDateSection && this._setDateSection(this._dateSection);
+                        } catch (_) {}
+                        try { e.stopPropagation(); } catch (_) {}
+                    }
+
                     if (this.listMode) {
                         // Prevent the document-level click handler from seeing this
                         // click and immediately closing the newly opened popup.
@@ -3298,6 +3391,7 @@ class TextBox extends FormInput {
             });
 
             this.element.addEventListener('keydown', (e) => {
+                if (this.isDate) { try { this._handleDateKeydown && this._handleDateKeydown(e); } catch (_) {} return; }
                 if (this.digitsOnly) {
                     // allow control combinations
                     if (e.ctrlKey || e.metaKey || e.altKey) return;
@@ -3444,6 +3538,11 @@ class TextBox extends FormInput {
             // focus/blur border changes moved to container; skip on-element border edits
             this.element.addEventListener('focus', (e) => {
                 try {
+                    if (this.isDate) {
+                        // On focus, validate date and position cursor at current section
+                        try { this._updateDateDisplay && this._updateDateDisplay(); } catch (_) {}
+                        try { setTimeout(() => { try { this._setDateSection && this._setDateSection(this._dateSection || 0); } catch(_){} }, 0); } catch (_) {}
+                    }
                     // Open list on focus when in listMode
                     if (this.listMode) {
                         try { this._openList && this._openList(); } catch (_) {}
@@ -3509,6 +3608,444 @@ class TextBox extends FormInput {
         return this.element;
     }
 
+    // ======================== DATE MODE METHODS ========================
+
+    _getDateDisplay() {
+        const dd = (this._dd || '').padEnd(2, ' ');
+        const mm = (this._mm || '').padEnd(2, ' ');
+        const yyyy = (this._yyyy || '').padEnd(4, ' ');
+        return dd + '.' + mm + '.' + yyyy;
+    }
+
+    _getDateISO() {
+        if ((this._dd || '').length === 2 && (this._mm || '').length === 2 && (this._yyyy || '').length === 4) {
+            const d = parseInt(this._dd, 10);
+            const m = parseInt(this._mm, 10);
+            const y = parseInt(this._yyyy, 10);
+            if (d >= 1 && d <= 31 && m >= 1 && m <= 12 && y >= 1000) {
+                return y + '-' + String(m).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+            }
+        }
+        return null;
+    }
+
+    _setDateFromAny(val) {
+        this._dd = ''; this._mm = ''; this._yyyy = '';
+        if (!val && val !== 0) { if (this.element) this._updateDateDisplay(); return; }
+        try {
+            let d, m, y;
+            if (val instanceof Date) {
+                if (!isNaN(val.getTime())) { d = val.getDate(); m = val.getMonth() + 1; y = val.getFullYear(); }
+            } else {
+                const s = String(val).trim();
+                const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+                if (iso) { y = parseInt(iso[1], 10); m = parseInt(iso[2], 10); d = parseInt(iso[3], 10); }
+                else {
+                    const dmy = s.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})/);
+                    if (dmy) { d = parseInt(dmy[1], 10); m = parseInt(dmy[2], 10); y = parseInt(dmy[3], 10); }
+                }
+            }
+            if (d && m && y && d >= 1 && d <= 31 && m >= 1 && m <= 12) {
+                this._dd = String(d).padStart(2, '0');
+                this._mm = String(m).padStart(2, '0');
+                this._yyyy = String(y);
+            }
+        } catch (_) {}
+        if (this.element) this._updateDateDisplay();
+    }
+
+    _updateDateDisplay() {
+        if (!this.element) return;
+        const sec = this._dateSection || 0;
+        const dd = (this._dd || '').padEnd(2, ' ');
+        const mm = (this._mm || '').padEnd(2, ' ');
+        const yyyy = (this._yyyy || '').padEnd(4, ' ');
+        this.element.value = dd + '.' + mm + '.' + yyyy;
+        this._setDateSection(sec);
+        // Notify listeners so dirty-tracking / dataMap updates fire on every keystroke
+        try { this.element.dispatchEvent(new Event('input', { bubbles: true })); } catch (_) {}
+    }
+
+    _setDateSection(n) {
+        this._dateSection = n;
+        if (!this.element) return;
+        // Only reposition cursor if element is focused
+        if (document.activeElement !== this.element) return;
+        const starts = [0, 3, 6];
+        const parts = [this._dd, this._mm, this._yyyy];
+        const s = starts[n];
+        const partLen = (parts[n] || '').length;
+        const pos = s + partLen;
+        try { this.element.setSelectionRange(pos, pos); } catch (_) {}
+    }
+
+    _handleDateKeydown(e) {
+        const k = e.key;
+        // Allow standard shortcuts (copy/paste/select all)
+        if (e.ctrlKey || e.metaKey) return;
+        e.preventDefault();
+        const sectionMaxLen = [2, 2, 4];
+        const getPart = (n) => (n === 0 ? this._dd : (n === 1 ? this._mm : this._yyyy));
+        const setPart = (n, v) => { if (n === 0) this._dd = v; else if (n === 1) this._mm = v; else this._yyyy = v; };
+        const sec = this._dateSection;
+
+        if (/^\d$/.test(k)) {
+            const cur = getPart(sec);
+            if (cur.length < sectionMaxLen[sec]) {
+                const next = cur + k;
+                setPart(sec, next);
+                // Auto-advance to next section once section is full
+                if (next.length === sectionMaxLen[sec]) {
+                    // Validate range before advancing
+                    if (sec === 1) {
+                        const mv = parseInt(next, 10);
+                        if (mv < 1 || mv > 12) { setPart(1, ''); this._updateDateDisplay(); return; }
+                    }
+                    if (sec < 2) { this._dateSection = sec + 1; }
+                }
+            }
+            this._updateDateDisplay();
+        } else if (k === 'Backspace' || k === 'Delete') {
+            const cur = getPart(sec);
+            if (cur.length > 0) {
+                setPart(sec, cur.slice(0, -1));
+                this._updateDateDisplay();
+            } else if (sec > 0) {
+                this._dateSection = sec - 1;
+                this._updateDateDisplay();
+            }
+        } else if (k === 'ArrowLeft') {
+            if (sec > 0) { this._dateSection = sec - 1; this._updateDateDisplay(); }
+        } else if (k === 'ArrowRight' || k === '.') {
+            if (sec < 2) { this._dateSection = sec + 1; this._updateDateDisplay(); }
+        } else if (k === 'Tab') {
+            if (!e.shiftKey) {
+                if (sec < 2) { this._dateSection = sec + 1; this._updateDateDisplay(); }
+                else {
+                    // Allow Tab to propagate to next field
+                    e.preventDefault = () => {}; // already prevented above — need to re-allow
+                    // Re-dispatch as a real tab press
+                    try {
+                        const next = this._findNextFocusable(true);
+                        if (next) next.focus();
+                    } catch (_) {}
+                }
+            } else {
+                if (sec > 0) { this._dateSection = sec - 1; this._updateDateDisplay(); }
+                else {
+                    try {
+                        const prev = this._findNextFocusable(false);
+                        if (prev) prev.focus();
+                    } catch (_) {}
+                }
+            }
+        } else if (k === 'Escape') {
+            if (this._calOpen) {
+                this._closeCalendar();
+            } else {
+                this._dd = ''; this._mm = ''; this._yyyy = '';
+                this._dateSection = 0;
+                this._updateDateDisplay();
+            }
+        } else if (k === 'Enter') {
+            if (this._calOpen) {
+                this._closeCalendar();
+            } else {
+                // Fire input event so dirty-tracking picks up the value
+                try { if (this.element) this.element.dispatchEvent(new Event('input', { bubbles: true })); } catch (_) {}
+            }
+        } else if (k === 'F4') {
+            this._toggleCalendar && this._toggleCalendar();
+        }
+        // Ignore all other keys (letters, symbols etc.)
+    }
+
+    _findNextFocusable(forward) {
+        try {
+            const focusable = Array.from(document.querySelectorAll(
+                'input:not([disabled]):not([tabindex="-1"]), select:not([disabled]):not([tabindex="-1"]), textarea:not([disabled]):not([tabindex="-1"]), button:not([disabled]):not([tabindex="-1"]), [tabindex]:not([tabindex="-1"])'
+            )).filter(el => !el.closest('[style*="display: none"]') && !el.closest('[hidden]'));
+            const idx = focusable.indexOf(this.element);
+            if (idx === -1) return null;
+            return forward ? focusable[idx + 1] : focusable[idx - 1];
+        } catch (_) { return null; }
+    }
+
+    _toggleCalendar() {
+        if (this._calOpen) this._closeCalendar();
+        else this._openCalendar();
+    }
+
+    _openCalendar() {
+        if (this._calOpen) return;
+        const today = new Date();
+        let year = today.getFullYear(), month = today.getMonth() + 1;
+        if (this._yyyy) { const y = parseInt(this._yyyy, 10); if (y >= 1000) year = y; }
+        if (this._mm) { const m = parseInt(this._mm, 10); if (m >= 1 && m <= 12) month = m; }
+        this._calYear = year;
+        this._calMonth = month;
+        const popup = this._buildCalendarPopup(year, month);
+        const anchor = this.containerElement || (this.element && this.element.closest('.ui-input-container')) || this.inputContainer;
+        const rect = anchor ? anchor.getBoundingClientRect() : { left: 0, bottom: 20 };
+        popup.style.left = (rect.left + (window.pageXOffset || document.documentElement.scrollLeft || 0)) + 'px';
+        popup.style.top = (rect.bottom + (window.pageYOffset || document.documentElement.scrollTop || 0)) + 'px';
+        document.body.appendChild(popup);
+        this._calPopup = popup;
+        this._calOpen = true;
+        this._calDocHandler = (ev) => {
+            try {
+                if (!popup.contains(ev.target) && this._dateBtn && !this._dateBtn.contains(ev.target)) {
+                    this._closeCalendar();
+                }
+            } catch (_) {}
+        };
+        document.addEventListener('click', this._calDocHandler);
+        // Global keyboard capture: while calendar is open, eat ALL keydown events
+        // so the underlying form (and its Escape/Enter handlers) cannot react.
+        this._calKeyCapture = (ev) => {
+            try {
+                ev.stopPropagation();
+                ev.stopImmediatePropagation();
+                // Route the key to our date handler so Enter/Escape still work
+                try { this._handleDateKeydown && this._handleDateKeydown(ev); } catch (_) {}
+            } catch (_) {}
+        };
+        document.addEventListener('keydown', this._calKeyCapture, true);
+    }
+
+    _closeCalendar() {
+        if (this._calPopup) {
+            try { this._calPopup.remove(); } catch (_) { try { document.body.removeChild(this._calPopup); } catch (_) {} }
+            this._calPopup = null;
+        }
+        this._calOpen = false;
+        if (this._calDocHandler) {
+            try { document.removeEventListener('click', this._calDocHandler); } catch (_) {}
+            this._calDocHandler = null;
+        }
+        if (this._calKeyCapture) {
+            try { document.removeEventListener('keydown', this._calKeyCapture, true); } catch (_) {}
+            this._calKeyCapture = null;
+        }
+    }
+
+    _navigateCalendar(dy, dm) {
+        this._calMonth = (this._calMonth || 1) + dm;
+        this._calYear = (this._calYear || new Date().getFullYear()) + dy;
+        if (this._calMonth > 12) { this._calMonth -= 12; this._calYear++; }
+        if (this._calMonth < 1) { this._calMonth += 12; this._calYear--; }
+        if (!this._calOpen) return;
+        const anchor = this.containerElement || this.inputContainer;
+        const rect = anchor ? anchor.getBoundingClientRect() : { left: 0, bottom: 20 };
+        if (this._calPopup) { try { this._calPopup.remove(); } catch (_) {} }
+        // remove old listeners before re-attaching
+        if (this._calDocHandler) { try { document.removeEventListener('click', this._calDocHandler); } catch (_) {} this._calDocHandler = null; }
+        if (this._calKeyCapture) { try { document.removeEventListener('keydown', this._calKeyCapture, true); } catch (_) {} this._calKeyCapture = null; }
+        const newPopup = this._buildCalendarPopup(this._calYear, this._calMonth);
+        newPopup.style.left = (rect.left + (window.pageXOffset || document.documentElement.scrollLeft || 0)) + 'px';
+        newPopup.style.top = (rect.bottom + (window.pageYOffset || document.documentElement.scrollTop || 0)) + 'px';
+        document.body.appendChild(newPopup);
+        this._calPopup = newPopup;
+        if (this._calDocHandler) document.removeEventListener('click', this._calDocHandler);
+        this._calDocHandler = (ev) => {
+            try {
+                if (!newPopup.contains(ev.target) && this._dateBtn && !this._dateBtn.contains(ev.target)) {
+                    this._closeCalendar();
+                }
+            } catch (_) {}
+        };
+        document.addEventListener('click', this._calDocHandler);
+        // Re-attach keyboard capture for the new popup
+        this._calKeyCapture = (ev) => {
+            try {
+                ev.stopPropagation();
+                ev.stopImmediatePropagation();
+                try { this._handleDateKeydown && this._handleDateKeydown(ev); } catch (_) {}
+            } catch (_) {}
+        };
+        document.addEventListener('keydown', this._calKeyCapture, true);
+    }
+
+    _buildCalendarPopup(year, month) {
+        const base = UIObject.getClientConfigValue('defaultColor', '#c0c0c0');
+        const light = UIObject.brightenColor(base, 60);
+        const dark = UIObject.brightenColor(base, -60);
+
+        const popup = document.createElement('div');
+        popup.style.cssText = 'position:absolute;z-index:99999;background:' + base + ';box-sizing:border-box;padding:2px;' +
+            'font-family:MS Sans Serif,sans-serif;font-size:11px;' +
+            'border-top:2px solid ' + light + ';border-left:2px solid ' + light + ';' +
+            'border-right:2px solid ' + dark + ';border-bottom:2px solid ' + dark + ';' +
+            'box-shadow:2px 2px 4px rgba(0,0,0,0.4);user-select:none;width:190px;';
+
+        // Header: prev / month+year title / next
+        const header = document.createElement('div');
+        header.style.cssText = 'display:flex;align-items:center;justify-content:space-between;' +
+            'background:#000080;color:#ffffff;padding:2px 4px;margin-bottom:2px;';
+
+        const mkNavBtn = (label) => {
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.textContent = label;
+            b.style.cssText = 'background:' + base + ';color:#000;border-top:2px solid ' + light + ';border-left:2px solid ' + light + ';' +
+                'border-right:2px solid ' + dark + ';border-bottom:2px solid ' + dark + ';' +
+                'cursor:default;padding:0 5px;font-size:10px;font-family:MS Sans Serif,sans-serif;line-height:1.2;min-width:18px;';
+            return b;
+        };
+
+        const btnPrev = mkNavBtn('◄');
+        btnPrev.addEventListener('click', (e) => { e.stopPropagation(); this._navigateCalendar(0, -1); });
+
+        const MONTHS_RU = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+        const titleEl = document.createElement('span');
+        titleEl.style.cssText = 'font-weight:bold;cursor:default;font-family:MS Sans Serif,sans-serif;font-size:11px;user-select:none;';
+        titleEl.textContent = MONTHS_RU[month - 1] + ' ' + year;
+        // Click on month name — cycle through year by +/- 1 year with double click on arrows
+        // (simple single-click navigation is enough for now)
+
+        const btnNext = mkNavBtn('►');
+        btnNext.addEventListener('click', (e) => { e.stopPropagation(); this._navigateCalendar(0, 1); });
+
+        header.appendChild(btnPrev);
+        header.appendChild(titleEl);
+        header.appendChild(btnNext);
+        popup.appendChild(header);
+
+        // Calendar grid
+        const table = document.createElement('table');
+        table.style.cssText = 'border-collapse:collapse;width:100%;table-layout:fixed;';
+
+        // Day-of-week headers (Mon…Sun)
+        const DAYS_SHORT = ['Пн','Вт','Ср','Чт','Пт','Сб','Вс'];
+        const thead = document.createElement('thead');
+        const headRow = document.createElement('tr');
+        for (let i = 0; i < 7; i++) {
+            const th = document.createElement('th');
+            th.textContent = DAYS_SHORT[i];
+            th.style.cssText = 'text-align:center;padding:1px 2px;font-weight:bold;font-size:10px;width:20px;' + (i >= 5 ? 'color:#800000;' : '');
+            headRow.appendChild(th);
+        }
+        thead.appendChild(headRow);
+        table.appendChild(thead);
+
+        // Compute first weekday of month (Mon-based: 0=Mon, 6=Sun)
+        const firstDayJS = new Date(year, month - 1, 1).getDay(); // 0=Sun
+        const startOffset = (firstDayJS + 6) % 7; // convert to Mon-start
+        const daysInMonth = new Date(year, month, 0).getDate();
+        const daysInPrev = new Date(year, month - 1, 0).getDate();
+
+        const today = new Date();
+        const todayY = today.getFullYear(), todayM = today.getMonth() + 1, todayD = today.getDate();
+        const selD = this._dd ? parseInt(this._dd, 10) : -1;
+        const selM = this._mm ? parseInt(this._mm, 10) : -1;
+        const selY = this._yyyy ? parseInt(this._yyyy, 10) : -1;
+
+        const tbody = document.createElement('tbody');
+        let dayNum = 1, nextDay = 1;
+
+        for (let row = 0; row < 6; row++) {
+            const tr = document.createElement('tr');
+            let rowHasCurMonth = false;
+
+            for (let col = 0; col < 7; col++) {
+                const cellIdx = row * 7 + col;
+                const td = document.createElement('td');
+                td.style.cssText = 'text-align:center;padding:2px;cursor:default;width:20px;height:18px;box-sizing:border-box;';
+
+                let dayVal, isOtherMonth = false;
+                if (cellIdx < startOffset) {
+                    dayVal = daysInPrev - startOffset + cellIdx + 1;
+                    isOtherMonth = true;
+                } else if (dayNum > daysInMonth) {
+                    dayVal = nextDay++;
+                    isOtherMonth = true;
+                } else {
+                    dayVal = dayNum++;
+                    rowHasCurMonth = true;
+                }
+
+                const isWeekend = (col >= 5);
+                if (isOtherMonth) {
+                    td.style.color = '#a0a0a0';
+                } else if (isWeekend) {
+                    td.style.color = '#800000';
+                }
+
+                // Highlight today
+                const isToday = (!isOtherMonth && dayVal === todayD && month === todayM && year === todayY);
+                if (isToday) { td.style.border = '1px dotted #000080'; }
+
+                // Highlight selected date
+                const isSel = (!isOtherMonth && dayVal === selD && month === selM && year === selY);
+                if (isSel) {
+                    td.style.backgroundColor = '#000080';
+                    td.style.color = '#ffffff';
+                    td.style.border = '';
+                }
+
+                td.textContent = String(dayVal);
+
+                if (!isOtherMonth) {
+                    const _day = dayVal, _month = month, _year = year;
+                    td.addEventListener('mouseenter', () => { if (!isSel) td.style.backgroundColor = base; });
+                    td.addEventListener('mouseleave', () => { if (!isSel) td.style.backgroundColor = ''; });
+                    td.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        this._dd = String(_day).padStart(2, '0');
+                        this._mm = String(_month).padStart(2, '0');
+                        this._yyyy = String(_year);
+                        this._updateDateDisplay();
+                        try { if (this.element) this.element.dispatchEvent(new Event('input', { bubbles: true })); } catch (_) {}
+                        this._closeCalendar();
+                        try { if (this.element) this.element.focus(); } catch (_) {}
+                    });
+                } else {
+                    // Click on prev/next month days — navigate and then select
+                    const _day = dayVal;
+                    const _offset = (cellIdx < startOffset) ? -1 : 1;
+                    td.style.cursor = 'pointer';
+                    td.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        this._navigateCalendar(0, _offset);
+                    });
+                }
+
+                tr.appendChild(td);
+            }
+
+            tbody.appendChild(tr);
+            if (!rowHasCurMonth && row >= 4) break; // Stop rendering empty extra rows
+        }
+
+        table.appendChild(tbody);
+        popup.appendChild(table);
+
+        // Footer: "Сегодня" button
+        const footer = document.createElement('div');
+        footer.style.cssText = 'display:flex;justify-content:center;padding:2px 0 0;';
+        const btnToday = document.createElement('button');
+        btnToday.type = 'button';
+        btnToday.textContent = 'Сегодня';
+        btnToday.style.cssText = 'background:' + base + ';border-top:2px solid ' + light + ';border-left:2px solid ' + light + ';' +
+            'border-right:2px solid ' + dark + ';border-bottom:2px solid ' + dark + ';' +
+            'cursor:default;padding:1px 10px;font-size:11px;font-family:MS Sans Serif,sans-serif;';
+        btnToday.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this._dd = String(todayD).padStart(2, '0');
+            this._mm = String(todayM).padStart(2, '0');
+            this._yyyy = String(todayY);
+            this._updateDateDisplay();
+            try { if (this.element) this.element.dispatchEvent(new Event('input', { bubbles: true })); } catch (_) {}
+            this._closeCalendar();
+            try { if (this.element) this.element.focus(); } catch (_) {}
+        });
+        footer.appendChild(btnToday);
+        popup.appendChild(footer);
+
+        return popup;
+    }
+
+    // ======================== END DATE MODE METHODS ========================
 
     onSelectionStart() {
         // Open uniListForm chooser directly and forward selection to `handleSelection`.
