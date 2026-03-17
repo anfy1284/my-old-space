@@ -160,10 +160,14 @@ function registerDynamicTableMethods(appName, config = {}) {
             const columns = normalizeColumnsFromFields(fields, rows);
             try { console.log(`[${appName}/getDynamicTableData] normalized columns=`, columns.map(c => ({ data: c.data, caption: c.caption }))); } catch(e) {}
 
+            // Pass range and editSessionId from server so client can position
+            // the floating table precisely (server may apply its own buffer offset)
             return {
                 columns,
                 rows,
-                totalRows
+                totalRows,
+                range: (raw && raw.range) ? raw.range : null,
+                editSessionId: (raw && raw.editSessionId) ? raw.editSessionId : undefined
             };
         },
 

@@ -7250,23 +7250,46 @@ class DynamicTable extends Table {
         this._sseDestroyed = false;
     }
 
-    // Override Draw to ensure data subscription happens before base drawing
+    // Override Draw: base structure + attach virtual scroll listener
     Draw(container) {
         try {
-            // Subscribe to server-side changes if not already subscribed
             if (!this._dataSubscribed) {
-                try {
-                    // Prefer existing connectSSE implementation
-                    if (typeof this.connectSSE === 'function') this.connectSSE();
-                } catch (e) {}
+                try { if (typeof this.connectSSE === 'function') this.connectSSE(); } catch (e) {}
                 this._dataSubscribed = true;
             }
         } catch (e) {}
 
-        // Call base Draw to build UI and then trigger initial load if needed
+        // Table.prototype.Draw calls this.buildBody() — our override creates the runway
         const el = (function(self, cnt) {
             try { return Table.prototype.Draw.call(self, cnt); } catch (e) { return null; }
         })(this, container);
+
+        // Attach virtual scroll listener once (bodyContainer created by Table.Draw)
+        try {
+            if (el && this.bodyContainer && !this._scrollHandlerAttached) {
+                this._scrollHandlerAttached = true;
+                const self = this;
+                this._scrollHandler = () => { try { self._onScroll(); } catch (e) {} };
+                this.bodyContainer.addEventListener('scroll', this._scrollHandler);
+            }
+        } catch (e) {}
+
+        // ResizeObserver: recalculate visibleRows and trigger scroll-check when bodyContainer height changes
+        try {
+            if (el && this.bodyContainer && !this._resizeObserver && typeof ResizeObserver !== 'undefined') {
+                const self = this;
+                this._resizeObserver = new ResizeObserver(() => {
+                    try {
+                        self.calculateVisibleRows();
+                        if (self.dataLoaded && !self.isLoading) {
+                            // _onScroll reads current scrollTop — correct for any resize direction
+                            self._onScroll();
+                        }
+                    } catch (e) {}
+                });
+                this._resizeObserver.observe(this.bodyContainer);
+            }
+        } catch (e) {}
 
         try {
             if (el && !this.dataLoaded && !this.isLoading) {
@@ -7277,8 +7300,341 @@ class DynamicTable extends Table {
         return el;
     }
 
+    // Override buildBody: creates a regular table with empty tbody.
+    // All TR rows are allocated later (in _allocateRows) once totalRows is known.
+    buildBody(bodyContainer, _rows) {
+        const tableEl = document.createElement('table');
+        tableEl.style.width = '100%';
+        tableEl.style.borderCollapse = 'collapse';
+        tableEl.style.tableLayout = 'fixed';
+
+        const bcolgroup = document.createElement('colgroup');
+        for (let i = 0; i < this.columns.length; i++) {
+            const col = this.columns[i] || {};
+            const c = document.createElement('col');
+            c.style.width = (col.width ? col.width + 'px' : '100px');
+            bcolgroup.appendChild(c);
+        }
+        tableEl.appendChild(bcolgroup);
+        const tbody = document.createElement('tbody');
+        tableEl.appendChild(tbody);
+        bodyContainer.appendChild(tableEl);
+
+        this._mainTable = tableEl;
+        this._mainTbody = tbody;
+        this._dtBcolgroup = bcolgroup;
+        this._rowElements = [];
+
+        return { bodyTable: tableEl, bcolgroup: bcolgroup, tbody: tbody, renderBodyRows: () => {} };
+    }
+
+    // Create (or recreate) all TR placeholder elements for the full dataset.
+    // Each TR is a fixed-height empty row — the browser uses these for the scrollbar.
+    _allocateRows() {
+        const tbody = this._mainTbody;
+        if (!tbody) return;
+        const colSpan = Math.max(1, this.columns.length);
+
+        const existing = this._rowElements ? this._rowElements.length : 0;
+
+        if (existing === this.totalRows) return; // nothing changed, skip
+
+        // Remove excess rows
+        while (this._rowElements && this._rowElements.length > this.totalRows) {
+            const tr = this._rowElements.pop();
+            try { if (tr && tr.parentNode) tr.parentNode.removeChild(tr); } catch (e) {}
+        }
+        if (!this._rowElements) this._rowElements = [];
+
+        // Append missing rows
+        for (let i = existing; i < this.totalRows; i++) {
+            const tr = document.createElement('tr');
+            tr.classList.add('ui-table-row');
+            tr.style.height = this.rowHeight + 'px';
+            tr.style.boxSizing = 'border-box';
+            tr.tabIndex = 0;
+            tr._dtIndex = i;
+            tr._dtFilled = false;
+
+            // Placeholder: single wide cell occupying the row height
+            const ph = document.createElement('td');
+            ph.colSpan = colSpan;
+            ph.style.padding = '0';
+            ph.style.height = this.rowHeight + 'px';
+            tr.appendChild(ph);
+
+            // Events — pass global index directly (index === globalIndex in this approach)
+            const self = this;
+            const gi = i;
+            tr.addEventListener('click', (ev) => {
+                try {
+                    if (self.editMode === 'row-activate') {
+                        if (self._activeRowIndex !== gi) { self.activateRow(gi); return; }
+                    } else {
+                        if (self._activeRowIndex !== gi) self.activateRow(gi);
+                    }
+                    const td = ev.target && ev.target.closest ? ev.target.closest('td') : null;
+                    if (td) {
+                        const keyEl = td.querySelector('[data-field]') || td.querySelector('input,textarea,select,button');
+                        if (keyEl) { try { keyEl.focus && keyEl.focus(); } catch (e) {} }
+                    }
+                } catch (e) {}
+            });
+            tr.addEventListener('dblclick', () => {
+                try {
+                    if (self.readOnly) {
+                        if (self._activeRowIndex !== gi) self.activateRow(gi);
+                        try { self.onSelectOrOpen(gi); } catch (e) {}
+                    }
+                } catch (e) {}
+            });
+            tr.addEventListener('keydown', (ev) => {
+                try {
+                    if (ev.key === 'Enter') {
+                        if (self.readOnly) {
+                            if (self._activeRowIndex !== gi) self.activateRow(gi);
+                            try { self.onSelectOrOpen(gi); } catch (e) {}
+                        } else { tr.click(); }
+                    }
+                } catch (e) {}
+            });
+
+            tbody.appendChild(tr);
+            this._rowElements.push(tr);
+        }
+    }
+
+    // Fill a single row with real cell content from dataCache.
+    _fillRow(globalIndex) {
+        const tr = this._rowElements && this._rowElements[globalIndex];
+        if (!tr) return;
+        const row = this.dataCache[globalIndex];
+        if (!row || !row.loaded) return;
+        if (tr._dtFilled) return; // already rendered (flag cleared by _resetFilledRows on refresh)
+
+        tr.innerHTML = '';
+        for (let c = 0; c < this.columns.length; c++) {
+            const col = this.columns[c] || {};
+            const td = this.renderCellElement(globalIndex, c, col, row);
+            tr.appendChild(td);
+        }
+        tr._dtFilled = true;
+
+        // Restore active highlight if needed
+        if (this._activeRowIndex === globalIndex) tr.classList.add('active');
+    }
+
+    // Reset a row back to empty placeholder (used on refresh/sort).
+    _emptyRow(tr) {
+        if (!tr) return;
+        tr.innerHTML = '';
+        const ph = document.createElement('td');
+        ph.colSpan = Math.max(1, this.columns.length);
+        ph.style.padding = '0';
+        ph.style.height = this.rowHeight + 'px';
+        tr.appendChild(ph);
+        tr._dtFilled = false;
+    }
+
+    // Fill all cached rows in the currently visible range (+ buffer).
+    _fillVisibleRows() {
+        if (!this.bodyContainer || !this._rowElements || !this._rowElements.length) return;
+        const scrollTop  = this.bodyContainer.scrollTop;
+        const visibleH   = this.bodyContainer.clientHeight || 0;
+        const from = Math.max(0, Math.floor(scrollTop / this.rowHeight) - this.bufferRows);
+        const to   = Math.min(this.totalRows - 1, Math.ceil((scrollTop + visibleH) / this.rowHeight) + this.bufferRows);
+        for (let i = from; i <= to; i++) {
+            if (this.dataCache[i] && this.dataCache[i].loaded) {
+                this._fillRow(i);
+            }
+        }
+    }
+
+    // Scroll handler: fill from cache then fetch any missing rows.
+    _onScroll() {
+        if (!this.bodyContainer || this.totalRows === 0) return;
+
+        // Immediately fill visible rows from what is already cached
+        this._fillVisibleRows();
+
+        const scrollTop  = this.bodyContainer.scrollTop;
+        const visibleH   = this.bodyContainer.clientHeight || 0;
+        const from = Math.max(0, Math.floor(scrollTop / this.rowHeight) - this.bufferRows);
+        const to   = Math.min(this.totalRows - 1, Math.ceil((scrollTop + visibleH) / this.rowHeight) + this.bufferRows);
+
+        // Find first row in visible range that is not cached
+        let firstMissing = -1;
+        for (let i = from; i <= to; i++) {
+            if (!this.dataCache[i] || !this.dataCache[i].loaded) { firstMissing = i; break; }
+        }
+        if (firstMissing === -1) return; // everything visible is cached
+
+        if (this._scrollDebounce) { clearTimeout(this._scrollDebounce); this._scrollDebounce = null; }
+        const self = this;
+        this._scrollDebounce = setTimeout(async () => {
+            if (self._sseDestroyed) return;
+            if (self.isLoading) {
+                // Wait for current load then re-check
+                const retry = () => {
+                    if (self._sseDestroyed) return;
+                    if (!self.isLoading) { try { self._onScroll(); } catch (e) {} }
+                    else setTimeout(retry, 50);
+                };
+                setTimeout(retry, 50);
+                return;
+            }
+            self.firstVisibleRow = firstMissing;
+            try {
+                self.calculateVisibleRows();
+                await self.loadData(firstMissing);
+            } catch (e) {
+                console.error('[DynamicTable] scroll load error', e);
+            }
+        }, 80);
+    }
+
+    // Override activateRow: O(1) — directly target row by global index.
+    activateRow(globalIndex) {
+        // Remove highlight from previously active row
+        if (typeof this._activeRowIndex === 'number' && this._activeRowIndex >= 0) {
+            const prev = this._rowElements && this._rowElements[this._activeRowIndex];
+            if (prev) try { prev.classList.remove('active'); } catch (e) {}
+        }
+        this._activeRowIndex = globalIndex;
+        const tr = this._rowElements && this._rowElements[globalIndex];
+        if (tr) try { tr.classList.add('active'); } catch (e) {}
+        try { this.updateAllRowsReadOnly(); } catch (e) {}
+        try { if (typeof this.onRowActivate === 'function') this.onRowActivate(globalIndex); } catch (e) {}
+        // Attach Escape handler to close editors
+        if (!this._docKeyHandler) {
+            this._docKeyHandler = (ev) => {
+                try {
+                    if (ev.key === 'Escape') {
+                        const tgt = ev.target;
+                        const isEditable = (node => {
+                            if (!node) return false;
+                            try {
+                                const tag = node.tagName ? node.tagName.toLowerCase() : '';
+                                if (tag === 'input' || tag === 'textarea' || tag === 'select' || tag === 'button') return true;
+                                if (node.isContentEditable) return true;
+                                if (node.closest) { const p = node.closest('input,textarea,select,button,[contenteditable="true"]'); if (p) return true; }
+                            } catch (e) {}
+                            return false;
+                        })(tgt);
+                        if (isEditable) {
+                            try { tgt.blur(); } catch (e) {}
+                            try { ev.preventDefault(); ev.stopPropagation(); } catch (e) {}
+                            setTimeout(() => {
+                                try {
+                                    const activeEl = this._rowElements && this._rowElements[this._activeRowIndex];
+                                    if (activeEl) activeEl.focus(); else if (this.element) this.element.focus();
+                                } catch (e) {}
+                            }, 0);
+                            return;
+                        }
+                        this.deactivateRow();
+                    }
+                } catch (e) {}
+            };
+            document.addEventListener('keydown', this._docKeyHandler);
+        }
+    }
+
+    // Override deactivateRow: O(1).
+    deactivateRow() {
+        if (typeof this._activeRowIndex === 'number' && this._activeRowIndex >= 0) {
+            const tr = this._rowElements && this._rowElements[this._activeRowIndex];
+            if (tr) try { tr.classList.remove('active'); } catch (e) {}
+        }
+        this._activeRowIndex = -1;
+        try { this.updateAllRowsReadOnly(); } catch (e) {}
+        if (this._docKeyHandler) {
+            try { document.removeEventListener('keydown', this._docKeyHandler); } catch (e) {}
+            this._docKeyHandler = null;
+        }
+        try {
+            const focused = document.activeElement;
+            if (focused && this.element && this.element.contains(focused)) try { focused.blur(); } catch (e) {}
+        } catch (e) {}
+    }
+
+    // Override updateAllRowsReadOnly: only iterate filled rows in visible range.
+    updateAllRowsReadOnly() {
+        if (!this._rowElements || !this.bodyContainer) return;
+        const scrollTop = this.bodyContainer.scrollTop;
+        const visibleH  = this.bodyContainer.clientHeight || 0;
+        const from = Math.max(0, Math.floor(scrollTop / this.rowHeight) - this.bufferRows);
+        const to   = Math.min(this._rowElements.length - 1, Math.ceil((scrollTop + visibleH) / this.rowHeight) + this.bufferRows);
+        for (let i = from; i <= to; i++) {
+            const tr = this._rowElements[i];
+            if (!tr || !tr._dtFilled) continue;
+            const isActive = (this._activeRowIndex === i) && !this.readOnly;
+            const interactives = tr.querySelectorAll('input,textarea,select,button');
+            for (let j = 0; j < interactives.length; j++) {
+                const el = interactives[j];
+                try {
+                    const tag = el.tagName ? el.tagName.toLowerCase() : '';
+                    if (tag === 'input' || tag === 'textarea') el.readOnly = !isActive;
+                    if (tag === 'select' || tag === 'button' || (el.type && (el.type === 'checkbox' || el.type === 'radio'))) el.disabled = !isActive;
+                    el.style.pointerEvents = isActive ? '' : 'none';
+                } catch (e) {}
+            }
+        }
+    }
+
+    // Override onSelectOrOpen: rowIndex IS the global index in this approach.
+    onSelectOrOpen(globalIndex) {
+        try {
+            const row = this.dataCache[globalIndex];
+            if (!row || !row.loaded) return;
+            const isSelect = !!(this.appForm && this.appForm.selectMode);
+            if (!isSelect) {
+                const tableName = this.tableName || (this.appForm && (this.appForm.dbTable || this.dataKey)) || '';
+                if (typeof window !== 'undefined' && window.MySpace && typeof window.MySpace.open === 'function') {
+                    const self = this;
+                    (async () => {
+                        try {
+                            const instId = await window.MySpace.open('uniRecordForm', { tableName, recordID: row.UID });
+                            if (instId) {
+                                const onFD = (ev) => {
+                                    try {
+                                        const inst = window.MySpace.getInstance(instId);
+                                        const df = ev && ev.detail && ev.detail.form;
+                                        if (inst && inst.form && df === inst.form) {
+                                            window.removeEventListener('form-destroyed', onFD);
+                                            try { self.refresh(); } catch (e) {}
+                                        }
+                                    } catch (e) {}
+                                };
+                                window.addEventListener('form-destroyed', onFD);
+                            }
+                        } catch (e) {}
+                    })();
+                }
+            } else {
+                if (this.appForm) this.appForm._currentRecord = row;
+                const inst = this.appForm && this.appForm.instance;
+                if (inst && typeof inst.onSelect === 'function') { try { inst.onSelect({}); } catch (e) {} }
+                else if (this.appForm && typeof this.appForm.onSelect === 'function') { try { this.appForm.onSelect({}); } catch (e) {} }
+            }
+        } catch (e) {}
+    }
+
+    // Mark all allocated rows as unfilled (O(N) flag-only, no DOM writes).
+    // Called before a full data refresh so stale cell content is replaced on next _fillVisibleRows.
+    _resetFilledRows() {
+        if (!this._rowElements) return;
+        for (let i = 0; i < this._rowElements.length; i++) {
+            const tr = this._rowElements[i];
+            if (tr) tr._dtFilled = false;
+        }
+    }
+
     async refresh() {
         this.showLoadingIndicator();
+        // Reset all cached rows so stale cell content is replaced after reload
+        this.dataCache = {};
+        this._resetFilledRows();
         try {
             this.calculateVisibleRows();
             await this.loadData(this.firstVisibleRow);
@@ -7453,22 +7809,29 @@ class DynamicTable extends Table {
                 this.dataCache[globalIndex] = Object.assign({}, row, { loaded: true, __index: globalIndex });
             });
 
-            // If table is already rendered, rebuild header and body to reflect new columns/rows
+            // Render: allocate rows (if totalRows changed), update colgroup, fill visible rows
             try {
                 if (this.element) {
-                    const headerContainer = this.headerContainer;
-                    const bodyContainer = this.bodyContainer;
-                    if (headerContainer) {
-                        headerContainer.innerHTML = '';
-                        this.buildHeader(headerContainer, () => {
-                            try { return bodyContainer.querySelector('colgroup'); } catch (e) { return null; }
-                        });
+                    // Rebuild header when columns first arrive from server
+                    if (this.headerContainer) {
+                        this.headerContainer.innerHTML = '';
+                        const self = this;
+                        this.buildHeader(this.headerContainer, () => self._dtBcolgroup);
                     }
-                    if (bodyContainer) {
-                        bodyContainer.innerHTML = '';
-                        this.buildBody(bodyContainer, rows);
-                        try { this.updateAllRowsReadOnly(); } catch (e) {}
+                    // Sync colgroup widths
+                    const bcg = this._dtBcolgroup;
+                    if (bcg) {
+                        while (bcg.children.length < this.columns.length) bcg.appendChild(document.createElement('col'));
+                        while (bcg.children.length > this.columns.length) bcg.removeChild(bcg.lastChild);
+                        for (let i = 0; i < this.columns.length; i++) {
+                            const col = this.columns[i] || {};
+                            bcg.children[i].style.width = (col.width ? col.width + 'px' : '100px');
+                        }
                     }
+                    // Allocate/resize the TR array to match totalRows
+                    this._allocateRows();
+                    // Fill visible rows from the freshly populated dataCache
+                    this._fillVisibleRows();
                 }
             } catch (e) { console.error('[DynamicTable] rebuild after loadData failed', e); }
 
@@ -7646,11 +8009,32 @@ class DynamicTable extends Table {
         };
     }
 
-    // Ensure cleanup of long-lived resources (SSE) when table is destroyed
+    // Ensure cleanup of long-lived resources (SSE, timers, listeners) when table is destroyed
     destroy() {
         try {
             this._sseDestroyed = true;
             console.log('[DynamicTable] destroy() called for', this.appName, this.tableName);
+            try { if (this._scrollDebounce) { clearTimeout(this._scrollDebounce); this._scrollDebounce = null; } } catch (e) {}
+            try {
+                if (this._scrollHandler && this.bodyContainer) {
+                    this.bodyContainer.removeEventListener('scroll', this._scrollHandler);
+                    this._scrollHandler = null;
+                    this._scrollHandlerAttached = false;
+                }
+            } catch (e) {}
+            try {
+                if (this._resizeObserver) {
+                    this._resizeObserver.disconnect();
+                    this._resizeObserver = null;
+                }
+            } catch (e) {}
+            try {
+                if (this._docKeyHandler) {
+                    document.removeEventListener('keydown', this._docKeyHandler);
+                    this._docKeyHandler = null;
+                }
+            } catch (e) {}
+            try { this._rowElements = null; } catch (e) {}
             try { if (this._sseReconnectTimer) { clearTimeout(this._sseReconnectTimer); this._sseReconnectTimer = null; } } catch (e) {}
             try {
                 const sharedKey = this._sseSharedKey;
