@@ -2,6 +2,10 @@ const crypto = require('crypto');
 
 // Use the generic framework memory store (namespace: 'datasets')
 const memoryStore = require('../../drive_root/memory_store');
+
+// UID generation utility
+let _util = null;
+try { _util = require('../../drive_root/db/utilites'); } catch(e) { console.warn('[uniRecordForm] util load failed:', e && e.message); }
 const { dataApp } = require('../../drive_forms/dataApp');
 const { read } = require('fs');
 const config = require('./config.json');
@@ -109,12 +113,17 @@ async function applyChanges(datasetId, changes) {
         }
 
         const applyDbGW = require('../../drive_root/dbGateway');
-        if (recordId) {
+        if (recordId && !dsObj.isNew) {
             // Update existing record
             console.log(`[uniRecordForm] Updating ${tableName} UID=${recordId} with`, changes);
             await applyDbGW.execute({ operation: 'update', table: tableName, data: changes, where: { UID: recordId }, context: { appName: 'uniRecordForm' } });
         } else {
             // Create new record
+            // Если запись новая и UID был заранее сгенерирован — передаём его в changes
+            // чтобы dbGateway не перегенерировал (условие if (!data.UID) в executor)
+            if (dsObj.isNew && recordId && !changes.UID) {
+                changes = Object.assign({}, changes, { UID: recordId });
+            }
             console.log(`[uniRecordForm] Creating new ${tableName} with`, changes);
             await applyDbGW.execute({ operation: 'create', table: tableName, data: changes, context: { appName: 'uniRecordForm' } });
         }
@@ -298,9 +307,34 @@ async function generateFormSpec(tableName, params) {
             { type: 'group', caption: 'Действия', orientation: 'horizontal', layout: [ { type: 'button', action: 'save', caption: 'Сохранить' }, { type: 'button', action: 'cancel', caption: 'Отмена' } ] }
         ];
 
+        // Для новой записи генерируем UID заранее и включаем его в данные формы
+        let effectiveRecordId = recordId;
+        let isNew = false;
+        if (!effectiveRecordId) {
+            isNew = true;
+            try {
+                const globalCtxForUID = require('../../drive_root/globalServerContext');
+                const modelNameForUID = globalCtxForUID.getModelNameForTable(tableName) || tableName;
+                if (_util && typeof _util.generateUID === 'function') {
+                    effectiveRecordId = _util.generateUID(modelNameForUID);
+                } else {
+                    const time = Date.now().toString(36).padStart(9, '0').slice(-9);
+                    const random = require('crypto').randomBytes(6).readUIntBE(0, 6).toString(36).padStart(7, '0').slice(-7);
+                    effectiveRecordId = `${time}-0000000-${random}`;
+                }
+                console.log('[generateFormSpec] New record, pre-generated UID:', effectiveRecordId);
+                // Вставляем UID в данные формы (поле UID)
+                const uidField = data.find(d => d.name === 'UID');
+                if (uidField) uidField.value = effectiveRecordId;
+            } catch(e) {
+                console.error('[generateFormSpec] UID pre-generation failed:', e && e.message);
+            }
+        }
+
         const datasetId = dataApp.storeDataset({
             table: tableName,
-            id: recordId,
+            id: effectiveRecordId,
+            isNew: isNew,
             params: params,
             time: Date.now()
         });

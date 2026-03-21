@@ -129,6 +129,29 @@ function collectAllModels() {
 
   console.log(`[COLLECT] Levels with defaultValues: ${Object.keys(defaultValuesByLevel).join(', ')}`);
 
+  // Collect from PROJECT_ROOT apps for defaultValues
+  if (projectRoot) {
+    try {
+      const projectAppsJsonPath = path.join(projectRoot, 'apps.json');
+      if (fs.existsSync(projectAppsJsonPath)) {
+        const projectAppsConfig = JSON.parse(fs.readFileSync(projectAppsJsonPath, 'utf8'));
+        const appsPath = projectAppsConfig.appsPath || 'apps';
+        const appsList = projectAppsConfig.apps || [];
+        for (const app of appsList) {
+          const appDefaultValuesPath = path.join(projectRoot, appsPath, app.name, 'db', 'defaultValues.json');
+          if (fs.existsSync(appDefaultValuesPath)) {
+            const appDefaultValuesData = JSON.parse(fs.readFileSync(appDefaultValuesPath, 'utf8'));
+            const processed = processDefaultValues(appDefaultValuesData, app.name);
+            defaultValuesByLevel[app.name] = processed;
+            console.log(`[COLLECT] Loaded defaultValues from project app: ${app.name}`);
+          }
+        }
+      }
+    } catch (e) {
+      console.error('[COLLECT] Error loading defaultValues from project apps:', e.message);
+    }
+  }
+
   return { models: allModels, defaultValuesByLevel };
 }
 
