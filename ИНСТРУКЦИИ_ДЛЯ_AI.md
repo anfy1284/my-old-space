@@ -64,8 +64,9 @@
 - **Предопределённые записи — паттерн `defaultValues.json` (CRITICAL):** Для системных справочных записей с фиксированными UID (которые должны существовать при любой инсталляции) ЗАПРЕЩЕНО использовать `systemCode` / магические строки. Вместо этого: создай `apps/<app>/db/defaultValues.json` с объектом `{ "table_name": [{ "UID": "...", ... }] }`. Записи будут автоматически засеяны при старте через `createDB.js` (патч сканирует `apps/*/db/defaultValues.json`). Поиск в рантайме: `getDefaultValue(level, tableName, defaultValueId)`. Если у таблицы `organizationId` — nullable (глобальные записи), добавь её в `excluded_tables` в `app.config.json`. Подробности схемы см. в разделе 8 `АРХИТЕКТУРА_ПРОЕКТА.md`.
 
 ### События жизненного цикла и Hooks (events_handler.js)
-- **Цепочка вызовов:** Сначала вызывается обработчик фреймворка (`node_modules/my-old-space/events_handler.js`), затем — обработчик проекта (`./events_handler.js`).
-- **onModelsPostCollect:** Используется для инъекции `UID` и валидации структуры безопасности моделей перед запуском БД.
+- **Цепочка вызовов:** Сначала вызывается framework-обработчик (`node_modules/my-old-space/events_handler.js` — корень пакета, НЕ `drive_root/events_handler.js`!), затем — project-обработчик (`./events_handler.js` в корне проекта).
+- **module.exports (CRITICAL):** Project `events_handler.js` обязательно должен использовать `module.exports = { ... }` (CommonJS). Использование `export default` (ESM) приводит к тому, что файл не загружается через `require()` и все hooks молча игнорируются.
+- **onModelsPostCollect:** Используется для инъекции `UID` в все определения моделей до `sequelize.define`. Инъекция MUST быть реализована именно здесь (PROJECT `events_handler`), а не в `db.json`. Подробности см. раздел 7 `АРХИТЕКТУРА_ПРОЕКТА.md`.
 
 ---
 
@@ -110,3 +111,4 @@
 14. Если popup имеет фиксированный размер — используется `width`, а не `min-width`?
 15. Если нужны системные предопределённые записи — используется `defaultValues.json`, а не `systemCode`/магические строки?
 16. Если таблица имеет nullable `organizationId` (глобальные записи) — она добавлена в `excluded_tables` в `app.config.json`?
+17. Project `events_handler.js` использует `module.exports` (не `export default`) и реально инъектирует UID в `onModelsPostCollect`?
