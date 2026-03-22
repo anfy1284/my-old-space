@@ -2290,11 +2290,22 @@ class DataForm extends Form {
     async doAction(action, params) {
         if (action === 'save') {
             const data = this.collectData();
-            console.log('[DataForm] Saving data:', data);
+            // Собираем данные табличных частей из _dataMap (записи с tabularSection: true)
+            try {
+                const tabularSections = {};
+                if (this._dataMap) {
+                    for (const key in this._dataMap) {
+                        const entry = this._dataMap[key];
+                        if (entry && entry.tabularSection === true) {
+                            tabularSections[entry.tableName] = Array.isArray(entry.value) ? entry.value : [];
+                        }
+                    }
+                }
+                if (Object.keys(tabularSections).length > 0) data.__tabularSections = tabularSections;
+            } catch (_) {}
             try {
                 const res = await this.applyChanges(data);
                 if (res && res.ok) {
-                    // success — reset modified flag, no alert needed
                     this._modified = false;
                 } else {
                     const errMsg = (res && res.error ? res.error : 'Неизвестная ошибка');
@@ -2306,6 +2317,42 @@ class DataForm extends Form {
                 else alert('Ошибка сохранения: ' + e.message);
             }
             return;
+        }
+        if (action === 'recordAdd') {
+            try {
+                const dataKey = params && params.dataKey;
+                if (dataKey && this._dataMap && this._dataMap[dataKey] && this._dataMap[dataKey].tabularSection) {
+                    if (!Array.isArray(this._dataMap[dataKey].value)) this._dataMap[dataKey].value = [];
+                    const rows = this._dataMap[dataKey].value;
+                    const tbl = Object.values(this.controlsMap || {}).find(c => c && c.dataKey === dataKey);
+                    const newRow = {};
+                    if (tbl && Array.isArray(tbl.columns)) {
+                        for (const col of tbl.columns) { if (col.data) newRow[col.data] = ''; }
+                    }
+                    rows.push(newRow);
+                    try { if (tbl && typeof tbl._invokeRenderBodyRows === 'function') tbl._invokeRenderBodyRows(); } catch (_) {}
+                    try { if (typeof this.setModified === 'function') this.setModified(true); } catch (_) {}
+                    return;
+                }
+            } catch (e) { console.error('[DataForm] recordAdd (TS) error', e); }
+        }
+        if (action === 'recordDelete') {
+            try {
+                const dataKey = params && params.dataKey;
+                if (dataKey && this._dataMap && this._dataMap[dataKey] && this._dataMap[dataKey].tabularSection) {
+                    const tbl = Object.values(this.controlsMap || {}).find(c => c && c.dataKey === dataKey);
+                    const activeIdx = (tbl && typeof tbl._activeRowIndex === 'number') ? tbl._activeRowIndex : -1;
+                    if (activeIdx < 0) return;
+                    const rows = this._dataMap[dataKey].value;
+                    if (Array.isArray(rows) && activeIdx < rows.length) {
+                        rows.splice(activeIdx, 1);
+                        if (tbl) tbl._activeRowIndex = -1;
+                        try { if (tbl && typeof tbl._invokeRenderBodyRows === 'function') tbl._invokeRenderBodyRows(); } catch (_) {}
+                        try { if (typeof this.setModified === 'function') this.setModified(true); } catch (_) {}
+                    }
+                    return;
+                }
+            } catch (e) { console.error('[DataForm] recordDelete (TS) error', e); }
         }
         if (action === 'cancel') {
             this.close();
@@ -2843,6 +2890,7 @@ class TextBox extends FormInput {
                         sbtn.type = 'button';
                         sbtn.tabIndex = -1;
                         sbtn.textContent = '...';
+                        sbtn.dataset.role = 'selection';
                         // Apply CSS class for static styling; colors provided globally by client config
                         try { sbtn.classList.add('input-field-button'); } catch (e) {}
                         sbtn.addEventListener('click', (ev) => { try { ev.stopPropagation(); ev.preventDefault(); this.onSelectionStart(); } catch (_) {} });
@@ -5282,6 +5330,7 @@ class ComboBox extends FormInput {
                         sbtn.type = 'button';
                         sbtn.tabIndex = -1;
                         sbtn.textContent = '...';
+                        sbtn.dataset.role = 'selection';
                         // Apply CSS class for static styling; colors provided globally by client config
                         try { sbtn.classList.add('input-field-button'); } catch (e) {}
                         // Colors are provided globally by client config
@@ -6084,7 +6133,7 @@ class Table extends UIObject {
         this._docClickHandler = null;
         this._docKeyHandler = null;
 
-        this.showToolbar = properties.showToolbar || true;
+        this.showToolbar = (properties.showToolbar !== false);
         this.tableName = properties.tableName || '';
     }
 
@@ -6443,7 +6492,16 @@ class Table extends UIObject {
                         if (el) {
                             const handler = (ev) => {
                                 try {
-                                    let newVal = (el.type === 'checkbox') ? !!el.checked : el.value;
+                                    // For selection-type controls (recordSelector with rawValue),
+                                    // use ctrl.getValue() to get the FK UID rather than el.value
+                                    // which contains only the human-readable display text.
+                                    const ctrl = this.appForm && this.appForm.controlsMap && this.appForm.controlsMap[key];
+                                    let newVal;
+                                    if (ctrl && typeof ctrl.getValue === 'function') {
+                                        newVal = ctrl.getValue();
+                                    } else {
+                                        newVal = (el.type === 'checkbox') ? !!el.checked : el.value;
+                                    }
                                     this.data_updateValue(key, newVal);
                                     this.data_updateParentArray(this.dataKey, rowIndexLocal, colDef, newVal);
                                 } catch (e) {}
@@ -6472,10 +6530,14 @@ class Table extends UIObject {
                                         try { node.readOnly = !isActive; } catch (e) {}
                                     }
                                     if (tag === 'select' || tag === 'button' || (node.type && (node.type === 'checkbox' || node.type === 'radio'))) {
-                                        try { node.disabled = !isActive; } catch (e) {}
+                                        if (!(node.dataset && node.dataset.role === 'selection')) {
+                                            try { node.disabled = !isActive; } catch (e) {}
+                                        }
                                     }
                                     // add pointer-events none for non-active to prevent JS click handlers
-                                    try { node.style.pointerEvents = isActive ? '' : 'none'; } catch (e) {}
+                                    if (!(node.dataset && node.dataset.role === 'selection')) {
+                                        try { node.style.pointerEvents = isActive ? '' : 'none'; } catch (e) {}
+                                    }
                                 }
                             } catch (e) {}
                         };
@@ -6738,11 +6800,15 @@ class Table extends UIObject {
                 for (let i = 0; i < interactives.length; i++) {
                     const el = interactives[i];
                     try {
+                        // Selection buttons ("...") stay always clickable — skip disabling them.
+                        const isSelectionBtn = !!(el.dataset && el.dataset.role === 'selection');
                         if (el.tagName) {
                             const tag = el.tagName.toLowerCase();
                             if (tag === 'input' || tag === 'textarea') el.readOnly = !isActive;
-                            if (tag === 'select' || tag === 'button' || (el.type && (el.type === 'checkbox' || el.type === 'radio'))) el.disabled = !isActive;
-                            try { el.style.pointerEvents = isActive ? '' : 'none'; } catch (e) {}
+                            if (!isSelectionBtn) {
+                                if (tag === 'select' || tag === 'button' || (el.type && (el.type === 'checkbox' || el.type === 'radio'))) el.disabled = !isActive;
+                                try { el.style.pointerEvents = isActive ? '' : 'none'; } catch (e) {}
+                            }
                         }
                         if (el._uiObject && typeof el._uiObject.setReadOnly === 'function') {
                             try { el._uiObject.setReadOnly(!isActive); } catch (e) {}
@@ -6917,6 +6983,15 @@ class Table extends UIObject {
             wrapper.style.flexDirection = 'column';
 
             if (this.showToolbar) {
+                // Create toolbar placeholder SYNCHRONOUSLY first so DOM order is correct.
+                // renderItem is async — if we append header/body before the toolbar promise
+                // resolves and then try to move `wrapper.lastElementChild`, we'd move the
+                // body container instead of the toolbar. Using a pre-created container avoids
+                // the insertion race entirely.
+                const toolbarContainer = document.createElement('div');
+                toolbarContainer.style.flex = '0 0 auto';
+                wrapper.appendChild(toolbarContainer);
+
                 const toolbarLayout = {
                     type: 'group',
                     caption: 'Действия',
@@ -6925,23 +7000,14 @@ class Table extends UIObject {
                         { type: 'button', action: 'select', caption: 'Выбрать', params: { isStandard: true } },
                         { type: 'button', action: 'cancel', caption: 'Отмена', params: { isStandard: true } },
                         { type: 'button', action: 'recordOpen', caption: 'Открыть', params: { isStandard: true } },
-                        { type: 'button', action: 'recordAdd', caption: 'Добавить', params: { isStandard: true } },
-                        { type: 'button', action: 'recordDelete', caption: 'Удалить', params: { isStandard: true } },
+                        { type: 'button', action: 'recordAdd', caption: 'Добавить', params: { isStandard: true, dataKey: this.dataKey } },
+                        { type: 'button', action: 'recordDelete', caption: 'Удалить', params: { isStandard: true, dataKey: this.dataKey } },
                         { type: 'button', action: 'listSettings', caption: 'Настройки', params: { isStandard: true } }
                     ]
                 };
 
                 if (this.appForm && typeof this.appForm.renderItem === 'function') {
-                    // Use DataForm's systematic rendering
-                    this.appForm.renderItem(toolbarLayout, wrapper).then(() => {
-                        const tbEl = wrapper.lastElementChild;
-                        if (tbEl) {
-                            tbEl.style.flex = '0 0 auto';
-                            tbEl.style.margin = '4px';
-                            // Ensure it's at the top
-                            wrapper.insertBefore(tbEl, wrapper.firstChild);
-                        }
-                    });
+                    this.appForm.renderItem(toolbarLayout, toolbarContainer);
                 }
             }
 
@@ -6969,14 +7035,12 @@ class Table extends UIObject {
             bodyContainer.style.borderLeft = '2px solid #808080';
             bodyContainer.style.borderRight = '2px solid #ffffff';
             bodyContainer.style.borderBottom = '2px solid #ffffff';
-            // If visibleRows specified (>0) fix the height to visibleRows*rowHeight, otherwise allow flexible grow
-            // ОТКЛЮЧЕНО: visibleRows мешает flex-растягиванию таблиц
-            // if (this.visibleRows && this.visibleRows > 0) {
-            //     bodyContainer.style.flex = '0 0 auto';
-            //     bodyContainer.style.height = (this.visibleRows * this.rowHeight) + 'px';
-            // } else {
-                bodyContainer.style.flex = '1 1 auto';
-            // }
+            // If visibleRows specified (>0) use it as minHeight so the table is always
+            // visible even when empty, but can still grow when there are more rows.
+            if (this.visibleRows && this.visibleRows > 0) {
+                bodyContainer.style.minHeight = (this.visibleRows * this.rowHeight) + 'px';
+            }
+            bodyContainer.style.flex = '1 1 auto';
             wrapper.appendChild(bodyContainer);
 
             // Build header and body using extractable helpers so DynamicTable can override

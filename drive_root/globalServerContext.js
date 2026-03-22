@@ -6,6 +6,10 @@ const eventBus = require('./eventBus');
 const util = require('util');
 const crypto = require('crypto');
 
+// Reserved session ID for internal system calls that bypass access control.
+// Search for this constant to audit all access control bypasses.
+const SYSTEM_SESSION_ID = '__SYS_INTERNAL__';
+
 // Store project root path (set by framework.start)
 let projectRoot = null;
 
@@ -727,7 +731,9 @@ async function getDynamicTableData(options) {
         defaultBufferRows: 10
     };
     
-    let { modelName, firstRow, visibleRows, sort, filters, fieldConfig, userId } = options;
+    let { modelName, firstRow, visibleRows, sort, filters, fieldConfig, userId, sessionID } = options;
+    // Prefer sessionID for access control; fall back to userId for legacy callers
+    const dbContext = sessionID ? { sessionID } : { userId };
     
     // Apply server-side limits to prevent abuse
     visibleRows = Math.min(visibleRows || 20, config.maxVisibleRows);
@@ -792,7 +798,7 @@ async function getDynamicTableData(options) {
     // Count total rows
     const t2 = Date.now();
     const dbGW = require('./dbGateway');
-    const totalRows = await dbGW.execute({ operation: 'count', table: Model.tableName, where, context: { userId } });
+    const totalRows = await dbGW.execute({ operation: 'count', table: Model.tableName, where, context: dbContext });
     console.log(`[PERF] Model.count: ${Date.now() - t2}ms`);
 
     // Calculate range with buffer (limited by server config)
@@ -816,7 +822,7 @@ async function getDynamicTableData(options) {
             limit: requestCount,
             raw: true
         },
-        context: { userId }
+        context: dbContext
     });
     console.log(`[PERF] Model.findAll via dbGateway: ${Date.now() - t3}ms`);
 
@@ -898,7 +904,7 @@ async function resolveTableForeignKeys(modelName, dataArray, fields) {
 
             // Fetch display value
             try {
-                const targetRow = await fkDbGW.execute({ operation: 'findByPk', table: fkTableName, where: { UID: fkValue }, options: { raw: true } });
+                const targetRow = await fkDbGW.execute({ operation: 'findByPk', table: fkTableName, where: { UID: fkValue }, options: { raw: true }, context: { sessionID: SYSTEM_SESSION_ID } });
                 console.log(`[FK] Found target row:`, targetRow);
                 if (targetRow) {
                     const displayValue = targetRow[fkField.foreignKey.displayField] || targetRow.UID.toString();
@@ -987,7 +993,8 @@ async function commitTableEdits(editSessionId) {
                     table: model.tableName,
                     data: updateData,
                     where: { UID: rowId },
-                    options: { transaction }
+                    options: { transaction },
+                    context: { sessionID: SYSTEM_SESSION_ID }
                 });
 
                 successCount++;
@@ -1053,7 +1060,8 @@ module.exports.commitTableEdits = commitTableEdits;
  * @returns {Promise<Object>} - { totalRows, fields, data, range }
  */
 async function getLookupList(options) {
-    let { tableName, modelName, firstRow, visibleRows, userId } = options || {};
+    let { tableName, modelName, firstRow, visibleRows, userId, sessionID } = options || {};
+    const dbContext = sessionID ? { sessionID } : { userId };
 
     // Resolve modelName if tableName provided
     if (!modelName && tableName) {
@@ -1083,7 +1091,7 @@ async function getLookupList(options) {
     firstRow = Math.max(0, firstRow || 0);
 
     const lookupDbGW = require('./dbGateway');
-    const totalRows = await lookupDbGW.execute({ operation: 'count', table: tableName || Model.tableName, context: { userId } });
+    const totalRows = await lookupDbGW.execute({ operation: 'count', table: tableName || Model.tableName, context: dbContext });
 
     const keyField = 'UID';
 
@@ -1097,7 +1105,7 @@ async function getLookupList(options) {
             order: [[keyField, 'ASC']],
             raw: true
         },
-        context: { userId }
+        context: dbContext
     });
 
     // Normalize to simple objects with id and display
