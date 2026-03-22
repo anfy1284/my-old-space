@@ -240,6 +240,7 @@ async function buildTableFieldsFromModel(tableName) {
             };
 
             if (f.foreignKey) {
+                field.foreignKey = f.foreignKey;
                 field.properties = {
                     selection: { table: f.foreignKey.table, idField: f.foreignKey.field || 'UID', displayField: f.foreignKey.displayField || 'name' },
                     showSelectionButton: true,
@@ -459,6 +460,7 @@ async function generateFormSpec(tableName, params, sessionID) {
                                         inputType: mapInputTypeToControl(f.inputType || 'textbox')
                                     };
                                     if (f.properties) col.properties = f.properties;
+                                    if (f.foreignKey) col.foreignKey = f.foreignKey;
                                     return col;
                                 });
                             // Собираем FK-поля для последующего резолва display-имён

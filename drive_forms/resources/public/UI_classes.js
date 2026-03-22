@@ -2318,42 +2318,6 @@ class DataForm extends Form {
             }
             return;
         }
-        if (action === 'recordAdd') {
-            try {
-                const dataKey = params && params.dataKey;
-                if (dataKey && this._dataMap && this._dataMap[dataKey] && this._dataMap[dataKey].tabularSection) {
-                    if (!Array.isArray(this._dataMap[dataKey].value)) this._dataMap[dataKey].value = [];
-                    const rows = this._dataMap[dataKey].value;
-                    const tbl = Object.values(this.controlsMap || {}).find(c => c && c.dataKey === dataKey);
-                    const newRow = {};
-                    if (tbl && Array.isArray(tbl.columns)) {
-                        for (const col of tbl.columns) { if (col.data) newRow[col.data] = ''; }
-                    }
-                    rows.push(newRow);
-                    try { if (tbl && typeof tbl._invokeRenderBodyRows === 'function') tbl._invokeRenderBodyRows(); } catch (_) {}
-                    try { if (typeof this.setModified === 'function') this.setModified(true); } catch (_) {}
-                    return;
-                }
-            } catch (e) { console.error('[DataForm] recordAdd (TS) error', e); }
-        }
-        if (action === 'recordDelete') {
-            try {
-                const dataKey = params && params.dataKey;
-                if (dataKey && this._dataMap && this._dataMap[dataKey] && this._dataMap[dataKey].tabularSection) {
-                    const tbl = Object.values(this.controlsMap || {}).find(c => c && c.dataKey === dataKey);
-                    const activeIdx = (tbl && typeof tbl._activeRowIndex === 'number') ? tbl._activeRowIndex : -1;
-                    if (activeIdx < 0) return;
-                    const rows = this._dataMap[dataKey].value;
-                    if (Array.isArray(rows) && activeIdx < rows.length) {
-                        rows.splice(activeIdx, 1);
-                        if (tbl) tbl._activeRowIndex = -1;
-                        try { if (tbl && typeof tbl._invokeRenderBodyRows === 'function') tbl._invokeRenderBodyRows(); } catch (_) {}
-                        try { if (typeof this.setModified === 'function') this.setModified(true); } catch (_) {}
-                    }
-                    return;
-                }
-            } catch (e) { console.error('[DataForm] recordDelete (TS) error', e); }
-        }
         if (action === 'cancel') {
             this.close();
             return;
@@ -6135,6 +6099,39 @@ class Table extends UIObject {
 
         this.showToolbar = (properties.showToolbar !== false);
         this.tableName = properties.tableName || '';
+        // Признак табличной части — выставляется автоматически в Draw() из _dataMap
+        this.isTabularSection = false;
+    }
+
+    // Обрабатывает действие тулбара внутри таблицы.
+    // Возвращает true если действие обработано (tabular section); false — передать в appForm.
+    doToolbarAction(action) {
+        if (action === 'recordAdd' && this.isTabularSection) {
+            const rows = this.data_getRows(this.dataKey);
+            const newRow = {};
+            if (Array.isArray(this.columns)) {
+                for (const col of this.columns) { if (col.data) newRow[col.data] = ''; }
+            }
+            rows.push(newRow);
+            this.data_updateValue(this.dataKey, rows);
+            try { if (typeof this._invokeRenderBodyRows === 'function') this._invokeRenderBodyRows(); } catch (_) {}
+            try { if (this.appForm && typeof this.appForm.setModified === 'function') this.appForm.setModified(true); } catch (_) {}
+            return true;
+        }
+        if (action === 'recordDelete' && this.isTabularSection) {
+            const activeIdx = this._activeRowIndex;
+            if (activeIdx < 0) return true;
+            const rows = this.data_getRows(this.dataKey);
+            if (Array.isArray(rows) && activeIdx < rows.length) {
+                rows.splice(activeIdx, 1);
+                this._activeRowIndex = -1;
+                this.data_updateValue(this.dataKey, rows);
+                try { if (typeof this._invokeRenderBodyRows === 'function') this._invokeRenderBodyRows(); } catch (_) {}
+                try { if (this.appForm && typeof this.appForm.setModified === 'function') this.appForm.setModified(true); } catch (_) {}
+            }
+            return true;
+        }
+        return false;
     }
 
     // Data helpers: encapsulate all _dataMap access for Table
@@ -6982,32 +6979,39 @@ class Table extends UIObject {
             wrapper.style.display = 'flex';
             wrapper.style.flexDirection = 'column';
 
+            // Определяем: является ли таблица табличной частью
+            try {
+                if (this.dataKey && this.appForm && this.appForm._dataMap) {
+                    const entry = this.appForm._dataMap[this.dataKey];
+                    this.isTabularSection = !!(entry && entry.tabularSection === true);
+                }
+            } catch (e) {}
+
             if (this.showToolbar) {
-                // Create toolbar placeholder SYNCHRONOUSLY first so DOM order is correct.
-                // renderItem is async — if we append header/body before the toolbar promise
-                // resolves and then try to move `wrapper.lastElementChild`, we'd move the
-                // body container instead of the toolbar. Using a pre-created container avoids
-                // the insertion race entirely.
                 const toolbarContainer = document.createElement('div');
-                toolbarContainer.style.flex = '0 0 auto';
+                toolbarContainer.classList.add('ui-toolbar');
                 wrapper.appendChild(toolbarContainer);
 
-                const toolbarLayout = {
-                    type: 'group',
-                    caption: 'Действия',
-                    orientation: 'horizontal',
-                    layout: [
-                        { type: 'button', action: 'select', caption: 'Выбрать', params: { isStandard: true } },
-                        { type: 'button', action: 'cancel', caption: 'Отмена', params: { isStandard: true } },
-                        { type: 'button', action: 'recordOpen', caption: 'Открыть', params: { isStandard: true } },
-                        { type: 'button', action: 'recordAdd', caption: 'Добавить', params: { isStandard: true, dataKey: this.dataKey } },
-                        { type: 'button', action: 'recordDelete', caption: 'Удалить', params: { isStandard: true, dataKey: this.dataKey } },
-                        { type: 'button', action: 'listSettings', caption: 'Настройки', params: { isStandard: true } }
-                    ]
-                };
+                const toolbarButtons = [
+                    { action: 'select',       caption: 'Выбрать' },
+                    { action: 'cancel',       caption: 'Отмена' },
+                    { action: 'recordOpen',   caption: 'Открыть' },
+                    { action: 'recordAdd',    caption: 'Добавить' },
+                    { action: 'recordDelete', caption: 'Удалить' },
+                    { action: 'listSettings', caption: 'Настройки' }
+                ];
 
-                if (this.appForm && typeof this.appForm.renderItem === 'function') {
-                    this.appForm.renderItem(toolbarLayout, toolbarContainer);
+                for (const btnDef of toolbarButtons) {
+                    const btn = new Button(toolbarContainer, { caption: btnDef.caption });
+                    btn.Draw(toolbarContainer);
+                    const action = btnDef.action;
+                    const self = this;
+                    btn.onClick = () => {
+                        if (!self.doToolbarAction(action)) {
+                            self.appForm && typeof self.appForm.doAction === 'function' &&
+                                self.appForm.doAction(action, { isStandard: true });
+                        }
+                    };
                 }
             }
 
