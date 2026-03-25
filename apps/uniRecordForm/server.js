@@ -140,9 +140,14 @@ async function applyChanges(payload, sessionID) {
         }
 
         // Сохраняем табличные части (стратегия: DELETE по фильтру родителя + INSERT текущих строк)
+        console.log('[TS_DEBUG] tabularSectionsData:', JSON.stringify(tabularSectionsData));
+        console.log('[TS_DEBUG] parentUID:', parentUID);
+        console.log('[TS_DEBUG] changes (parent):', JSON.stringify(changes));
         if (tabularSectionsData && parentUID) {
             const tsDefs = getTabularSectionsForTable(tableName);
+            console.log('[TS_DEBUG] tsDefs found:', tsDefs.map(d => d.tableName));
             for (const [sectionTableName, rows] of Object.entries(tabularSectionsData)) {
+                console.log(`[TS_DEBUG] Processing section: ${sectionTableName}, rows count: ${Array.isArray(rows) ? rows.length : 'NOT_ARRAY'}`);
                 try {
                     const tsDef = tsDefs.find(d => d.tableName === sectionTableName);
                     if (!tsDef) {
@@ -150,6 +155,7 @@ async function applyChanges(payload, sessionID) {
                         continue;
                     }
                     const parentField = tsDef.tabularSection.parentField;
+                    console.log(`[TS_DEBUG] parentField: ${parentField}`);
 
                     // Удаляем все строки ТЧ данного родителя
                     await applyDbGW.execute({
@@ -158,18 +164,25 @@ async function applyChanges(payload, sessionID) {
                         where: { [parentField]: parentUID },
                         context: { appName: 'uniRecordForm', sessionID }
                     });
+                    console.log(`[TS_DEBUG] DELETE done for ${sectionTableName} where ${parentField}=${parentUID}`);
 
                     // Вставляем текущие строки
                     if (Array.isArray(rows)) {
-                        for (const row of rows) {
+                        for (let ri = 0; ri < rows.length; ri++) {
+                            const row = rows[ri];
                             const rowData = Object.assign({}, row);
-                            delete rowData.UID; // Сервер сгенерирует новый UID
+                            // Сохраняем UID существующих строк, чтобы не ломать FK-ссылки
+                            // из других ТЧ (напр. bookingRoomId в booking_room_services).
+                            // Для новых строк (без UID) dbGateway сгенерирует UID автоматически.
+                            if (!rowData.UID) { /* новая строка — UID будет сгенерирован */ }
                             rowData[parentField] = parentUID;
                             // Наследуем поля родительской записи, которых нет в строке ТЧ
                             // или которые остались пустыми (напр. organizationId обязателен,
                             // но не редактируется пользователем в ТЧ — пустая строка по умолчанию).
                             if (changes && typeof changes === 'object') {
                                 for (const [k, v] of Object.entries(changes)) {
+                                    // Пропускаем технические поля (display-значения, данные других ТЧ)
+                                    if (k.startsWith('__')) continue;
                                     if (k !== 'UID' && k !== parentField) {
                                         const cur = rowData[k];
                                         if (cur === undefined || cur === null || cur === '') {
@@ -178,12 +191,18 @@ async function applyChanges(payload, sessionID) {
                                     }
                                 }
                             }
-                            await applyDbGW.execute({
-                                operation: 'create',
-                                table: sectionTableName,
-                                data: rowData,
-                                context: { appName: 'uniRecordForm', sessionID }
-                            });
+                            console.log(`[TS_DEBUG] INSERT row[${ri}]:`, JSON.stringify(rowData));
+                            try {
+                                await applyDbGW.execute({
+                                    operation: 'create',
+                                    table: sectionTableName,
+                                    data: rowData,
+                                    context: { appName: 'uniRecordForm', sessionID }
+                                });
+                                console.log(`[TS_DEBUG] INSERT row[${ri}] OK`);
+                            } catch (insertErr) {
+                                console.error(`[TS_DEBUG] INSERT row[${ri}] FAILED:`, insertErr && insertErr.message || insertErr);
+                            }
                         }
                     }
                     console.log(`[uniRecordForm] TS saved: ${sectionTableName}, rows: ${Array.isArray(rows) ? rows.length : 0}`);
@@ -191,6 +210,8 @@ async function applyChanges(payload, sessionID) {
                     console.error('[uniRecordForm] TS save error for', sectionTableName, ':', e && e.message || e);
                 }
             }
+        } else {
+            console.log('[TS_DEBUG] Skipped: tabularSectionsData=', !!tabularSectionsData, 'parentUID=', parentUID);
         }
 
         return { ok: true };
