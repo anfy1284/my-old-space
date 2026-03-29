@@ -323,6 +323,9 @@ async function createAll() {
     // Build adjacency: from parent -> set(children)
     const adj = new Map();
     const indeg = new Map();
+    // Track unique (parent, child) pairs to avoid double-counting indeg
+    // when multiple FK fields in the same table reference the same parent table
+    const countedEdges = new Set();
 
     for (const def of modelsDefs) {
       const table = def.tableName;
@@ -340,10 +343,14 @@ async function createAll() {
             const found = modelsDefs.find(d => d.name === referenced);
             if (found) referenced = found.tableName;
           }
-          if (nameByTable.has(referenced)) {
-            // edge: referenced -> table (parent -> child)
-            adj.get(referenced).add(table);
-            indeg.set(table, (indeg.get(table) || 0) + 1);
+          // Skip self-referential FKs and duplicate (parent→child) edges
+          if (nameByTable.has(referenced) && referenced !== table) {
+            const edgeKey = `${referenced}→${table}`;
+            if (!countedEdges.has(edgeKey)) {
+              countedEdges.add(edgeKey);
+              adj.get(referenced).add(table);
+              indeg.set(table, (indeg.get(table) || 0) + 1);
+            }
           }
         }
       }
@@ -697,6 +704,17 @@ async function createAll() {
         }
         if (pendingModels.length === currentBatch.length) {
           console.error(`[MIGRATION] Cyclic dependency or unresolvable error. Tables left: ${pendingModels.map(m => m.tableName).join(', ')}`);
+          for (const def of pendingModels) {
+            try {
+              await sequelize.query(`SAVEPOINT sync_force_${def.tableName}`, { transaction });
+              await models[def.name].sync({ transaction });
+              await sequelize.query(`RELEASE SAVEPOINT sync_force_${def.tableName}`, { transaction });
+              console.log(`[MIGRATION] Force synced: ${def.tableName}`);
+            } catch (e2) {
+              await sequelize.query(`ROLLBACK TO SAVEPOINT sync_force_${def.tableName}`, { transaction });
+              console.error(`[MIGRATION] FAILED to sync ${def.tableName}: ${e2.message}`);
+            }
+          }
           break;
         }
       }
@@ -825,10 +843,17 @@ async function createAll() {
           // Check if record with this ID already exists (from backup)
           let existingRecord = null;
           if (data.UID) {
-            existingRecord = await Model.findOne({
-              where: { UID: data.UID },
-              transaction
-            });
+            try {
+              await sequelize.query('SAVEPOINT check_existing', { transaction });
+              existingRecord = await Model.findOne({
+                where: { UID: data.UID },
+                transaction
+              });
+              await sequelize.query('RELEASE SAVEPOINT check_existing', { transaction });
+            } catch (findErr) {
+              await sequelize.query('ROLLBACK TO SAVEPOINT check_existing', { transaction });
+              console.warn(`[MIGRATION] Warning: could not check existing record in ${entity}: ${findErr.message}. Will attempt create.`);
+            }
           }
 
           try {

@@ -37,13 +37,13 @@ function getLayout(params) {
     return layout;
 }
 
-async function getLayoutWithData(params) {
+async function getLayoutWithData(params, sessionID) {
     // Return layout and data together for atomic loading
     try {
         // If caller requested a tableName, prefer the generated form spec (async)
         if (params && params.tableName) {
             try {
-                const spec = await generateFormSpec(params.tableName, params);
+                const spec = await generateFormSpec(params.tableName, params, sessionID);
                 const datasetId = spec.datasetId || dataApp.storeDataset({ 
                     layout: spec.layout || [], 
                     data: spec.data || [], 
@@ -75,11 +75,12 @@ async function getLayoutWithData(params) {
     }
 }
 
-async function applyChanges(datasetId, changes) {
+async function applyChanges(payload, sessionID) {
+    let datasetId = payload;
+    let changes = null;
     try {
         console.log('[uniRecordForm] applyChanges called.');
-        if (datasetId && typeof datasetId === 'object' && (datasetId.datasetId !== undefined || datasetId.changes !== undefined)) {
-            const payload = datasetId;
+        if (payload && typeof payload === 'object' && (payload.datasetId !== undefined || payload.changes !== undefined)) {
             datasetId = payload.datasetId;
             changes = payload.changes;
         }
@@ -113,10 +114,20 @@ async function applyChanges(datasetId, changes) {
         }
 
         const applyDbGW = require('../../drive_root/dbGateway');
+
+        // Извлекаем данные табличных частей из changes до сохранения основной записи
+        let tabularSectionsData = null;
+        if (changes && typeof changes.__tabularSections === 'object' && changes.__tabularSections !== null) {
+            tabularSectionsData = changes.__tabularSections;
+            changes = Object.assign({}, changes);
+            delete changes.__tabularSections;
+        }
+
+        const parentUID = recordId;
         if (recordId && !dsObj.isNew) {
             // Update existing record
             console.log(`[uniRecordForm] Updating ${tableName} UID=${recordId} with`, changes);
-            await applyDbGW.execute({ operation: 'update', table: tableName, data: changes, where: { UID: recordId }, context: { appName: 'uniRecordForm' } });
+            await applyDbGW.execute({ operation: 'update', table: tableName, data: changes, where: { UID: recordId }, context: { appName: 'uniRecordForm', sessionID } });
         } else {
             // Create new record
             // Если запись новая и UID был заранее сгенерирован — передаём его в changes
@@ -125,8 +136,84 @@ async function applyChanges(datasetId, changes) {
                 changes = Object.assign({}, changes, { UID: recordId });
             }
             console.log(`[uniRecordForm] Creating new ${tableName} with`, changes);
-            await applyDbGW.execute({ operation: 'create', table: tableName, data: changes, context: { appName: 'uniRecordForm' } });
+            await applyDbGW.execute({ operation: 'create', table: tableName, data: changes, context: { appName: 'uniRecordForm', sessionID } });
         }
+
+        // Сохраняем табличные части (стратегия: DELETE по фильтру родителя + INSERT текущих строк)
+        console.log('[TS_DEBUG] tabularSectionsData:', JSON.stringify(tabularSectionsData));
+        console.log('[TS_DEBUG] parentUID:', parentUID);
+        console.log('[TS_DEBUG] changes (parent):', JSON.stringify(changes));
+        if (tabularSectionsData && parentUID) {
+            const tsDefs = getTabularSectionsForTable(tableName);
+            console.log('[TS_DEBUG] tsDefs found:', tsDefs.map(d => d.tableName));
+            for (const [sectionTableName, rows] of Object.entries(tabularSectionsData)) {
+                console.log(`[TS_DEBUG] Processing section: ${sectionTableName}, rows count: ${Array.isArray(rows) ? rows.length : 'NOT_ARRAY'}`);
+                try {
+                    const tsDef = tsDefs.find(d => d.tableName === sectionTableName);
+                    if (!tsDef) {
+                        console.warn('[uniRecordForm] tabularSection def not found for:', sectionTableName);
+                        continue;
+                    }
+                    const parentField = tsDef.tabularSection.parentField;
+                    console.log(`[TS_DEBUG] parentField: ${parentField}`);
+
+                    // Удаляем все строки ТЧ данного родителя
+                    await applyDbGW.execute({
+                        operation: 'delete',
+                        table: sectionTableName,
+                        where: { [parentField]: parentUID },
+                        context: { appName: 'uniRecordForm', sessionID }
+                    });
+                    console.log(`[TS_DEBUG] DELETE done for ${sectionTableName} where ${parentField}=${parentUID}`);
+
+                    // Вставляем текущие строки
+                    if (Array.isArray(rows)) {
+                        for (let ri = 0; ri < rows.length; ri++) {
+                            const row = rows[ri];
+                            const rowData = Object.assign({}, row);
+                            // Сохраняем UID существующих строк, чтобы не ломать FK-ссылки
+                            // из других ТЧ (напр. bookingRoomId в booking_room_services).
+                            // Для новых строк (без UID) dbGateway сгенерирует UID автоматически.
+                            if (!rowData.UID) { /* новая строка — UID будет сгенерирован */ }
+                            rowData[parentField] = parentUID;
+                            // Наследуем поля родительской записи, которых нет в строке ТЧ
+                            // или которые остались пустыми (напр. organizationId обязателен,
+                            // но не редактируется пользователем в ТЧ — пустая строка по умолчанию).
+                            if (changes && typeof changes === 'object') {
+                                for (const [k, v] of Object.entries(changes)) {
+                                    // Пропускаем технические поля (display-значения, данные других ТЧ)
+                                    if (k.startsWith('__')) continue;
+                                    if (k !== 'UID' && k !== parentField) {
+                                        const cur = rowData[k];
+                                        if (cur === undefined || cur === null || cur === '') {
+                                            rowData[k] = v;
+                                        }
+                                    }
+                                }
+                            }
+                            console.log(`[TS_DEBUG] INSERT row[${ri}]:`, JSON.stringify(rowData));
+                            try {
+                                await applyDbGW.execute({
+                                    operation: 'create',
+                                    table: sectionTableName,
+                                    data: rowData,
+                                    context: { appName: 'uniRecordForm', sessionID }
+                                });
+                                console.log(`[TS_DEBUG] INSERT row[${ri}] OK`);
+                            } catch (insertErr) {
+                                console.error(`[TS_DEBUG] INSERT row[${ri}] FAILED:`, insertErr && insertErr.message || insertErr);
+                            }
+                        }
+                    }
+                    console.log(`[uniRecordForm] TS saved: ${sectionTableName}, rows: ${Array.isArray(rows) ? rows.length : 0}`);
+                } catch (e) {
+                    console.error('[uniRecordForm] TS save error for', sectionTableName, ':', e && e.message || e);
+                }
+            }
+        } else {
+            console.log('[TS_DEBUG] Skipped: tabularSectionsData=', !!tabularSectionsData, 'parentUID=', parentUID);
+        }
+
         return { ok: true };
     } catch (e) {
         console.error('[uniRecordForm] applyChanges error:', e);
@@ -174,6 +261,7 @@ async function buildTableFieldsFromModel(tableName) {
             };
 
             if (f.foreignKey) {
+                field.foreignKey = f.foreignKey;
                 field.properties = {
                     selection: { table: f.foreignKey.table, idField: f.foreignKey.field || 'UID', displayField: f.foreignKey.displayField || 'name' },
                     showSelectionButton: true,
@@ -205,11 +293,27 @@ function mapInputTypeToControl(inputType) {
     return 'textbox';
 }
 
+// Helper: найти все модели-определения, являющиеся табличными частями указанной родительской таблицы.
+// Определение ТЧ: в db.json у модели должно быть поле tabularSection: { parentTable, parentField, caption? }.
+function getTabularSectionsForTable(parentTableName) {
+    try {
+        const globalCtx = require('../../drive_root/globalServerContext');
+        const { models } = globalCtx.collectAllModelDefs();
+        return (models || []).filter(def =>
+            def.tabularSection &&
+            def.tabularSection.parentTable === parentTableName
+        );
+    } catch (e) {
+        console.error('[uniRecordForm] getTabularSectionsForTable error:', e && e.message);
+        return [];
+    }
+}
+
 // Автоматическая функция: по имени таблицы возвращает объекты `data` и `layout`
 // Параметр: tableName (string)
 // Возвращает: { data: Array, layout: Array }
 // params may include { recordID }
-async function generateFormSpec(tableName, params) {
+async function generateFormSpec(tableName, params, sessionID) {
     console.log('[generateFormSpec] called with tableName:', tableName, 'params:', params);
     try {
         if (!tableName) return { data: [], layout: [] };
@@ -235,7 +339,7 @@ async function generateFormSpec(tableName, params) {
                 try {
                     console.log('[generateFormSpec] Fetching record with id:', recordId);
                     const specDbGW = require('../../drive_root/dbGateway');
-                    record = await specDbGW.execute({ operation: 'findByPk', table: tableName, where: { UID: recordId }, options: { raw: true }, context: { appName: 'uniRecordForm' } });
+                    record = await specDbGW.execute({ operation: 'findByPk', table: tableName, where: { UID: recordId }, options: { raw: true }, context: { appName: 'uniRecordForm', sessionID } });
                     console.log('[generateFormSpec] Fetched record:', record);
                 } catch (e) {
                     console.error('[generateFormSpec] Model.findByPk error:', e && e.message || e);
@@ -278,7 +382,7 @@ async function generateFormSpec(tableName, params) {
                     const displayField = f.properties.selection.displayField || f.foreignKey && f.foreignKey.displayField || 'name';
                     if (targetTable) {
                         const fkDbGW = require('../../drive_root/dbGateway');
-                        const trg = await fkDbGW.execute({ operation: 'findByPk', table: targetTable, where: { UID: item.value }, options: { raw: true }, context: { appName: 'uniRecordForm' } });
+                        const trg = await fkDbGW.execute({ operation: 'findByPk', table: targetTable, where: { UID: item.value }, options: { raw: true }, context: { appName: 'uniRecordForm', sessionID } });
                         if (trg) {
                             // Provide selection object for recordSelector controls
                             item.selection = { id: trg.UID, display: trg[displayField] || String(trg.UID) };
@@ -302,12 +406,24 @@ async function generateFormSpec(tableName, params) {
             return ctrl;
         });
 
-        const layout = [
-            { type: 'group', caption: tableName, orientation: 'vertical', layout: controls },
-            { type: 'group', caption: 'Действия', orientation: 'horizontal', layout: [ { type: 'button', action: 'save', caption: 'Сохранить' }, { type: 'button', action: 'cancel', caption: 'Отмена' } ] }
-        ];
-
-        // Для новой записи генерируем UID заранее и включаем его в данные формы
+        // Check for a custom layout stored in server memory before building the default one
+        let layout;
+        try {
+            const layoutMemory = require('../../drive_root/layoutMemory');
+            // Быстрая sync-проверка: есть ли вообще кастомный лейаут для этой таблицы.
+            // Если нет — сразу выходим, ни одного запроса в БД не делается.
+            if (layoutMemory.hasRegistered('uniRecordForm', tableName)) {
+                const userRole = await layoutMemory.getUserRoleBySession(sessionID);
+                const customLayout = await layoutMemory.getLayoutForUser('uniRecordForm', tableName, userRole);
+                if (customLayout) {
+                    // Deep clone to avoid mutating the cached array (splice/push below would corrupt it)
+                    layout = JSON.parse(JSON.stringify(customLayout));
+                }
+            }
+        } catch (e) {
+            console.error('[generateFormSpec] custom layout check error:', e && e.message || e);
+        }
+        // Для новой записи генерируем UID заранее (нужен и для загрузки строк ТЧ)
         let effectiveRecordId = recordId;
         let isNew = false;
         if (!effectiveRecordId) {
@@ -323,13 +439,175 @@ async function generateFormSpec(tableName, params) {
                     effectiveRecordId = `${time}-0000000-${random}`;
                 }
                 console.log('[generateFormSpec] New record, pre-generated UID:', effectiveRecordId);
-                // Вставляем UID в данные формы (поле UID)
                 const uidField = data.find(d => d.name === 'UID');
                 if (uidField) uidField.value = effectiveRecordId;
             } catch(e) {
                 console.error('[generateFormSpec] UID pre-generation failed:', e && e.message);
             }
         }
+
+        if (!layout) {
+            layout = [
+                { type: 'group', caption: tableName, orientation: 'vertical', layout: controls },
+                { type: 'group', caption: 'Действия', orientation: 'horizontal', layout: [ { type: 'button', action: 'save', caption: 'Сохранить' }, { type: 'button', action: 'cancel', caption: 'Отмена' } ] }
+            ];
+
+            // Табличные части — часть автоматического лейаута, строятся здесь же
+            try {
+            const tsDefs = getTabularSectionsForTable(tableName);
+            if (tsDefs.length > 0) {
+                const tsLayoutItems = [];
+                for (const tsDef of tsDefs) {
+                    const tsTableName = tsDef.tableName;
+                    const tsParentField = tsDef.tabularSection && tsDef.tabularSection.parentField;
+                    if (!tsTableName || !tsParentField) continue;
+
+                    // Загружаем строки ТЧ (только для существующей записи)
+                    let tsRows = [];
+                    if (effectiveRecordId && !isNew) {
+                        try {
+                            const tsDbGW = require('../../drive_root/dbGateway');
+                            const fetched = await tsDbGW.execute({
+                                operation: 'read',
+                                table: tsTableName,
+                                where: { [tsParentField]: effectiveRecordId },
+                                options: { raw: true },
+                                context: { appName: 'uniRecordForm', sessionID }
+                            });
+                            if (Array.isArray(fetched)) tsRows = fetched;
+                        } catch (e) {
+                            console.error('[generateFormSpec] TS load error for', tsTableName, ':', e && e.message);
+                        }
+                    }
+
+                    // Строим колонки таблицы из метаданных модели ТЧ
+                    let tsColumns = [];
+                    let tsFkFields = []; // FK-поля для резолва display-значений
+                    try {
+                        const tsFields = await buildTableFieldsFromModel(tsTableName);
+                        if (Array.isArray(tsFields)) {
+                            tsColumns = tsFields
+                                .filter(f => f.name !== tsParentField && f.name !== 'UID')
+                                .map(f => {
+                                    const col = {
+                                        caption: f.caption || f.name,
+                                        data: f.name,
+                                        width: f.width || 120,
+                                        inputType: mapInputTypeToControl(f.inputType || 'textbox')
+                                    };
+                                    if (f.properties) col.properties = f.properties;
+                                    if (f.foreignKey) col.foreignKey = f.foreignKey;
+                                    return col;
+                                });
+                            // Собираем FK-поля для последующего резолва display-имён
+                            tsFkFields = tsFields.filter(f =>
+                                f.name !== tsParentField && f.name !== 'UID' &&
+                                f.foreignKey && f.foreignKey.table
+                            );
+                        }
+                    } catch (e) {
+                        console.error('[generateFormSpec] TS fields error for', tsTableName, ':', e && e.message);
+                    }
+
+                    // Резолвим display-значения для FK-полей в строках ТЧ
+                    if (tsRows.length > 0 && tsFkFields.length > 0) {
+                        try {
+                            const resolveDbGW = require('../../drive_root/dbGateway');
+                            for (const fkField of tsFkFields) {
+                                const fkTable = fkField.foreignKey.table;
+                                const fkIdField = fkField.foreignKey.field || 'UID';
+                                const fkDispField = fkField.foreignKey.displayField || 'name';
+                                // Собираем уникальные FK-значения из строк
+                                const fkValues = [...new Set(
+                                    tsRows.map(r => r[fkField.name]).filter(v => v !== null && v !== undefined && v !== '')
+                                )];
+                                if (fkValues.length === 0) continue;
+                                try {
+                                    const lookupRows = await resolveDbGW.execute({
+                                        operation: 'read',
+                                        table: fkTable,
+                                        where: { [fkIdField]: fkValues },
+                                        options: { raw: true },
+                                        context: { appName: 'uniRecordForm', sessionID }
+                                    });
+                                    if (Array.isArray(lookupRows)) {
+                                        const dispMap = {};
+                                        for (const lr of lookupRows) {
+                                            if (lr[fkIdField] !== undefined) dispMap[lr[fkIdField]] = lr[fkDispField] || lr[fkIdField];
+                                        }
+                                        const dispKey = '__' + fkField.name + '_display';
+                                        for (const row of tsRows) {
+                                            if (row[fkField.name] !== undefined && row[fkField.name] !== null) {
+                                                row[dispKey] = dispMap[row[fkField.name]] || row[fkField.name];
+                                            }
+                                        }
+                                    }
+                                } catch (e) {
+                                    console.warn('[generateFormSpec] FK resolve error for', fkField.name, ':', e && e.message);
+                                }
+                            }
+                        } catch (e) {
+                            console.warn('[generateFormSpec] TS FK resolve outer error:', e && e.message);
+                        }
+                    }
+
+                    // Добавляем запись в data
+                    const dataKey = '__ts_' + tsTableName;
+                    data.push({
+                        name: dataKey,
+                        value: tsRows,
+                        tabularSection: true,
+                        tableName: tsTableName,
+                        parentField: tsParentField
+                    });
+
+                    // layout-элемент ТЧ: стандартная группа + обычная table
+                    const tsName = 'ts_' + tsTableName;
+                    const tsCaption = (tsDef.tabularSection && tsDef.tabularSection.caption) || tsDef.name || tsTableName;
+                    tsLayoutItems.push({
+                        type: 'group',
+                        caption: tsCaption,
+                        orientation: 'vertical',
+                        layout: [
+                            {
+                                type: 'table',
+                                name: tsName,
+                                data: dataKey,
+                                columns: tsColumns,
+                                properties: { editMode: 'cell-immediate', visibleRows: 5 }
+                            }
+                        ]
+                    });
+                }
+
+                if (tsLayoutItems.length > 0) {
+                    // Вставляем ТЧ перед группой действий (Сохранить/Отмена)
+                    const actionsIdx = layout.findIndex(item =>
+                        item.type === 'group' &&
+                        Array.isArray(item.layout) &&
+                        item.layout.some(i => i.action === 'save')
+                    );
+                    const insertIdx = actionsIdx >= 0 ? actionsIdx : layout.length;
+
+                    if (tsLayoutItems.length === 1) {
+                        // Одна ТЧ — показываем inline
+                        layout.splice(insertIdx, 0, tsLayoutItems[0]);
+                    } else {
+                        // Несколько ТЧ — оборачиваем в Tabs
+                        layout.splice(insertIdx, 0, {
+                            type: 'tabs',
+                            tabs: tsLayoutItems.map(item => ({
+                                caption: item.caption,
+                                layout: [item]
+                            }))
+                        });
+                    }
+                }
+            }
+        } catch (e) {
+            console.error('[generateFormSpec] tabular sections error:', e && e.message || e);
+        }
+        } // end of if (!layout) — auto-layout + tabular sections
 
         const datasetId = dataApp.storeDataset({
             table: tableName,

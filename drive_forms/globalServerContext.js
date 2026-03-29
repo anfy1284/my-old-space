@@ -92,18 +92,30 @@ const UserSystem = sequelize.define(userSystemDef.name, Object.fromEntries(
   Object.entries(userSystemDef.fields).map(([k, v]) => [k, { ...v, type: DataTypes[v.type] }])
 ), { ...userSystemDef.options, tableName: userSystemDef.tableName });
 
+const _memStoreForRoles = require('../drive_root/memory_store');
+const _USER_ROLE_NS = 'user_roles';
+
 // Get AccessRole for user object
 async function getUserAccessRole(user) {
   if (!user) return 'nologged';
-  // Find first user_systems record for user
   const userId = user.UID;
+  // L1: same-process Map (synchronous)
+  const cachedL1 = _memStoreForRoles.getSync(_USER_ROLE_NS, userId);
+  if (cachedL1 !== null && cachedL1 !== undefined) return cachedL1;
+  // L2: shared memory_store service (cross-process)
+  const cachedL2 = await _memStoreForRoles.get(_USER_ROLE_NS, userId);
+  if (cachedL2 !== null && cachedL2 !== undefined) return cachedL2;
+
+  // L3: DB
   const userSystem = await UserSystem.findOne({ where: { userId }, order: [['UID', 'ASC']] });
   if (!userSystem || !userSystem.roleId) {
     console.log(`[getUserAccessRole] No userSystem or roleId found for user ${userId}`);
     return null;
   }
   const role = await AccessRole.findOne({ where: { UID: userSystem.roleId } });
-  return role ? role.name : null;
+  const result = role ? role.name : null;
+  await _memStoreForRoles.set(_USER_ROLE_NS, userId, result);
+  return result;
 }
 
 module.exports = {

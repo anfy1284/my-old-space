@@ -6,6 +6,10 @@ const eventBus = require('./eventBus');
 const util = require('util');
 const crypto = require('crypto');
 
+// Reserved session ID for internal system calls that bypass access control.
+// Search for this constant to audit all access control bypasses.
+const SYSTEM_SESSION_ID = '__SYS_INTERNAL__';
+
 // Store project root path (set by framework.start)
 let projectRoot = null;
 
@@ -314,11 +318,22 @@ const Session = sequelize.define(sessionDef.name, Object.fromEntries(
 const User = sequelize.define(userDef.name, Object.fromEntries(
     Object.entries(userDef.fields).map(([k, v]) => [k, { ...v, type: DataTypes[v.type] }])
 ), { ...userDef.options, tableName: userDef.tableName });
+const _memoryStore = require('./memory_store');
+const _SESSION_USER_NS = 'session_users';
+
 async function getUserBySessionID(sessionID) {
     if (!sessionID) {
         console.log('[getUserBySessionID] No sessionID provided');
         return null;
     }
+    // L1: same-process Map (synchronous)
+    const cachedL1 = _memoryStore.getSync(_SESSION_USER_NS, sessionID);
+    if (cachedL1 !== null && cachedL1 !== undefined) return cachedL1;
+    // L2: shared memory_store service (cross-process)
+    const cachedL2 = await _memoryStore.get(_SESSION_USER_NS, sessionID);
+    if (cachedL2 !== null && cachedL2 !== undefined) return cachedL2;
+
+    // L3: DB
     const session = await Session.findOne({ where: { sessionId: sessionID } });
     if (!session) {
         console.log(`[getUserBySessionID] Session not found for ID: ${sessionID}`);
@@ -331,10 +346,12 @@ async function getUserBySessionID(sessionID) {
     const user = await User.findOne({ where: { UID: session.userId } });
     if (!user) {
         console.log(`[getUserBySessionID] User not found for userId: ${session.userId}`);
-        return null; // return null if user not found
+        return null;
     }
     console.log(`[getUserBySessionID] Found user: ${user.name} (${user.UID})`);
-    return user.get({ plain: true });
+    const plain = user.get({ plain: true });
+    await _memoryStore.set(_SESSION_USER_NS, sessionID, plain);
+    return plain;
 }
 
 // Process default values
@@ -727,7 +744,9 @@ async function getDynamicTableData(options) {
         defaultBufferRows: 10
     };
     
-    let { modelName, firstRow, visibleRows, sort, filters, fieldConfig, userId } = options;
+    let { modelName, firstRow, visibleRows, sort, filters, fieldConfig, userId, sessionID } = options;
+    // Prefer sessionID for access control; fall back to userId for legacy callers
+    const dbContext = sessionID ? { sessionID } : { userId };
     
     // Apply server-side limits to prevent abuse
     visibleRows = Math.min(visibleRows || 20, config.maxVisibleRows);
@@ -792,7 +811,7 @@ async function getDynamicTableData(options) {
     // Count total rows
     const t2 = Date.now();
     const dbGW = require('./dbGateway');
-    const totalRows = await dbGW.execute({ operation: 'count', table: Model.tableName, where, context: { userId } });
+    const totalRows = await dbGW.execute({ operation: 'count', table: Model.tableName, where, context: dbContext });
     console.log(`[PERF] Model.count: ${Date.now() - t2}ms`);
 
     // Calculate range with buffer (limited by server config)
@@ -816,7 +835,7 @@ async function getDynamicTableData(options) {
             limit: requestCount,
             raw: true
         },
-        context: { userId }
+        context: dbContext
     });
     console.log(`[PERF] Model.findAll via dbGateway: ${Date.now() - t3}ms`);
 
@@ -898,7 +917,7 @@ async function resolveTableForeignKeys(modelName, dataArray, fields) {
 
             // Fetch display value
             try {
-                const targetRow = await fkDbGW.execute({ operation: 'findByPk', table: fkTableName, where: { UID: fkValue }, options: { raw: true } });
+                const targetRow = await fkDbGW.execute({ operation: 'findByPk', table: fkTableName, where: { UID: fkValue }, options: { raw: true }, context: { sessionID: SYSTEM_SESSION_ID } });
                 console.log(`[FK] Found target row:`, targetRow);
                 if (targetRow) {
                     const displayValue = targetRow[fkField.foreignKey.displayField] || targetRow.UID.toString();
@@ -987,7 +1006,8 @@ async function commitTableEdits(editSessionId) {
                     table: model.tableName,
                     data: updateData,
                     where: { UID: rowId },
-                    options: { transaction }
+                    options: { transaction },
+                    context: { sessionID: SYSTEM_SESSION_ID }
                 });
 
                 successCount++;
@@ -1053,7 +1073,8 @@ module.exports.commitTableEdits = commitTableEdits;
  * @returns {Promise<Object>} - { totalRows, fields, data, range }
  */
 async function getLookupList(options) {
-    let { tableName, modelName, firstRow, visibleRows, userId } = options || {};
+    let { tableName, modelName, firstRow, visibleRows, userId, sessionID } = options || {};
+    const dbContext = sessionID ? { sessionID } : { userId };
 
     // Resolve modelName if tableName provided
     if (!modelName && tableName) {
@@ -1083,7 +1104,7 @@ async function getLookupList(options) {
     firstRow = Math.max(0, firstRow || 0);
 
     const lookupDbGW = require('./dbGateway');
-    const totalRows = await lookupDbGW.execute({ operation: 'count', table: tableName || Model.tableName, context: { userId } });
+    const totalRows = await lookupDbGW.execute({ operation: 'count', table: tableName || Model.tableName, context: dbContext });
 
     const keyField = 'UID';
 
@@ -1097,7 +1118,7 @@ async function getLookupList(options) {
             order: [[keyField, 'ASC']],
             raw: true
         },
-        context: { userId }
+        context: dbContext
     });
 
     // Normalize to simple objects with id and display

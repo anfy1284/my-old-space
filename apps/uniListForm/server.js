@@ -30,9 +30,30 @@ function getLayout(params) {
     return layout;
 }
 
-function getLayoutWithData(params) {
+async function getLayoutWithData(params, sessionID) {
     // Return layout and data together for atomic loading
     try {
+        const tableName = params && (params.tableName || params.dbTable || params.table);
+        // Check for a custom layout stored in server memory before generating the default one
+        if (tableName) {
+            try {
+                const layoutMemory = require('../../drive_root/layoutMemory');
+                // Быстрая sync-проверка: есть ли вообще кастомный лейаут для этой таблицы.
+                // Если нет — сразу выходим, ни одного запроса в БД не делается.
+                if (layoutMemory.hasRegistered('uniListForm', tableName)) {
+                    const userRole = await layoutMemory.getUserRoleBySession(sessionID);
+                    const customLayout = await layoutMemory.getLayoutForUser('uniListForm', tableName, userRole);
+                    if (customLayout) {
+                        const data = getData(params);
+                        const payload = { layout: customLayout, data: data || [], params: params || {} };
+                        const datasetId = dataApp.storeDataset(payload);
+                        return { layout: customLayout, data: payload.data, datasetId };
+                    }
+                }
+            } catch (e) {
+                console.error('[uniListForm/getLayoutWithData] custom layout check error:', e && e.message || e);
+            }
+        }
         const layout = getLayout(params);
         const data = getData(params);
         // Store the returned payload in server memory and expose a datasetId

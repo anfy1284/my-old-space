@@ -2290,11 +2290,22 @@ class DataForm extends Form {
     async doAction(action, params) {
         if (action === 'save') {
             const data = this.collectData();
-            console.log('[DataForm] Saving data:', data);
+            // Собираем данные табличных частей из _dataMap (записи с tabularSection: true)
+            try {
+                const tabularSections = {};
+                if (this._dataMap) {
+                    for (const key in this._dataMap) {
+                        const entry = this._dataMap[key];
+                        if (entry && entry.tabularSection === true) {
+                            tabularSections[entry.tableName] = Array.isArray(entry.value) ? entry.value : [];
+                        }
+                    }
+                }
+                if (Object.keys(tabularSections).length > 0) data.__tabularSections = tabularSections;
+            } catch (_) {}
             try {
                 const res = await this.applyChanges(data);
                 if (res && res.ok) {
-                    // success — reset modified flag, no alert needed
                     this._modified = false;
                 } else {
                     const errMsg = (res && res.error ? res.error : 'Неизвестная ошибка');
@@ -2843,6 +2854,7 @@ class TextBox extends FormInput {
                         sbtn.type = 'button';
                         sbtn.tabIndex = -1;
                         sbtn.textContent = '...';
+                        sbtn.dataset.role = 'selection';
                         // Apply CSS class for static styling; colors provided globally by client config
                         try { sbtn.classList.add('input-field-button'); } catch (e) {}
                         sbtn.addEventListener('click', (ev) => { try { ev.stopPropagation(); ev.preventDefault(); this.onSelectionStart(); } catch (_) {} });
@@ -5282,6 +5294,7 @@ class ComboBox extends FormInput {
                         sbtn.type = 'button';
                         sbtn.tabIndex = -1;
                         sbtn.textContent = '...';
+                        sbtn.dataset.role = 'selection';
                         // Apply CSS class for static styling; colors provided globally by client config
                         try { sbtn.classList.add('input-field-button'); } catch (e) {}
                         // Colors are provided globally by client config
@@ -6084,8 +6097,41 @@ class Table extends UIObject {
         this._docClickHandler = null;
         this._docKeyHandler = null;
 
-        this.showToolbar = properties.showToolbar || true;
+        this.showToolbar = (properties.showToolbar !== false);
         this.tableName = properties.tableName || '';
+        // Признак табличной части — выставляется автоматически в Draw() из _dataMap
+        this.isTabularSection = false;
+    }
+
+    // Обрабатывает действие тулбара внутри таблицы.
+    // Возвращает true если действие обработано (tabular section); false — передать в appForm.
+    doToolbarAction(action) {
+        if (action === 'recordAdd' && this.isTabularSection) {
+            const rows = this.data_getRows(this.dataKey);
+            const newRow = {};
+            if (Array.isArray(this.columns)) {
+                for (const col of this.columns) { if (col.data) newRow[col.data] = ''; }
+            }
+            rows.push(newRow);
+            this.data_updateValue(this.dataKey, rows);
+            try { if (typeof this._invokeRenderBodyRows === 'function') this._invokeRenderBodyRows(); } catch (_) {}
+            try { if (this.appForm && typeof this.appForm.setModified === 'function') this.appForm.setModified(true); } catch (_) {}
+            return true;
+        }
+        if (action === 'recordDelete' && this.isTabularSection) {
+            const activeIdx = this._activeRowIndex;
+            if (activeIdx < 0) return true;
+            const rows = this.data_getRows(this.dataKey);
+            if (Array.isArray(rows) && activeIdx < rows.length) {
+                rows.splice(activeIdx, 1);
+                this._activeRowIndex = -1;
+                this.data_updateValue(this.dataKey, rows);
+                try { if (typeof this._invokeRenderBodyRows === 'function') this._invokeRenderBodyRows(); } catch (_) {}
+                try { if (this.appForm && typeof this.appForm.setModified === 'function') this.appForm.setModified(true); } catch (_) {}
+            }
+            return true;
+        }
+        return false;
     }
 
     // Data helpers: encapsulate all _dataMap access for Table
@@ -6443,7 +6489,16 @@ class Table extends UIObject {
                         if (el) {
                             const handler = (ev) => {
                                 try {
-                                    let newVal = (el.type === 'checkbox') ? !!el.checked : el.value;
+                                    // For selection-type controls (recordSelector with rawValue),
+                                    // use ctrl.getValue() to get the FK UID rather than el.value
+                                    // which contains only the human-readable display text.
+                                    const ctrl = this.appForm && this.appForm.controlsMap && this.appForm.controlsMap[key];
+                                    let newVal;
+                                    if (ctrl && typeof ctrl.getValue === 'function') {
+                                        newVal = ctrl.getValue();
+                                    } else {
+                                        newVal = (el.type === 'checkbox') ? !!el.checked : el.value;
+                                    }
                                     this.data_updateValue(key, newVal);
                                     this.data_updateParentArray(this.dataKey, rowIndexLocal, colDef, newVal);
                                 } catch (e) {}
@@ -6472,10 +6527,14 @@ class Table extends UIObject {
                                         try { node.readOnly = !isActive; } catch (e) {}
                                     }
                                     if (tag === 'select' || tag === 'button' || (node.type && (node.type === 'checkbox' || node.type === 'radio'))) {
-                                        try { node.disabled = !isActive; } catch (e) {}
+                                        if (!(node.dataset && node.dataset.role === 'selection')) {
+                                            try { node.disabled = !isActive; } catch (e) {}
+                                        }
                                     }
                                     // add pointer-events none for non-active to prevent JS click handlers
-                                    try { node.style.pointerEvents = isActive ? '' : 'none'; } catch (e) {}
+                                    if (!(node.dataset && node.dataset.role === 'selection')) {
+                                        try { node.style.pointerEvents = isActive ? '' : 'none'; } catch (e) {}
+                                    }
                                 }
                             } catch (e) {}
                         };
@@ -6738,11 +6797,15 @@ class Table extends UIObject {
                 for (let i = 0; i < interactives.length; i++) {
                     const el = interactives[i];
                     try {
+                        // Selection buttons ("...") stay always clickable — skip disabling them.
+                        const isSelectionBtn = !!(el.dataset && el.dataset.role === 'selection');
                         if (el.tagName) {
                             const tag = el.tagName.toLowerCase();
                             if (tag === 'input' || tag === 'textarea') el.readOnly = !isActive;
-                            if (tag === 'select' || tag === 'button' || (el.type && (el.type === 'checkbox' || el.type === 'radio'))) el.disabled = !isActive;
-                            try { el.style.pointerEvents = isActive ? '' : 'none'; } catch (e) {}
+                            if (!isSelectionBtn) {
+                                if (tag === 'select' || tag === 'button' || (el.type && (el.type === 'checkbox' || el.type === 'radio'))) el.disabled = !isActive;
+                                try { el.style.pointerEvents = isActive ? '' : 'none'; } catch (e) {}
+                            }
                         }
                         if (el._uiObject && typeof el._uiObject.setReadOnly === 'function') {
                             try { el._uiObject.setReadOnly(!isActive); } catch (e) {}
@@ -6916,32 +6979,39 @@ class Table extends UIObject {
             wrapper.style.display = 'flex';
             wrapper.style.flexDirection = 'column';
 
-            if (this.showToolbar) {
-                const toolbarLayout = {
-                    type: 'group',
-                    caption: 'Действия',
-                    orientation: 'horizontal',
-                    layout: [
-                        { type: 'button', action: 'select', caption: 'Выбрать', params: { isStandard: true } },
-                        { type: 'button', action: 'cancel', caption: 'Отмена', params: { isStandard: true } },
-                        { type: 'button', action: 'recordOpen', caption: 'Открыть', params: { isStandard: true } },
-                        { type: 'button', action: 'recordAdd', caption: 'Добавить', params: { isStandard: true } },
-                        { type: 'button', action: 'recordDelete', caption: 'Удалить', params: { isStandard: true } },
-                        { type: 'button', action: 'listSettings', caption: 'Настройки', params: { isStandard: true } }
-                    ]
-                };
+            // Определяем: является ли таблица табличной частью
+            try {
+                if (this.dataKey && this.appForm && this.appForm._dataMap) {
+                    const entry = this.appForm._dataMap[this.dataKey];
+                    this.isTabularSection = !!(entry && entry.tabularSection === true);
+                }
+            } catch (e) {}
 
-                if (this.appForm && typeof this.appForm.renderItem === 'function') {
-                    // Use DataForm's systematic rendering
-                    this.appForm.renderItem(toolbarLayout, wrapper).then(() => {
-                        const tbEl = wrapper.lastElementChild;
-                        if (tbEl) {
-                            tbEl.style.flex = '0 0 auto';
-                            tbEl.style.margin = '4px';
-                            // Ensure it's at the top
-                            wrapper.insertBefore(tbEl, wrapper.firstChild);
+            if (this.showToolbar) {
+                const toolbarContainer = document.createElement('div');
+                toolbarContainer.classList.add('ui-toolbar');
+                wrapper.appendChild(toolbarContainer);
+
+                const toolbarButtons = [
+                    { action: 'select',       caption: 'Выбрать' },
+                    { action: 'cancel',       caption: 'Отмена' },
+                    { action: 'recordOpen',   caption: 'Открыть' },
+                    { action: 'recordAdd',    caption: 'Добавить' },
+                    { action: 'recordDelete', caption: 'Удалить' },
+                    { action: 'listSettings', caption: 'Настройки' }
+                ];
+
+                for (const btnDef of toolbarButtons) {
+                    const btn = new Button(toolbarContainer, { caption: btnDef.caption });
+                    btn.Draw(toolbarContainer);
+                    const action = btnDef.action;
+                    const self = this;
+                    btn.onClick = () => {
+                        if (!self.doToolbarAction(action)) {
+                            self.appForm && typeof self.appForm.doAction === 'function' &&
+                                self.appForm.doAction(action, { isStandard: true });
                         }
-                    });
+                    };
                 }
             }
 
@@ -6969,14 +7039,12 @@ class Table extends UIObject {
             bodyContainer.style.borderLeft = '2px solid #808080';
             bodyContainer.style.borderRight = '2px solid #ffffff';
             bodyContainer.style.borderBottom = '2px solid #ffffff';
-            // If visibleRows specified (>0) fix the height to visibleRows*rowHeight, otherwise allow flexible grow
-            // ОТКЛЮЧЕНО: visibleRows мешает flex-растягиванию таблиц
-            // if (this.visibleRows && this.visibleRows > 0) {
-            //     bodyContainer.style.flex = '0 0 auto';
-            //     bodyContainer.style.height = (this.visibleRows * this.rowHeight) + 'px';
-            // } else {
-                bodyContainer.style.flex = '1 1 auto';
-            // }
+            // If visibleRows specified (>0) use it as minHeight so the table is always
+            // visible even when empty, but can still grow when there are more rows.
+            if (this.visibleRows && this.visibleRows > 0) {
+                bodyContainer.style.minHeight = (this.visibleRows * this.rowHeight) + 'px';
+            }
+            bodyContainer.style.flex = '1 1 auto';
             wrapper.appendChild(bodyContainer);
 
             // Build header and body using extractable helpers so DynamicTable can override

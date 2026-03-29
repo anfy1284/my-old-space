@@ -404,14 +404,14 @@ input[type="checkbox"],
    gray for inactive state). This makes buttons invisible instead of gray. */
 .ui-dynamictable table tbody tr.ui-table-row:not(.active) .input-field-button,
 .ui-dynamictable table tbody tr.ui-table-row:not(.active) button.input-field-button {
-  display: none !important;
+  visibility: hidden !important;
 }
 
 /* Hide input buttons in dynamic table rows when controls are disabled
    (table logic sets `button.disabled = true` for inactive rows). */
 .ui-dynamictable table tbody tr.ui-table-row .input-field-button:disabled,
 .ui-dynamictable table tbody tr.ui-table-row button.input-field-button[disabled] {
-  display: none !important;
+  visibility: hidden !important;
 }
 .ui-dynamictable table tbody tr.ui-table-row:focus {
   outline: none;

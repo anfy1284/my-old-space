@@ -5,6 +5,44 @@ const { generateUID } = require('./db/utilites');
 
 module.exports = {
     /**
+     * Инъектирует поле UID во все определения моделей, где оно отсутствует.
+     * Вызывается в контексте createDB.js до инициализации Sequelize-моделей.
+     */
+    onModelsPostCollect: async function(context) {
+        const { mergedModelsDef } = context;
+        if (!Array.isArray(mergedModelsDef)) return;
+
+        for (const def of mergedModelsDef) {
+            if (!def.fields) def.fields = {};
+
+            // Remove any other primary keys (besides UID)
+            for (const [fieldName, fieldDef] of Object.entries(def.fields)) {
+                if (fieldName !== 'UID' && fieldDef && fieldDef.primaryKey) {
+                    delete fieldDef.primaryKey;
+                }
+            }
+
+            // Inject UID as the sole primary key if missing
+            if (!def.fields.UID) {
+                def.fields.UID = {
+                    type: "STRING",
+                    allowNull: false,
+                    primaryKey: true,
+                    defaultValue: "GENERATE_UID"
+                };
+            } else {
+                def.fields.UID.primaryKey = true;
+                def.fields.UID.allowNull = false;
+                def.fields.UID.type = "STRING";
+                if (!def.fields.UID.defaultValue) {
+                    def.fields.UID.defaultValue = "GENERATE_UID";
+                }
+            }
+        }
+        console.log(`[drive_root:events_handler] UID injected into ${mergedModelsDef.length} model definitions.`);
+    },
+
+    /**
      * Добавляет поле UID во все таблицы, где оно отсутствует.
      */
     _injectUID: async function(sequelize) {
