@@ -125,8 +125,8 @@
 18. Кэш реализован в самой базовой функции, а не снаружи?
 19. Кастомный лейаут `uniRecordForm`: не забыл ли я что табличные части при кастомном лейауте НЕ добавляются автоматически? Если они нужны — они должны быть описаны явно в самом лейауте.
 20. `init.js` приложения проекта: зарегистрировано ли приложение в `drive_forms/apps.json`? (иначе его `init.js` не будет вызван)
-17. Project `events_handler.js` использует `module.exports` (не `export default`) и реально инъектирует UID в `onModelsPostCollect`?
-18. Если скрываю элемент в строке таблицы — он влияет на высоту строки при появлении? Если да → `visibility: hidden`, не `display: none`.
-19. При создании кнопки в базовом классе — использую `new Button()` → `btn.Draw()`, а не `document.createElement('button')`?
-20. В серверных метаданных полей таблицы — FK присутствует одновременно в `field.foreignKey` (верхний уровень) И в `field.properties.selection`?
-21. Внутренние системные dbGateway-вызовы (FK-резолв, commitTableEdits) идут через `SYSTEM_SESSION_ID`, а не через `role: 'admin'` или `userId` постороннего пользователя?
+21. Project `events_handler.js` использует `module.exports` (не `export default`) и реально инъектирует UID в `onModelsPostCollect`?
+22. Если скрываю элемент в строке таблицы — он влияет на высоту строки при появлении? Если да → `visibility: hidden`, не `display: none`.
+23. При создании кнопки в базовом классе — использую `new Button()` → `btn.Draw()`, а не `document.createElement('button')`?
+24. В серверных метаданных полей таблицы — FK присутствует одновременно в `field.foreignKey` (верхний уровень) И в `field.properties.selection`?
+25. Внутренние системные dbGateway-вызовы (FK-резолв, commitTableEdits) идут через `SYSTEM_SESSION_ID`, а не через `role: 'admin'` или `userId` постороннего пользователя?
