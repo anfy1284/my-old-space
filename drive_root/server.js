@@ -270,6 +270,121 @@ async function handleRequest(req, res) {
         }
     }
 
+    // --- Endpoint: GET /files/:uid — получить клиентский файл из MemoryStore ---
+    if (req.method === 'GET' && req.url.startsWith('/files/')) {
+        const uid = req.url.split('/files/')[1].split('?')[0];
+        if (!uid) {
+            res.writeHead(400, { 'Content-Type': 'text/plain' });
+            res.end('Bad Request: uid required');
+            return;
+        }
+
+        // Извлечь sessionID из cookie
+        let sessionID = null;
+        if (req.headers && req.headers.cookie) {
+            const match = req.headers.cookie.match(/(?:^|; )sessionID=([^;]+)/);
+            if (match) sessionID = decodeURIComponent(match[1]);
+        }
+
+        const fileStore = require('./fileStore');
+        const formsCtx = require('../drive_forms/globalServerContext');
+
+        try {
+            // Получить пользователя по сессии
+            const user = await require('./globalServerContext').getUserBySessionID(sessionID);
+            const userRole = user ? await formsCtx.getUserAccessRole(user) : 'public';
+
+            const result = fileStore.getFile(uid, userRole);
+            if (!result) {
+                res.writeHead(403, { 'Content-Type': 'text/plain' });
+                res.end('Forbidden or file not found');
+                return;
+            }
+
+            // Определить Content-Type по типу файла
+            const MIME_TYPES = {
+                js:   'application/javascript',
+                css:  'text/css',
+                html: 'text/html',
+                json: 'application/json',
+                txt:  'text/plain',
+                svg:  'image/svg+xml',
+                xml:  'application/xml',
+            };
+            const contentType = MIME_TYPES[result.fileType] || 'text/plain';
+
+            res.writeHead(200, { 'Content-Type': contentType + '; charset=utf-8' });
+            res.end(result.text);
+        } catch (e) {
+            console.error('[/files] Error serving file:', e);
+            res.writeHead(500, { 'Content-Type': 'text/plain' });
+            res.end('Internal Server Error');
+        }
+        return;
+    }
+
+    // --- Endpoint: POST /server-call — вызов серверной функции из serverScriptStore ---
+    if (req.method === 'POST' && req.url === '/server-call') {
+        let body = '';
+        req.on('data', chunk => { body += chunk; });
+        req.on('end', async () => {
+            let data;
+            try {
+                data = JSON.parse(body);
+            } catch (e) {
+                res.writeHead(400, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: 'Invalid JSON' }));
+                return;
+            }
+
+            const { uid, fn, fnParams } = data;
+            if (!uid || !fn) {
+                res.writeHead(400, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: 'uid and fn are required' }));
+                return;
+            }
+
+            // Извлечь sessionID из cookie
+            let sessionID = null;
+            if (req.headers && req.headers.cookie) {
+                const match = req.headers.cookie.match(/(?:^|; )sessionID=([^;]+)/);
+                if (match) sessionID = decodeURIComponent(match[1]);
+            }
+
+            const serverScriptStore = require('./serverScriptStore');
+            const formsCtx = require('../drive_forms/globalServerContext');
+
+            try {
+                const user = await require('./globalServerContext').getUserBySessionID(sessionID);
+                const userRole = user ? await formsCtx.getUserAccessRole(user) : 'public';
+
+                const entry = serverScriptStore.getServerScript(uid, userRole);
+                if (!entry) {
+                    res.writeHead(403, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ error: 'Forbidden or script not found' }));
+                    return;
+                }
+
+                if (typeof entry.scriptObj[fn] !== 'function') {
+                    res.writeHead(404, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ error: `Function "${fn}" not found in script` }));
+                    return;
+                }
+
+                const ctx = { sessionID, user, role: userRole };
+                const result = await entry.scriptObj[fn](fnParams, ctx);
+
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ result: result !== undefined ? result : null }));
+            } catch (e) {
+                console.error('[/server-call] Error:', e);
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: e.message || 'Internal Server Error' }));
+            }
+        });
+        return;
+    }
+
     // ...remaining logic...
     if (req.url === '/') {
         fs.readFile(path.join(appDir, config.appIndexPage), 'utf8', (err, data) => {

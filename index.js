@@ -7,6 +7,8 @@ const globalContext = require('./drive_root/globalServerContext');
 const eventBus = require('./drive_root/eventBus');
 const SequelizeInstance = require('./drive_root/db/sequelize_instance');
 const Utilities = require('./drive_root/db/utilites');
+const fileStore = require('./drive_root/fileStore');
+const serverScriptStore = require('./drive_root/serverScriptStore');
 
 /**
  * Start the framework server
@@ -66,5 +68,12 @@ module.exports = {
   globalContext,
   eventBus,
   SequelizeInstance,
-  Utilities
+  Utilities,
+  // Хранилище клиентских файлов
+  loadFile: fileStore.loadFile,
+  loadScript: fileStore.loadScript,
+  getFile: fileStore.getFile,
+  // Хранилище серверных скриптов
+  loadServerScript: serverScriptStore.loadServerScript,
+  getServerScript: serverScriptStore.getServerScript,
 };

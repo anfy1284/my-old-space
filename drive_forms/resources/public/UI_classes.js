@@ -1746,6 +1746,30 @@ Form.prototype.doAction = function(action, params) {
     // no-op when no instance handler
 };
 
+/**
+ * Вызов серверной функции из serverScriptStore.
+ * Доступен глобально в клиентских скриптах (loadScript).
+ *
+ * @param {string} uid       - Имя серверного скрипта (loadServerScript name)
+ * @param {string} fn        - Имя функции внутри скрипта
+ * @param {*}      fnParams  - Параметры (любой JSON-сериализуемый тип)
+ * @returns {Promise<*>}     - Результат серверной функции
+ */
+window.callServer = async function(uid, fn, fnParams) {
+    const resp = await fetch('/server-call', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ uid, fn, fnParams }),
+    });
+    if (!resp.ok) {
+        let errMsg = resp.status;
+        try { const e = await resp.json(); errMsg = e.error || errMsg; } catch (_) {}
+        throw new Error(String(errMsg));
+    }
+    const data = await resp.json();
+    return data.result;
+};
+
 class DataForm extends Form {
     constructor(appName) {
         super();
@@ -2288,6 +2312,39 @@ class DataForm extends Form {
     }
 
     async doAction(action, params) {
+        if (action === 'runScript') {
+            const uid      = params && params.uid;
+            const fn       = params && params.fn;
+            const fnParams = params && params.fnParams;
+            if (!uid) { if (typeof showAlert === 'function') showAlert('runScript: не указан uid'); return; }
+            if (!fn)  { if (typeof showAlert === 'function') showAlert('runScript: не указан fn'); return; }
+            // Резолвинг {data.fieldName} — подставляет значения полей формы в fnParams
+            const resolveParams = (val) => {
+                if (!val) return val;
+                if (typeof val === 'string') return val.replace(/\{data\.([^}]+)\}/g, (_, field) => {
+                    const entry = this._dataMap && this._dataMap[field];
+                    return (entry && entry.value !== undefined) ? entry.value : '';
+                });
+                if (Array.isArray(val)) return val.map(resolveParams);
+                if (typeof val === 'object') { const out = {}; for (const k in val) out[k] = resolveParams(val[k]); return out; }
+                return val;
+            };
+            try {
+                const resp = await fetch(`/files/${uid}`);
+                if (!resp.ok) { if (typeof showAlert === 'function') showAlert('Файл не найден или нет доступа'); return; }
+                const code = await resp.text();
+                // eslint-disable-next-line no-new-func
+                const mod = (new Function(code))();
+                if (mod && typeof mod[fn] === 'function') {
+                    await mod[fn](resolveParams(fnParams));
+                } else {
+                    if (typeof showAlert === 'function') showAlert(`runScript: функция "${fn}" не найдена в скрипте`);
+                }
+            } catch (e) {
+                if (typeof showAlert === 'function') showAlert('Ошибка выполнения скрипта: ' + e.message);
+            }
+            return;
+        }
         if (action === 'save') {
             const data = this.collectData();
             // Собираем данные табличных частей из _dataMap (записи с tabularSection: true)
