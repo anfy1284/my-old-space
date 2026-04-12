@@ -48,6 +48,10 @@
         {
             "name": "listSettings",
             "path": "/listSettings"
+        },
+        {
+            "name": "drive_api",
+            "path": "/drive_api"
         }
     ]
 }

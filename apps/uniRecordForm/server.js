@@ -139,14 +139,69 @@ async function applyChanges(payload, sessionID) {
             await applyDbGW.execute({ operation: 'create', table: tableName, data: changes, context: { appName: 'uniRecordForm', sessionID } });
         }
 
+        // Читаем актуальную родительскую запись из БД — передаётся в прикладной хук beforeSaveTSRow.
+        let parentRecord = null;
+        if (tabularSectionsData && parentUID) {
+            try {
+                parentRecord = await applyDbGW.execute({
+                    operation: 'findByPk',
+                    table: tableName,
+                    where: { UID: parentUID },
+                    options: { raw: true },
+                    context: { appName: 'uniRecordForm', sessionID }
+                });
+            } catch(e) {
+                console.warn('[TS_DEBUG] Could not load parent record:', e && e.message);
+            }
+        }
+
+        // Вызываем серверное событие onBeforeSave если зарегистрировано в saveLayout.
+        // Прикладной обработчик получает полный контекст и может изменить данные напрямую
+        // (заполнить скрытые поля, проставить organizationId в строки ТЧ и т.д.).
+        if (tabularSectionsData) {
+            await dispatchServerEvent('onBeforeSave', {
+                tableName,
+                record:          parentRecord,
+                changes,
+                tabularSections: tabularSectionsData,
+                parentUID
+            }, { tableName, sessionID });
+        }
+
         // Сохраняем табличные части (стратегия: DELETE по фильтру родителя + INSERT текущих строк)
         console.log('[TS_DEBUG] tabularSectionsData:', JSON.stringify(tabularSectionsData));
         console.log('[TS_DEBUG] parentUID:', parentUID);
         console.log('[TS_DEBUG] changes (parent):', JSON.stringify(changes));
+        const saveWarnings = [];
         if (tabularSectionsData && parentUID) {
             const tsDefs = getTabularSectionsForTable(tableName);
             console.log('[TS_DEBUG] tsDefs found:', tsDefs.map(d => d.tableName));
-            for (const [sectionTableName, rows] of Object.entries(tabularSectionsData)) {
+            const tsTableNames = new Set(tsDefs.map(d => d.tableName));
+
+            // Загружаем определения полей моделей для серверной валидации межсекционных FK
+            let allModelDefs = [];
+            try {
+                const gCtx = require('../../drive_root/globalServerContext');
+                allModelDefs = (gCtx.collectAllModelDefs().models) || [];
+            } catch(e) { console.warn('[TS_SECURITY] Could not load model defs:', e && e.message); }
+
+            // Сортируем секции топологически: секции без зависимостей на другие ТЧ — первыми.
+            // Это гарантирует, что booking_rooms сохранится раньше booking_guests/booking_room_services.
+            const hasSiblingFKDeps = (sectName) => {
+                const md = allModelDefs.find(m => m.tableName === sectName);
+                if (!md || !md.fields) return false;
+                return Object.values(md.fields).some(f =>
+                    f.references && tsTableNames.has(f.references.model) && f.references.model !== sectName
+                );
+            };
+            const sectionEntries = Object.entries(tabularSectionsData);
+            sectionEntries.sort((a, b) => (hasSiblingFKDeps(a[0]) ? 1 : 0) - (hasSiblingFKDeps(b[0]) ? 1 : 0));
+
+            // Кэш реальных UID по каждой сохранённой секции (читается из БД после сохранения).
+            // Используется для проверки принадлежности межсекционных FK текущей записи.
+            const validSiblingUIDs = {}; // { tableName: Set<string> }
+
+            for (const [sectionTableName, rows] of sectionEntries) {
                 console.log(`[TS_DEBUG] Processing section: ${sectionTableName}, rows count: ${Array.isArray(rows) ? rows.length : 'NOT_ARRAY'}`);
                 try {
                     const tsDef = tsDefs.find(d => d.tableName === sectionTableName);
@@ -156,6 +211,10 @@ async function applyChanges(payload, sessionID) {
                     }
                     const parentField = tsDef.tabularSection.parentField;
                     console.log(`[TS_DEBUG] parentField: ${parentField}`);
+
+                    // Определения полей этой секции для FK-валидации
+                    const sectModelDef = allModelDefs.find(m => m.tableName === sectionTableName);
+                    const sectFields = (sectModelDef && sectModelDef.fields) || {};
 
                     // Удаляем все строки ТЧ данного родителя
                     await applyDbGW.execute({
@@ -171,26 +230,38 @@ async function applyChanges(payload, sessionID) {
                         for (let ri = 0; ri < rows.length; ri++) {
                             const row = rows[ri];
                             const rowData = Object.assign({}, row);
-                            // Сохраняем UID существующих строк, чтобы не ломать FK-ссылки
-                            // из других ТЧ (напр. bookingRoomId в booking_room_services).
-                            // Для новых строк (без UID) dbGateway сгенерирует UID автоматически.
-                            if (!rowData.UID) { /* новая строка — UID будет сгенерирован */ }
                             rowData[parentField] = parentUID;
-                            // Наследуем поля родительской записи, которых нет в строке ТЧ
-                            // или которые остались пустыми (напр. organizationId обязателен,
-                            // но не редактируется пользователем в ТЧ — пустая строка по умолчанию).
-                            if (changes && typeof changes === 'object') {
-                                for (const [k, v] of Object.entries(changes)) {
-                                    // Пропускаем технические поля (display-значения, данные других ТЧ)
-                                    if (k.startsWith('__')) continue;
-                                    if (k !== 'UID' && k !== parentField) {
-                                        const cur = rowData[k];
-                                        if (cur === undefined || cur === null || cur === '') {
-                                            rowData[k] = v;
-                                        }
-                                    }
+
+                            // === СЕРВЕРНАЯ ВАЛИДАЦИЯ БЕЗОПАСНОСТИ ===
+                            // Проверяем FK-поля, ссылающиеся на другие ТЧ той же родительской записи.
+                            // Это не позволяет клиенту подставить UID из чужой записи (напр. чужой брони).
+                            let securityOk = true;
+                            for (const [fieldName, fieldDef] of Object.entries(sectFields)) {
+                                if (!fieldDef.references) continue;
+                                const refTable = fieldDef.references.model;
+                                // Интересует только ссылка на «сестринскую» ТЧ того же родителя
+                                if (!tsTableNames.has(refTable) || refTable === sectionTableName) continue;
+                                const fkVal = rowData[fieldName];
+                                if (!fkVal) {
+                                    // Поле обязательное (межсекционный FK) — без него INSERT всё равно упадёт
+                                    const msg = `Строка ${ri + 1} секции «${sectionTableName}»: поле «${fieldName}» не заполнено — строка пропущена`;
+                                    console.warn('[TS_SECURITY]', msg);
+                                    saveWarnings.push(msg);
+                                    securityOk = false;
+                                    break;
+                                }
+                                // Проверяем, что FK-значение принадлежит текущей записи (из реальных данных БД)
+                                const validSet = validSiblingUIDs[refTable];
+                                if (validSet && !validSet.has(fkVal)) {
+                                    const msg = `Строка ${ri + 1} секции «${sectionTableName}»: поле «${fieldName}» ссылается на запись, не принадлежащую текущему объекту — строка отклонена`;
+                                    console.error('[TS_SECURITY]', msg, `(fkVal=${fkVal})`);
+                                    saveWarnings.push(msg);
+                                    securityOk = false;
+                                    break;
                                 }
                             }
+                            if (!securityOk) continue;
+
                             console.log(`[TS_DEBUG] INSERT row[${ri}]:`, JSON.stringify(rowData));
                             try {
                                 await applyDbGW.execute({
@@ -201,10 +272,30 @@ async function applyChanges(payload, sessionID) {
                                 });
                                 console.log(`[TS_DEBUG] INSERT row[${ri}] OK`);
                             } catch (insertErr) {
-                                console.error(`[TS_DEBUG] INSERT row[${ri}] FAILED:`, insertErr && insertErr.message || insertErr);
+                                const errMsg = insertErr && insertErr.message || String(insertErr);
+                                console.error(`[TS_DEBUG] INSERT row[${ri}] FAILED:`, errMsg);
+                                saveWarnings.push(`Строка ${ri + 1} секции «${sectionTableName}»: ошибка сохранения — ${errMsg}`);
                             }
                         }
                     }
+
+                    // После сохранения секции читаем её актуальные UID из БД.
+                    // Они используются для валидации зависимых секций (напр. booking_guests → booking_rooms).
+                    try {
+                        const savedRows = await applyDbGW.execute({
+                            operation: 'read',
+                            table: sectionTableName,
+                            where: { [parentField]: parentUID },
+                            options: { raw: true },
+                            context: { appName: 'uniRecordForm', sessionID }
+                        });
+                        validSiblingUIDs[sectionTableName] = new Set((savedRows || []).map(r => r.UID).filter(Boolean));
+                        console.log(`[TS_DEBUG] validSiblingUIDs[${sectionTableName}] =`, [...validSiblingUIDs[sectionTableName]]);
+                    } catch(e) {
+                        console.warn('[TS_DEBUG] Could not load saved UIDs for', sectionTableName, e && e.message);
+                        validSiblingUIDs[sectionTableName] = new Set();
+                    }
+
                     console.log(`[uniRecordForm] TS saved: ${sectionTableName}, rows: ${Array.isArray(rows) ? rows.length : 0}`);
                 } catch (e) {
                     console.error('[uniRecordForm] TS save error for', sectionTableName, ':', e && e.message || e);
@@ -214,7 +305,9 @@ async function applyChanges(payload, sessionID) {
             console.log('[TS_DEBUG] Skipped: tabularSectionsData=', !!tabularSectionsData, 'parentUID=', parentUID);
         }
 
-        return { ok: true };
+        return saveWarnings.length > 0
+            ? { ok: true, warnings: saveWarnings }
+            : { ok: true };
     } catch (e) {
         console.error('[uniRecordForm] applyChanges error:', e);
         return { ok: false, error: String(e) };
@@ -417,7 +510,7 @@ async function generateFormSpec(tableName, params, sessionID) {
                 const customLayout = await layoutMemory.getLayoutForUser('uniRecordForm', tableName, userRole);
                 if (customLayout) {
                     // Deep clone to avoid mutating the cached array (splice/push below would corrupt it)
-                    layout = JSON.parse(JSON.stringify(customLayout));
+                    layout = JSON.parse(JSON.stringify(customLayout.layout || customLayout));
                 }
             }
         } catch (e) {
@@ -609,6 +702,117 @@ async function generateFormSpec(tableName, params, sessionID) {
         }
         } // end of if (!layout) — auto-layout + tabular sections
 
+        // ── tabularFilter: декларативная загрузка данных для table-элементов ──────────────────
+        // Если в лейауте (кастомном или авто) у table-элемента указано свойство
+        // properties.tabularFilter — загружаем строки из указанной таблицы (item.data)
+        // и добавляем их в data[] под ключом item.data.
+        // Плейсхолдеры в значениях фильтра: {UID} → UID текущей записи,
+        //                                    {fieldName} → record[fieldName].
+        // FK display-значения резолвятся автоматически из метаданных модели.
+        try {
+            const collectTableItems = (items) => {
+                const result = [];
+                if (!Array.isArray(items)) return result;
+                for (const item of items) {
+                    if (!item) continue;
+                    if (item.type === 'table' && item.properties && item.properties.tabularFilter && item.data) {
+                        result.push(item);
+                    }
+                    if (item.layout) result.push(...collectTableItems(item.layout));
+                    if (item.tabs) {
+                        for (const tab of item.tabs) {
+                            if (tab.layout) result.push(...collectTableItems(tab.layout));
+                        }
+                    }
+                }
+                return result;
+            };
+
+            const tableItemsWithFilter = collectTableItems(layout);
+            for (const item of tableItemsWithFilter) {
+                // Пропускаем если данные уже загружены (авто-лейаут уже добавил их)
+                if (data.find(d => d.name === item.data)) continue;
+
+                const targetTable = item.data;
+                const rawFilter = item.properties.tabularFilter;
+
+                // Резолвим плейсхолдеры в значениях фильтра
+                const resolvedFilter = {};
+                for (const [k, v] of Object.entries(rawFilter)) {
+                    if (typeof v === 'string') {
+                        resolvedFilter[k] = v
+                            .replace(/\{UID\}/g, effectiveRecordId || '')
+                            .replace(/\{(\w+)\}/g, (_, fn) => (record && record[fn] !== undefined ? record[fn] : ''));
+                    } else {
+                        resolvedFilter[k] = v;
+                    }
+                }
+
+                let rows = [];
+                if (effectiveRecordId && !isNew) {
+                    try {
+                        const tblDbGW = require('../../drive_root/dbGateway');
+                        const fetched = await tblDbGW.execute({
+                            operation: 'read',
+                            table: targetTable,
+                            where: resolvedFilter,
+                            options: { raw: true },
+                            context: { appName: 'uniRecordForm', sessionID }
+                        });
+                        if (Array.isArray(fetched)) rows = fetched;
+                    } catch (e) {
+                        console.error('[generateFormSpec] tabularFilter load error for', targetTable, ':', e && e.message);
+                    }
+                }
+
+                // Резолвим FK display-значения из метаданных модели
+                if (rows.length > 0) {
+                    try {
+                        const tfFields = await buildTableFieldsFromModel(targetTable);
+                        const tfFkFields = Array.isArray(tfFields)
+                            ? tfFields.filter(f => f.foreignKey && f.foreignKey.table)
+                            : [];
+                        for (const fkField of tfFkFields) {
+                            const fkTable = fkField.foreignKey.table;
+                            const fkIdField = fkField.foreignKey.field || 'UID';
+                            const fkDispField = fkField.foreignKey.displayField || 'name';
+                            const fkValues = [...new Set(
+                                rows.map(r => r[fkField.name]).filter(v => v != null && v !== '')
+                            )];
+                            if (fkValues.length === 0) continue;
+                            try {
+                                const fkDbGW = require('../../drive_root/dbGateway');
+                                const lookupRows = await fkDbGW.execute({
+                                    operation: 'read',
+                                    table: fkTable,
+                                    where: { [fkIdField]: fkValues },
+                                    options: { raw: true },
+                                    context: { appName: 'uniRecordForm', sessionID }
+                                });
+                                if (Array.isArray(lookupRows)) {
+                                    const dispMap = {};
+                                    for (const lr of lookupRows) dispMap[lr[fkIdField]] = lr[fkDispField] || lr[fkIdField];
+                                    const dispKey = '__' + fkField.name + '_display';
+                                    for (const row of rows) {
+                                        if (row[fkField.name] != null) row[dispKey] = dispMap[row[fkField.name]] || row[fkField.name];
+                                    }
+                                }
+                            } catch (e) {
+                                console.warn('[generateFormSpec] tabularFilter FK resolve error:', fkField.name, e && e.message);
+                            }
+                        }
+                    } catch (e) {
+                        console.warn('[generateFormSpec] tabularFilter FK resolve outer error:', e && e.message);
+                    }
+                }
+
+                data.push({ name: item.data, value: rows, tabularSection: true, tableName: targetTable });
+            }
+        } catch (e) {
+            console.error('[generateFormSpec] tabularFilter scan error:', e && e.message || e);
+        }
+        // ── end tabularFilter ─────────────────────────────────────────────────────────────────
+
         const datasetId = dataApp.storeDataset({
             table: tableName,
             id: effectiveRecordId,
@@ -660,6 +864,42 @@ const dynamicTableMethods = registerDynamicTableMethods('recordEditor', {
         return true;
     }
 });
+
+// Реестр прикладных хуков «перед сохранением строки ТЧ».
+// Ключ: имя родительской таблицы (например 'bookings').
+// Хук: async ({ sectionTableName, rowData, parentRecord, parentUID, changes }, { sessionID }) => rowData
+// Хук может мутировать rowData напрямую и/или вернуть объект с полями для merge.
+const _beforeSaveTSRowHooks = new Map();
+
+function registerBeforeSaveTSRow(parentTableName, hook) {
+    if (typeof parentTableName !== 'string' || typeof hook !== 'function') {
+        throw new Error('registerBeforeSaveTSRow: parentTableName (string) and hook (function) are required');
+    }
+    _beforeSaveTSRowHooks.set(parentTableName, hook);
+}
+
+// Универсальный диспетчер серверных событий формы.
+// Событие объявляется на форме (или любом UI-объекте) через свойство events: { eventName: { serverScript, fn } }.
+// Добавлять новые события = 0 новых строк в эту функцию, только вызов диспатчера в нужном месте.
+async function dispatchServerEvent(eventName, payload, { tableName, sessionID }) {
+    try {
+        const layoutMemory = require('../../drive_root/layoutMemory');
+        const serverScriptStore = require('../../drive_root/serverScriptStore');
+        if (!layoutMemory.hasRegistered('uniRecordForm', tableName)) return;
+        const userRole = await layoutMemory.getUserRoleBySession(sessionID);
+        const stored = await layoutMemory.getLayoutForUser('uniRecordForm', tableName, userRole);
+        const binding = stored && stored.events && stored.events[eventName];
+        if (!binding || !binding.serverScript) return;
+        const entry = serverScriptStore.getServerScript(binding.serverScript, userRole || '*');
+        const fn = entry && entry.scriptObj && entry.scriptObj[binding.fn || eventName];
+        if (typeof fn === 'function') {
+            await fn(payload, { sessionID });
+            console.log(`[uniRecordForm] server event "${eventName}" handled for ${tableName}`);
+        }
+    } catch(e) {
+        console.error(`[uniRecordForm] event "${eventName}" dispatch error:`, e && e.message || e);
+    }
+}
 
 module.exports = {
     getLayout,

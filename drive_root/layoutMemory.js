@@ -5,12 +5,13 @@
 // apps look up a stored layout here.
 //
 // Public API:
-//   saveLayout({ appName, tableName, roles, layout })
-//     — saves layout for one or more roles (roles can be string or array).
+//   saveLayout({ appName, tableName, roles, layout, events })
+//     — saves layout and optional event handlers for one or more roles.
 //       Pass roles: '*'  to match any role.
+//       events: { onBeforeSave: { serverScript, fn } } — server-side event bindings.
 //
 //   getLayoutForUser(appName, tableName, userRole)
-//     — returns stored layout array or null if not found.
+//     — returns { layout, events } or null if not found.
 //       First tries exact role match, then falls back to wildcard '*'.
 //
 //   getUserRoleBySession(sessionID)
@@ -61,14 +62,16 @@ function makePrefix(appName, tableName) {
  * @param {string}          opts.tableName — DB table name (e.g. 'hotels')
  * @param {string|string[]} opts.roles     — role name(s) or '*' for any role
  * @param {Array}           opts.layout    — layout JSON array
+ * @param {object}          [opts.events]  — server-side event handlers, e.g.:
+ *   { onBeforeSave: { serverScript: 'myScript', fn: 'onBeforeSave' } }
  */
-async function saveLayout({ appName, tableName, roles, layout }) {
+async function saveLayout({ appName, tableName, roles, layout, events }) {
     if (!appName || !tableName || !Array.isArray(layout)) {
         throw new Error('[layoutMemory.saveLayout] appName, tableName and layout (Array) are required');
     }
     const roleList = Array.isArray(roles) ? roles : (roles ? [String(roles)] : ['*']);
     for (const role of roleList) {
-        await memoryStore.set(NAMESPACE, makeKey(appName, tableName, role), layout);
+        await memoryStore.set(NAMESPACE, makeKey(appName, tableName, role), { layout, events: events || null });
     }
     // Register prefix so hot-path can skip tables with no layouts at all
     _registeredPrefixes.add(makePrefix(appName, tableName));
@@ -95,13 +98,14 @@ async function getLayoutForUser(appName, tableName, userRole) {
 
     // 1. Exact role match (in-memory Map → instant)
     if (userRole) {
-        const layout = memoryStore.getSync(NAMESPACE, makeKey(appName, tableName, userRole));
-        if (Array.isArray(layout)) return layout;
+        const stored = memoryStore.getSync(NAMESPACE, makeKey(appName, tableName, userRole));
+        if (stored) return stored.layout !== undefined ? stored : { layout: stored, events: null };
     }
 
     // 2. Wildcard match (any role)
     const fallback = memoryStore.getSync(NAMESPACE, makeKey(appName, tableName, '*'));
-    return Array.isArray(fallback) ? fallback : null;
+    if (!fallback) return null;
+    return fallback.layout !== undefined ? fallback : { layout: fallback, events: null };
 }
 
 /**

@@ -100,6 +100,10 @@
 - ❌ **Мутация объекта, полученного из `memory_store.getSync()`**. L1-кэш хранит объекты по ссылке. `splice`, `push`, изменение свойств — всё это портит закэшированный оригинал. Всегда клонируй: `JSON.parse(JSON.stringify(obj))` перед любыми изменениями структуры.
 - ❌ **Кэш в вызывающем коде снаружи уже закэшированной функции**. Если `getUserBySessionID` и `getUserAccessRole` уже кэшируют результат внутри себя — не добавляй ещё один слой кэша снаружи (в `layoutMemory`, middleware и т.д.). Это дублирование логики без пользы.
 - ❌ **Табличные части уходят за пределы `if (!layout)` блока**. Табличные части — это часть авто-генерации лейаута, они строятся внутри того же блока, что и `controls`. Кастомный лейаут — полностью в ведении автора лейаута, фреймворк ничего к нему не добавляет.
+- ❌ **Генерация UID новых строк ТЧ на клиенте** через `crypto.randomUUID()` или любой другой браузерный API. Используй `callServerMethod('drive_api', 'getNewUID', { tableName })` — тот же алгоритм что и в `dbGateway`.
+- ❌ **`getNewUID` в `uniRecordForm/server.js` или в проектном `apps/`** — это core-функция фреймворка. Её место: `node_modules/my-old-space/apps/drive_api/server.js`.
+- ❌ **Сравнение display-значений в скрытых `masterFor`-фильтрах**. Для `visibility: 'hidden'` фильтров `_matchClientFilters` сравнивает только по raw FK-значению (UID), не по `__<field>_display`. Видимые фильтры — по display где доступен.
+- ❌ **`drive_api` в проектном `apps/`** — это инфраструктурное приложение фреймворка, оно хранится только в `node_modules/my-old-space/apps/drive_api/`. В проектный `apps.json` не добавляется.
 
 ---
 
@@ -118,6 +122,8 @@
 11. При работе с моделями или сессией: я обращаюсь к `obj.UID`, а не к `obj.id`?
 12. Если контрол имеет `setValue` — `Draw` читает внутреннее состояние, а **не** сбрасывает его?
 13. Если контрол открывает popup — есть **capture-phase** keyboard listener на `document`?
+14. При добавлении строки ТЧ из деталей (`masterFor`): `doToolbarAction('recordAdd')` **асинхронный**? UID запрошен через `drive_api`? После добавления вызван `activateRow(rows.length - 1)` для триггера `masterFor.onRowActivate`?
+15. При добавлении нового системного API фреймворка: приложение создано в `node_modules/my-old-space/apps/<name>/`, зарегистрировано в `drive_forms/apps.json`, **НЕ** в проектном `apps.json`?
 14. Если popup имеет фиксированный размер — используется `width`, а не `min-width`?
 15. Если нужны системные предопределённые записи — используется `defaultValues.json`, а не `systemCode`/магические строки?
 16. Если таблица имеет nullable `organizationId` (глобальные записи) — она добавлена в `excluded_tables` в `app.config.json`?

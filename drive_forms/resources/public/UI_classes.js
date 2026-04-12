@@ -1872,8 +1872,15 @@ class DataForm extends Form {
     async renderLayout(contentArea = null, layout = null) {
         if (!contentArea) contentArea = this.getContentArea();
         const items = layout || this.layout || [];
+        const isRoot = layout == null;
         for (const item of items) {
             await this.renderItem(item, contentArea);
+        }
+        // После отрисовки корневого лейаута — активировать первую строку во всех таблицах.
+        // Порядок: мастер-таблицы (с masterFor) первыми, чтобы их фильтры установились
+        // до того как активируются деталь-таблицы.
+        if (isRoot) {
+            setTimeout(() => { try { this._activateFirstRows(); } catch(e) {} }, 0);
         }
     }
 
@@ -2189,6 +2196,38 @@ class DataForm extends Form {
                         try { if (typeof tbl.setCaption === 'function') tbl.setCaption(caption); } catch (e) {}
                         try { if (typeof tbl.Draw === 'function') tbl.Draw(contentArea); } catch (e) {}
                         if (item.name) this.controlsMap[item.name] = tbl;
+
+                        // masterFor: при активации строки автоматически фильтровать таблицу(ы)-деталь
+                        // Поддерживается как строка, так и массив имён таблиц-деталей.
+                        if (properties && properties.masterFor) {
+                            const masterForTargets = Array.isArray(properties.masterFor)
+                                ? properties.masterFor
+                                : [properties.masterFor];
+                            const masterField = properties.masterField || 'UID';
+                            const detailField = properties.detailField;
+                            const form = this;
+                            tbl.onRowActivate = function(rowIndex) {
+                                try {
+                                    const rows = typeof this.data_getRows === 'function'
+                                        ? this.data_getRows(this.dataKey)
+                                        : [];
+                                    const row = Array.isArray(rows) ? rows[rowIndex] : null;
+                                    for (const key of masterForTargets) {
+                                        const detailTbl = form.controlsMap && form.controlsMap[key];
+                                        if (!detailTbl || typeof detailTbl.setFilter !== 'function') continue;
+                                        if (row && detailField) {
+                                            detailTbl.setFilter(detailField, row[masterField], {
+                                                type: 'client', visibility: 'hidden', operator: '='
+                                            });
+                                        }
+                                    }
+                                } catch (e) {
+                                    console.error('[Table] masterFor onRowActivate error:', e);
+                                }
+                            };
+                            // Помечаем как мастер — _activateFirstRows() активирует их раньше деталей.
+                            tbl._isMaster = true;
+                        }
                     }
                 } catch (e) {
                     console.error('Error creating table control', e);
@@ -2214,6 +2253,101 @@ class DataForm extends Form {
             default:
                 console.warn('Unknown layout item type:', item.type);
         }
+
+        // Универсальная привязка клиентских событий на CUI-объект.
+        // events: { onMouseOver: { clientScript: uid, fn: 'handler' }, onRowActivate: { ... } }
+        try {
+            if (item.events && item.name && this.controlsMap[item.name]) {
+                this._wireItemEvents(this.controlsMap[item.name], item.events);
+            }
+        } catch(e) {}
+    }
+
+    // Привязывает клиентские события на любой UI-объект.
+    // Дом-события (onClick, onMouseOver ...) вешаются через addEventListener на ctrl.element.
+    // Колбэки объекта (onRowActivate, onSelect ...) просто присваиваются ctrl[eventName].
+    // Клиентский скрипт загружается один раз и кэшируется.
+    _wireItemEvents(ctrl, events) {
+        // Маппинг: имя события → DOM-событие. Всё что не здесь — объектный калбэк.
+        const DOM_MAP = {
+            onClick:       'click',
+            onDoubleClick: 'dblclick',
+            onMouseOver:   'mouseover',
+            onMouseOut:    'mouseout',
+            onMouseEnter:  'mouseenter',
+            onMouseLeave:  'mouseleave',
+            onKeyDown:     'keydown',
+            onKeyUp:       'keyup',
+            onKeyPress:    'keypress',
+            onFocus:       'focus',
+            onBlur:        'blur',
+            onContextMenu: 'contextmenu',
+        };
+        const loadAndCallScript = async (binding, args) => {
+            try {
+                const uid = binding.clientScript;
+                const fn  = binding.fn;
+                if (!uid || !fn) return;
+                if (!window._clientScriptCache) window._clientScriptCache = {};
+                if (!window._clientScriptCache[uid]) {
+                    const resp = await fetch(`/files/${uid}`);
+                    if (!resp.ok) return;
+                    window._clientScriptCache[uid] = (new Function(await resp.text()))();
+                }
+                const mod = window._clientScriptCache[uid];
+                if (mod && typeof mod[fn] === 'function') await mod[fn](...args);
+            } catch(e) { console.error('[_wireItemEvents] script error:', e); }
+        };
+        for (const [eventName, binding] of Object.entries(events || {})) {
+            if (!binding) continue;
+            const domEvt = DOM_MAP[eventName];
+            if (domEvt) {
+                // DOM-событие: вешаем на element
+                const el = ctrl.element || (typeof ctrl.getElement === 'function' && ctrl.getElement());
+                if (el) {
+                    el.addEventListener(domEvt, (...args) => loadAndCallScript(binding, args));
+                }
+            } else if (eventName === 'onResize') {
+                // ResizeObserver
+                const el = ctrl.element || (typeof ctrl.getElement === 'function' && ctrl.getElement());
+                if (el && typeof ResizeObserver !== 'undefined') {
+                    new ResizeObserver(entries => loadAndCallScript(binding, [entries])).observe(el);
+                }
+            } else {
+                // Объектный калбэк: onRowActivate, onSelect, onChange...
+                // Цепляем поверх уже установленного обработчика (напр. masterFor), не перезаписываем.
+                const existing = ctrl[eventName];
+                ctrl[eventName] = typeof existing === 'function'
+                    ? (...args) => { try { existing.apply(ctrl, args); } catch(e) {} loadAndCallScript(binding, args); }
+                    : (...args) => loadAndCallScript(binding, args);
+            }
+        }
+    }
+
+    // Активировать первую строку во всех таблицах лейаута.
+    // Мастер-таблицы (имеющие _isMaster) — первыми, чтобы их onRowActivate
+    // успел установить фильтры до активации деталь-таблиц.
+    // Деталь-таблицы активируются только если у них нет скрытых фильтров
+    // (иначе _activeRowIndex = 0 не соответствует видимой строке при фильтрации).
+    _activateFirstRows() {
+        try {
+            const tables = Object.values(this.controlsMap || {}).filter(
+                c => c && typeof c.activateRow === 'function' && typeof c.data_getRows === 'function'
+            );
+            // Мастера первыми
+            tables.sort((a, b) => (b._isMaster ? 1 : 0) - (a._isMaster ? 1 : 0));
+            for (const tbl of tables) {
+                try {
+                    // Деталь-таблицы пропускаем: их фильтр ещё не выставлен,
+                    // activateRow(0) дал бы реальный индекс, несовпадающий с видимым.
+                    // Мастер сам активирует свою первую строку → её onRowActivate
+                    // выставит фильтр на деталях.
+                    if (!tbl._isMaster) continue;
+                    const rows = tbl.data_getRows(tbl.dataKey);
+                    if (Array.isArray(rows) && rows.length > 0) tbl.activateRow(0);
+                } catch(e) {}
+            }
+        } catch(e) {}
     }
 
     async loadData() {
@@ -2364,6 +2498,11 @@ class DataForm extends Form {
                 const res = await this.applyChanges(data);
                 if (res && res.ok) {
                     this._modified = false;
+                    if (res.warnings && res.warnings.length > 0) {
+                        const msg = 'Сохранено, но часть строк не записана:\n' + res.warnings.join('\n');
+                        if (typeof showAlert === 'function') showAlert(msg);
+                        else alert(msg);
+                    }
                 } else {
                     const errMsg = (res && res.error ? res.error : 'Неизвестная ошибка');
                     if (typeof showAlert === 'function') showAlert('Ошибка сохранения: ' + errMsg);
@@ -2741,7 +2880,7 @@ class TextBox extends FormInput {
     getValue() {
         if (this.isDate) { return this._getDateISO(); }
         // For selection controls, rawValue holds the FK ID which differs from displayed text
-        if (this.showSelectionButton && this.rawValue !== undefined && this.rawValue !== null) {
+        if ((this.showSelectionButton || this.listMode) && this.rawValue !== undefined && this.rawValue !== null) {
             return this.rawValue;
         }
         // For regular text/number inputs, return what the user actually typed
@@ -3170,6 +3309,8 @@ class TextBox extends FormInput {
                                     row.addEventListener('mouseleave', () => { row.style.backgroundColor = ''; });
                                     row.addEventListener('click', (e) => {
                                         try {
+                                            // store raw value so getValue() returns code, not caption
+                                            this.rawValue = it.value;
                                             // set underlying value; setText will display caption when available
                                             this.setText(it.value);
                                             // notify any listeners (so clients can pick up the new value)
@@ -6158,21 +6299,46 @@ class Table extends UIObject {
         this.tableName = properties.tableName || '';
         // Признак табличной части — выставляется автоматически в Draw() из _dataMap
         this.isTabularSection = false;
+        this.currentFilters = [];
     }
 
     // Обрабатывает действие тулбара внутри таблицы.
     // Возвращает true если действие обработано (tabular section); false — передать в appForm.
     doToolbarAction(action) {
         if (action === 'recordAdd' && this.isTabularSection) {
-            const rows = this.data_getRows(this.dataKey);
-            const newRow = {};
-            if (Array.isArray(this.columns)) {
-                for (const col of this.columns) { if (col.data) newRow[col.data] = ''; }
-            }
-            rows.push(newRow);
-            this.data_updateValue(this.dataKey, rows);
-            try { if (typeof this._invokeRenderBodyRows === 'function') this._invokeRenderBodyRows(); } catch (_) {}
-            try { if (this.appForm && typeof this.appForm.setModified === 'function') this.appForm.setModified(true); } catch (_) {}
+            // Запрашиваем UID с сервера, затем добавляем строку
+            const self = this;
+            const doAdd = async () => {
+                const rows = self.data_getRows(self.dataKey);
+                const newRow = {};
+                if (Array.isArray(self.columns)) {
+                    for (const col of self.columns) { if (col.data) newRow[col.data] = ''; }
+                }
+                // Получаем UID с сервера — используем тот же алгоритм что и dbGateway
+                try {
+                    const tableName = self.tableName || self.dataKey || 'row';
+                    if (typeof callServerMethod === 'function') {
+                        const resp = await callServerMethod('drive_api', 'getNewUID', { tableName });
+                        if (resp && resp.uid) newRow.UID = resp.uid;
+                    }
+                } catch (_) {}
+                // Пред-заполняем скрытыми клиентскими фильтрами (напр. bookingRoomId при мастер-деталь)
+                try {
+                    if (Array.isArray(self.currentFilters)) {
+                        for (const f of self.currentFilters) {
+                            if (f.enabled !== false && f.type === 'client' && f.visibility === 'hidden' && f.field && f.value != null && f.value !== '') {
+                                newRow[f.field] = f.value;
+                            }
+                        }
+                    }
+                } catch (_) {}
+                rows.push(newRow);
+                self.data_updateValue(self.dataKey, rows);
+                try { if (typeof self._invokeRenderBodyRows === 'function') self._invokeRenderBodyRows(); } catch (_) {}
+                try { if (typeof self.activateRow === 'function') self.activateRow(rows.length - 1); } catch (_) {}
+                try { if (self.appForm && typeof self.appForm.setModified === 'function') self.appForm.setModified(true); } catch (_) {}
+            };
+            doAdd();
             return true;
         }
         if (action === 'recordDelete' && this.isTabularSection) {
@@ -6399,6 +6565,193 @@ class Table extends UIObject {
 
         return { headerTable: headerTable, hcolgroup: hcolgroup };
     }
+
+    // ===================== FILTER API =====================
+
+    /**
+     * Установить / обновить один фильтр.
+     * @param {string} field      - Поле модели
+     * @param {*}      value      - Значение
+     * @param {Object} [options]
+     * @param {string} [options.operator='=']         - '='|'!='|'>'|'>='|'<'|'<='|'contains'|'isNull'|'isNotNull'
+     * @param {string} [options.type='server']        - 'server'|'client'
+     * @param {string} [options.visibility='visible'] - 'visible'|'readonly'|'hidden'
+     * @param {string} [options.caption]              - Заголовок для UI
+     * @param {boolean} [options.enabled=true]        - Включён ли фильтр
+     */
+    setFilter(field, value, options = {}) {
+        if (!Array.isArray(this.currentFilters)) this.currentFilters = [];
+        const idx = this.currentFilters.findIndex(f => f.field === field);
+        const entry = {
+            field,
+            caption:    options.caption    || field,
+            operator:   options.operator   || '=',
+            value,
+            type:       options.type       || 'server',
+            visibility: options.visibility || 'visible',
+            enabled:    options.enabled !== false
+        };
+        if (idx >= 0) this.currentFilters[idx] = entry;
+        else this.currentFilters.push(entry);
+        this._updateFilterBar();
+        this.applyFilters();
+    }
+
+    /** Убрать фильтр по полю. */
+    removeFilter(field) {
+        if (!Array.isArray(this.currentFilters)) return;
+        this.currentFilters = this.currentFilters.filter(f => f.field !== field);
+        this._updateFilterBar();
+        this.applyFilters();
+    }
+
+    /** Получить объект фильтра по полю (или undefined). */
+    getFilter(field) {
+        if (!Array.isArray(this.currentFilters)) return undefined;
+        return this.currentFilters.find(f => f.field === field);
+    }
+
+    /** Все фильтры (копия массива). */
+    getFilters() {
+        return Array.isArray(this.currentFilters) ? this.currentFilters.slice() : [];
+    }
+
+    /** Заменить весь набор фильтров. */
+    setFilters(filters) {
+        this.currentFilters = Array.isArray(filters) ? filters.slice() : [];
+        this._updateFilterBar();
+        this.applyFilters();
+    }
+
+    /** Очистить все фильтры. */
+    clearFilters() {
+        this.currentFilters = [];
+        this._updateFilterBar();
+        this.applyFilters();
+    }
+
+    /**
+     * Применить текущие фильтры. Базовая реализация для Table: перерисовать строки.
+     * DynamicTable переопределяет этот метод для серверной перезагрузки.
+     */
+    applyFilters() {
+        try { if (typeof this._invokeRenderBodyRows === 'function') this._invokeRenderBodyRows(); } catch (e) {}
+    }
+
+    /**
+     * Применить client-фильтры к строке.
+     * Возвращает true если строку нужно показать.
+     */
+    _matchClientFilters(row) {
+        if (!Array.isArray(this.currentFilters)) return true;
+        const clientFilters = this.currentFilters.filter(f => f.enabled !== false && f.type === 'client');
+        if (clientFilters.length === 0) return true;
+        for (const f of clientFilters) {
+            const raw = row[f.field];
+            // Скрытые фильтры (masterFor) работают по сырому значению (FK-UID),
+            // а не по display-значению — иначе UID сравнивался бы с именем записи.
+            const dispKey = '__' + f.field + '_display';
+            const dispVal = (f.visibility !== 'hidden') ? row[dispKey] : undefined;
+            const val = (dispVal !== undefined) ? dispVal : raw;
+            const strVal = (val === null || val === undefined) ? '' : String(val).toLowerCase();
+            const fVal = (f.value === null || f.value === undefined) ? '' : String(f.value).toLowerCase();
+            switch (f.operator) {
+                case '=':         if (strVal !== fVal) return false; break;
+                case '!=':        if (strVal === fVal) return false; break;
+                case 'contains':  if (!strVal.includes(fVal)) return false; break;
+                case 'startsWith':if (!strVal.startsWith(fVal)) return false; break;
+                case 'endsWith':  if (!strVal.endsWith(fVal)) return false; break;
+                case '>':         if (!(parseFloat(val) >  parseFloat(f.value))) return false; break;
+                case '>=':        if (!(parseFloat(val) >= parseFloat(f.value))) return false; break;
+                case '<':         if (!(parseFloat(val) <  parseFloat(f.value))) return false; break;
+                case '<=':        if (!(parseFloat(val) <= parseFloat(f.value))) return false; break;
+                case 'isNull':    if (raw !== null && raw !== undefined && raw !== '') return false; break;
+                case 'isNotNull': if (raw === null || raw === undefined || raw === '') return false; break;
+                default: break;
+            }
+        }
+        return true;
+    }
+
+    // ===================== END FILTER API =====================
+
+    // Inline-редактор значения фильтра в filter bar (маленький popup).
+    _openFilterInlineEditor(filter, chipEl) {
+        // Убираем старый popup если был
+        try { const old = document.getElementById('__filter-inline-popup'); if (old) old.remove(); } catch (e) {}
+
+        const popup = document.createElement('div');
+        popup.id = '__filter-inline-popup';
+        popup.style.position = 'absolute';
+        popup.style.zIndex   = '99999';
+        popup.style.background = '#c0c0c0';
+        popup.style.border = '2px solid #000';
+        popup.style.padding = '6px 8px';
+        popup.style.display = 'flex';
+        popup.style.gap = '4px';
+        popup.style.alignItems = 'center';
+        popup.style.boxShadow = '2px 2px 0 #000';
+
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.value = (filter.value !== null && filter.value !== undefined) ? String(filter.value) : '';
+        input.style.width = '140px';
+        input.style.fontFamily = 'inherit';
+        input.style.fontSize = 'inherit';
+
+        const ok = document.createElement('button');
+        ok.textContent = 'OK';
+        ok.style.fontFamily = 'inherit';
+        ok.style.fontSize = 'inherit';
+
+        const cancel = document.createElement('button');
+        cancel.textContent = '✕';
+        cancel.style.fontFamily = 'inherit';
+        cancel.style.fontSize = 'inherit';
+
+        popup.appendChild(input);
+        popup.appendChild(ok);
+        popup.appendChild(cancel);
+        document.body.appendChild(popup);
+
+        // Позиционируем под чипом
+        try {
+            const rect = chipEl.getBoundingClientRect();
+            popup.style.top  = (rect.bottom + window.scrollY + 2) + 'px';
+            popup.style.left = (rect.left  + window.scrollX)      + 'px';
+        } catch (e) {}
+
+        const commit = () => {
+            filter.value = input.value;
+            filter.enabled = true;
+            popup.remove();
+            this._updateFilterBar();
+            this.applyFilters();
+        };
+        ok.addEventListener('click', commit);
+        cancel.addEventListener('click', () => popup.remove());
+        input.addEventListener('keydown', (ev) => {
+            if (ev.key === 'Enter')  { ev.preventDefault(); commit(); }
+            if (ev.key === 'Escape') { ev.preventDefault(); popup.remove(); }
+        });
+
+        // Закрыть при клике вне
+        const away = (ev) => {
+            if (!popup.contains(ev.target) && ev.target !== chipEl && !chipEl.contains(ev.target)) {
+                popup.remove();
+                document.removeEventListener('mousedown', away, true);
+            }
+        };
+        // небольшая задержка чтобы текущий mousedown не закрыл немедленно
+        setTimeout(() => document.addEventListener('mousedown', away, true), 0);
+
+        input.focus();
+        input.select();
+    }
+
+    // Заглушка-stub для _updateFilterBar: будет переопределена в Draw()
+    // чтобы код вне Draw (API фильтров) не падал до первой отрисовки.
+    _updateFilterBar() {}
 
     renderCellElement(rowIndex, c, col, row) {
         const td = document.createElement('td');
@@ -6652,6 +7005,9 @@ class Table extends UIObject {
         const tr = document.createElement('tr');
         // Use CSS classes for zebra and active-row highlighting
         try { tr.classList.add('ui-table-row'); } catch (e) {}
+        // Храним реальный индекс в массиве данных — используется в activateRow и updateAllRowsReadOnly
+        // для правильной подсветки при активных клиентских фильтрах.
+        tr._dataIndex = rowIndex;
         if (this._activeRowIndex === rowIndex) {
             try { tr.classList.add('active'); } catch (e) {}
         }
@@ -6744,7 +7100,8 @@ class Table extends UIObject {
                     for (let i = 0; i < children.length; i++) {
                         const child = children[i];
                         try {
-                            if (i === rowIndex) child.classList.add('active');
+                            // Сравниваем по _dataIndex, а не по визуальному номеру строки (при фильтрах виз. индекс ≠ реальному)
+                            if (child._dataIndex === rowIndex) child.classList.add('active');
                             else child.classList.remove('active');
                         } catch (e) {}
                     }
@@ -6849,7 +7206,8 @@ class Table extends UIObject {
             const rows = Array.from(tbody.children || []);
             for (let r = 0; r < rows.length; r++) {
                 const tr = rows[r];
-                const isActive = (this._activeRowIndex === r) && !this.readOnly;
+                // Используем _dataIndex чтобы правильно определить активную строку при активных клиентских фильтрах.
+                const isActive = (tr._dataIndex === this._activeRowIndex) && !this.readOnly;
                 const interactives = tr.querySelectorAll('input,textarea,select,button');
                 for (let i = 0; i < interactives.length; i++) {
                     const el = interactives[i];
@@ -6934,9 +7292,18 @@ class Table extends UIObject {
                 }
             }
 
+            // Применяем клиентские фильтры
+            if (Array.isArray(this.currentFilters) && this.currentFilters.some(f => f.enabled !== false && f.type === 'client')) {
+                workingRows = workingRows.filter(row => this._matchClientFilters(row));
+            }
+
             for (let r = 0; r < workingRows.length; r++) {
                 const row = workingRows[r] || {};
-                const tr = this.renderRowElement(r, row);
+                // При активных фильтрах workingRows — отфильтрованный срез исходного массива.
+                // Передаём реальный индекс в rows, чтобы data_updateParentArray обновлял правильный элемент.
+                const actualIndex = rows.indexOf(row);
+                const effectiveIndex = actualIndex >= 0 ? actualIndex : r;
+                const tr = this.renderRowElement(effectiveIndex, row);
                 tbody.appendChild(tr);
             }
         };
@@ -7064,6 +7431,21 @@ class Table extends UIObject {
                     const action = btnDef.action;
                     const self = this;
                     btn.onClick = () => {
+                        // Кнопка "Настройки": передаём себя как tableInstance чтобы listSettings
+                        // мог читать/писать фильтры напрямую на экземпляре таблицы
+                        if (action === 'listSettings') {
+                            try {
+                                if (window.MySpace && typeof window.MySpace.open === 'function') {
+                                    const appName  = (self.appForm && self.appForm.appName) || '';
+                                    const title    = (self.appForm && self.appForm._originalTitle) || appName;
+                                    window.MySpace.open('listSettings', {
+                                        appName, title,
+                                        tableInstance: self   // ключевой параметр
+                                    });
+                                }
+                            } catch (e) { console.error('[Table] listSettings error', e); }
+                            return;
+                        }
                         if (!self.doToolbarAction(action)) {
                             self.appForm && typeof self.appForm.doAction === 'function' &&
                                 self.appForm.doAction(action, { isStandard: true });
@@ -7071,6 +7453,76 @@ class Table extends UIObject {
                     };
                 }
             }
+
+            // --- FILTER BAR (полоска активных видимых фильтров) ---
+            const filterBarContainer = document.createElement('div');
+            filterBarContainer.classList.add('ui-filter-bar');
+            filterBarContainer.style.display = 'none'; // скрыт пока нет видимых фильтров
+            wrapper.appendChild(filterBarContainer);
+            this._filterBarContainer = filterBarContainer;
+
+            // Метод обновления полоски фильтров — вызывается из API фильтров
+            this._updateFilterBar = () => {
+                try {
+                    const filters = Array.isArray(this.currentFilters) ? this.currentFilters : [];
+                    const uiFilters = filters.filter(f => f.visibility === 'visible' || f.visibility === 'readonly');
+                    filterBarContainer.innerHTML = '';
+                    if (uiFilters.length === 0) {
+                        filterBarContainer.style.display = 'none';
+                        return;
+                    }
+                    filterBarContainer.style.display = 'flex';
+
+                    for (const f of uiFilters) {
+                        const chip = document.createElement('span');
+                        chip.className = 'ui-filter-chip' + (f.enabled === false ? ' ui-filter-chip--off' : '');
+                        chip.title = f.caption + ' ' + f.operator + ' ' + (f.value !== null && f.value !== undefined ? f.value : '');
+
+                        if (f.visibility === 'visible') {
+                            // Чекбокс вкл/выкл
+                            const cb = document.createElement('input');
+                            cb.type = 'checkbox';
+                            cb.checked = f.enabled !== false;
+                            cb.title = 'Включить / выключить фильтр';
+                            cb.addEventListener('change', () => {
+                                f.enabled = cb.checked;
+                                chip.classList.toggle('ui-filter-chip--off', !f.enabled);
+                                this.applyFilters();
+                            });
+                            chip.appendChild(cb);
+                        }
+
+                        // Текст: "Статус = Активный"
+                        const label = document.createElement('span');
+                        label.className = 'ui-filter-chip-label';
+                        const opLabel = { '=':'=', '!=':'≠', '>':'>', '>=':'≥', '<':'<', '<=':'≤',
+                            'contains':'⊃', 'startsWith':'^', 'endsWith':'$',
+                            'isNull':'∅', 'isNotNull':'∃' }[f.operator] || f.operator;
+                        label.textContent = (f.caption || f.field) + ' ' + opLabel +
+                            ((f.operator !== 'isNull' && f.operator !== 'isNotNull')
+                                ? ' ' + (f.value !== null && f.value !== undefined ? f.value : '') : '');
+                        chip.appendChild(label);
+
+                        // Клик на текст фильтра — inline-редактирование значения
+                        if (f.visibility === 'visible') {
+                            label.style.cursor = 'pointer';
+                            label.addEventListener('click', () => {
+                                this._openFilterInlineEditor(f, chip);
+                            });
+
+                            // Кнопка удаления
+                            const del = document.createElement('span');
+                            del.className = 'ui-filter-chip-del';
+                            del.textContent = '×';
+                            del.title = 'Убрать фильтр';
+                            del.addEventListener('click', () => { this.removeFilter(f.field); });
+                            chip.appendChild(del);
+                        }
+
+                        filterBarContainer.appendChild(chip);
+                    }
+                } catch (e) { console.error('[Table._updateFilterBar]', e); }
+            };
 
             // Header container (fixed) - styled like DynamicTable
             const headerContainer = document.createElement('div');
@@ -7537,6 +7989,10 @@ class DynamicTable extends Table {
         if (!row || !row.loaded) return;
         if (tr._dtFilled) return; // already rendered (flag cleared by _resetFilledRows on refresh)
 
+        // Применяем client-фильтры: не прошедшие строки просто скрываем
+        const visible = this._matchClientFilters(row);
+        tr.style.visibility = visible ? '' : 'hidden';
+
         tr.innerHTML = '';
         for (let c = 0; c < this.columns.length; c++) {
             const col = this.columns[c] || {};
@@ -7755,6 +8211,19 @@ class DynamicTable extends Table {
         }
     }
 
+    // Override applyFilters: server filters need a server round-trip; client-only filters just re-render.
+    applyFilters() {
+        const hasServer = Array.isArray(this.currentFilters) && this.currentFilters.some(
+            f => f.enabled !== false && f.type === 'server'
+        );
+        if (hasServer || !this.dataLoaded) {
+            try { this.refresh(); } catch (e) {}
+        } else {
+            this._resetFilledRows();
+            try { this._fillVisibleRows(); } catch (e) {}
+        }
+    }
+
     async refresh() {
         this.showLoadingIndicator();
         // Reset all cached rows so stale cell content is replaced after reload
@@ -7819,12 +8288,16 @@ class DynamicTable extends Table {
         if (this.isLoading) return;
         this.isLoading = true;
         try {
+            // На сервер отправляем только включённые server-фильтры
+            const serverFilters = Array.isArray(this.currentFilters)
+                ? this.currentFilters.filter(f => f.enabled !== false && f.type === 'server')
+                : [];
             const data = await callServerMethod(this.appName, 'getDynamicTableData', {
                 tableName: this.tableName,
                 firstRow: firstRow,
                 visibleRows: this.visibleRows,
                 sort: this.currentSort,
-                filters: this.currentFilters
+                filters: serverFilters
             });
             // Expect new format only: { columns, rows, totalRows }
             try { console.log('[DynamicTable.loadData] server response for', this.tableName, { hasData: !!data, keys: data ? Object.keys(data) : null }); } catch(e) {}

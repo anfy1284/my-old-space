@@ -786,16 +786,19 @@ async function getDynamicTableData(options) {
     if (filters && Array.isArray(filters)) {
         for (const filter of filters) {
             const { field, operator, value } = filter;
+            const Op = require('sequelize').Op;
 
-            if (operator === '=') where[field] = value;
-            else if (operator === '!=') where[field] = { [require('sequelize').Op.ne]: value };
-            else if (operator === '>') where[field] = { [require('sequelize').Op.gt]: value };
-            else if (operator === '<') where[field] = { [require('sequelize').Op.lt]: value };
-            else if (operator === '>=') where[field] = { [require('sequelize').Op.gte]: value };
-            else if (operator === '<=') where[field] = { [require('sequelize').Op.lte]: value };
-            else if (operator === 'contains') where[field] = { [require('sequelize').Op.like]: `%${value}%` };
-            else if (operator === 'startsWith') where[field] = { [require('sequelize').Op.like]: `${value}%` };
-            else if (operator === 'endsWith') where[field] = { [require('sequelize').Op.like]: `%${value}` };
+            if      (operator === '=')          where[field] = value;
+            else if (operator === '!=')         where[field] = { [Op.ne]: value };
+            else if (operator === '>')          where[field] = { [Op.gt]: value };
+            else if (operator === '<')          where[field] = { [Op.lt]: value };
+            else if (operator === '>=')         where[field] = { [Op.gte]: value };
+            else if (operator === '<=')         where[field] = { [Op.lte]: value };
+            else if (operator === 'contains')   where[field] = { [Op.like]: `%${value}%` };
+            else if (operator === 'startsWith') where[field] = { [Op.like]: `${value}%` };
+            else if (operator === 'endsWith')   where[field] = { [Op.like]: `%${value}` };
+            else if (operator === 'isNull')     where[field] = null;
+            else if (operator === 'isNotNull')  where[field] = { [Op.ne]: null };
         }
     }
 
