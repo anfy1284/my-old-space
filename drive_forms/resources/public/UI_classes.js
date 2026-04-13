@@ -6391,12 +6391,19 @@ class Table extends UIObject {
         } catch (e) {}
     }
 
-    data_updateParentArray(dataKey, rowIndex, colDef, newVal) {
+    data_updateParentArray(dataKey, rowIndex, colDef, newVal, displayVal) {
         try {
             if (dataKey && this.appForm && this.appForm._dataMap && this.appForm._dataMap[dataKey] && Array.isArray(this.appForm._dataMap[dataKey].value)) {
                 const parentArr = this.appForm._dataMap[dataKey].value;
                 if (!parentArr[rowIndex]) parentArr[rowIndex] = {};
-                if (colDef && colDef.data) parentArr[rowIndex][colDef.data] = newVal;
+                if (colDef && colDef.data) {
+                    parentArr[rowIndex][colDef.data] = newVal;
+                    // Persist FK display value so it survives re-renders (e.g. masterFor row switch)
+                    const dispKey = '__' + colDef.data + '_display';
+                    if (displayVal !== undefined && displayVal !== null) {
+                        parentArr[rowIndex][dispKey] = displayVal;
+                    }
+                }
             }
         } catch (e) {}
     }
@@ -6904,13 +6911,18 @@ class Table extends UIObject {
                                     // which contains only the human-readable display text.
                                     const ctrl = this.appForm && this.appForm.controlsMap && this.appForm.controlsMap[key];
                                     let newVal;
+                                    let displayVal;
                                     if (ctrl && typeof ctrl.getValue === 'function') {
                                         newVal = ctrl.getValue();
+                                        // For FK/selection controls, preserve display text alongside raw UID
+                                        if ((ctrl.showSelectionButton || ctrl.listMode) && typeof ctrl.getText === 'function') {
+                                            displayVal = ctrl.getText();
+                                        }
                                     } else {
                                         newVal = (el.type === 'checkbox') ? !!el.checked : el.value;
                                     }
                                     this.data_updateValue(key, newVal);
-                                    this.data_updateParentArray(this.dataKey, rowIndexLocal, colDef, newVal);
+                                    this.data_updateParentArray(this.dataKey, rowIndexLocal, colDef, newVal, displayVal);
                                 } catch (e) {}
                             };
                             el.addEventListener('input', handler);
@@ -8835,15 +8847,22 @@ class DynamicTable extends Table {
         try { if (super.data_updateValue) return super.data_updateValue(key, newVal); } catch (e) {}
     }
 
-    data_updateParentArray(dataKey, rowIndex, colDef, newVal) {
+    data_updateParentArray(dataKey, rowIndex, colDef, newVal, displayVal) {
         try {
             if (dataKey && dataKey === this.dataKey) {
                 if (!this.dataCache[rowIndex]) this.dataCache[rowIndex] = { loaded: false, __index: rowIndex };
-                if (colDef && colDef.data) this.dataCache[rowIndex][colDef.data] = newVal;
+                if (colDef && colDef.data) {
+                    this.dataCache[rowIndex][colDef.data] = newVal;
+                    // Persist FK display value so it survives re-renders
+                    const dispKey = '__' + colDef.data + '_display';
+                    if (displayVal !== undefined && displayVal !== null) {
+                        this.dataCache[rowIndex][dispKey] = displayVal;
+                    }
+                }
                 return;
             }
         } catch (e) {}
-        try { if (super.data_updateParentArray) return super.data_updateParentArray(dataKey, rowIndex, colDef, newVal); } catch (e) {}
+        try { if (super.data_updateParentArray) return super.data_updateParentArray(dataKey, rowIndex, colDef, newVal, displayVal); } catch (e) {}
     }
 }
 
