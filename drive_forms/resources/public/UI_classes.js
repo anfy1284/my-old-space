@@ -2254,6 +2254,32 @@ class DataForm extends Form {
                 }
                 break;
             }
+            case 'htmlViewer': {
+                try {
+                    const iframe = document.createElement('iframe');
+                    iframe.style.width  = item.width  || '100%';
+                    iframe.style.height = item.height || '400px';
+                    iframe.style.border = item.border != null ? item.border : '1px solid #888';
+                    iframe.style.backgroundColor = '#fff';
+                    iframe.setAttribute('sandbox', 'allow-same-origin allow-popups allow-scripts allow-modals');
+                    contentArea.appendChild(iframe);
+                    const viewer = {
+                        element: iframe,
+                        setValue(html) {
+                            const doc = iframe.contentDocument || iframe.contentWindow.document;
+                            doc.open(); doc.write(html); doc.close();
+                        },
+                        setUrl(url) { iframe.src = url; },
+                        print() {
+                            try { iframe.contentWindow.print(); } catch(e) { window.print(); }
+                        }
+                    };
+                    if (item.name) this.controlsMap[item.name] = viewer;
+                } catch (e) {
+                    console.error('Error creating htmlViewer control', e);
+                }
+                break;
+            }
             default:
                 console.warn('Unknown layout item type:', item.type);
         }

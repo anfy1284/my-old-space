@@ -1,0 +1,7 @@
+{
+    "level": "app",
+    "system": ["mySpace"],
+    "access": ["admin", "user"],
+    "autoStart": true,
+    "dependencies": {}
+}

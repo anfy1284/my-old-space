@@ -124,6 +124,19 @@ async function applyChanges(payload, sessionID) {
         }
 
         const parentUID = recordId;
+
+        // Вызываем серверное событие onBeforeSave ДО записи основного объекта,
+        // чтобы прикладной код мог заполнить скрытые обязательные поля
+        // (напр. organizationId) прямо в changes.
+        await dispatchServerEvent('onBeforeSave', {
+            tableName,
+            record:          null,       // запись ещё не прочитана
+            changes,
+            tabularSections: tabularSectionsData || {},
+            parentUID,
+            isNew:           !recordId || !!dsObj.isNew
+        }, { tableName, sessionID });
+
         if (recordId && !dsObj.isNew) {
             // Update existing record
             console.log(`[uniRecordForm] Updating ${tableName} UID=${recordId} with`, changes);
@@ -153,19 +166,6 @@ async function applyChanges(payload, sessionID) {
             } catch(e) {
                 console.warn('[TS_DEBUG] Could not load parent record:', e && e.message);
             }
-        }
-
-        // Вызываем серверное событие onBeforeSave если зарегистрировано в saveLayout.
-        // Прикладной обработчик получает полный контекст и может изменить данные напрямую
-        // (заполнить скрытые поля, проставить organizationId в строки ТЧ и т.д.).
-        if (tabularSectionsData) {
-            await dispatchServerEvent('onBeforeSave', {
-                tableName,
-                record:          parentRecord,
-                changes,
-                tabularSections: tabularSectionsData,
-                parentUID
-            }, { tableName, sessionID });
         }
 
         // Сохраняем табличные части (стратегия: DELETE по фильтру родителя + INSERT текущих строк)
@@ -232,6 +232,16 @@ async function applyChanges(payload, sessionID) {
                             const rowData = Object.assign({}, row);
                             rowData[parentField] = parentUID;
 
+                            // Приведение пустых строк к null для числовых полей
+                            for (const [fn, fd] of Object.entries(sectFields)) {
+                                if (rowData[fn] === '' || rowData[fn] === undefined) {
+                                    const t = (fd.type || '').toUpperCase();
+                                    if (t === 'INTEGER' || t === 'FLOAT' || t === 'DECIMAL' || t === 'DOUBLE' || t === 'NUMBER' || t === 'REAL') {
+                                        rowData[fn] = fd.defaultValue != null ? fd.defaultValue : null;
+                                    }
+                                }
+                            }
+
                             // === СЕРВЕРНАЯ ВАЛИДАЦИЯ БЕЗОПАСНОСТИ ===
                             // Проверяем FK-поля, ссылающиеся на другие ТЧ той же родительской записи.
                             // Это не позволяет клиенту подставить UID из чужой записи (напр. чужой брони).
@@ -243,6 +253,8 @@ async function applyChanges(payload, sessionID) {
                                 if (!tsTableNames.has(refTable) || refTable === sectionTableName) continue;
                                 const fkVal = rowData[fieldName];
                                 if (!fkVal) {
+                                    // Если поле допускает NULL — пропускаем проверку, это нормально
+                                    if (fieldDef.allowNull === true) continue;
                                     // Поле обязательное (межсекционный FK) — без него INSERT всё равно упадёт
                                     const msg = `Строка ${ri + 1} секции «${sectionTableName}»: поле «${fieldName}» не заполнено — строка пропущена`;
                                     console.warn('[TS_SECURITY]', msg);
