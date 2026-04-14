@@ -1782,6 +1782,7 @@ class DataForm extends Form {
         this._modified = false;
         this._originalTitle = '';
         this._closing = false; // guard against recursive close
+        this._clientScript = null; // UID клиентского скрипта (из saveLayout({ clientScript }))
     }
 
     // Override setTitle to keep track of the base (non-modified) title
@@ -2143,9 +2144,12 @@ class DataForm extends Form {
                 try {
                     const action = item.action;
                     const params = item.params || {};
-                    btn.onClick = (ev) => {
-                        try { if (action && this && typeof this.doAction === 'function') this.doAction(action, params); } catch (e) {}
-                    };
+                    if (action) {
+                        btn.onClick = (ev) => {
+                            try { if (this && typeof this.doAction === 'function') this.doAction(action, params); } catch (e) {}
+                        };
+                    }
+                    // Если action нет — onClick будет назначен через _wireItemEvents (events.onClick)
                 } catch (e) {}
 
                 try { if (item.name) this.controlsMap[item.name] = btn; } catch (e) {}
@@ -2254,11 +2258,20 @@ class DataForm extends Form {
                 console.warn('Unknown layout item type:', item.type);
         }
 
-        // Универсальная привязка клиентских событий на CUI-объект.
-        // events: { onMouseOver: { clientScript: uid, fn: 'handler' }, onRowActivate: { ... } }
+        // Сбор событий: явные events + top-level onXxx свойства элемента
         try {
-            if (item.events && item.name && this.controlsMap[item.name]) {
-                this._wireItemEvents(this.controlsMap[item.name], item.events);
+            if (item.name && this.controlsMap[item.name]) {
+                let mergedEvents = null;
+                // 1. Явно описанные events: { onClick: ..., onRowActivate: ... }
+                if (item.events) mergedEvents = Object.assign({}, item.events);
+                // 2. Top-level onXxx свойства (onAction, onClick, onChange, ...)
+                for (const k of Object.keys(item)) {
+                    if (k.length > 2 && k[0] === 'o' && k[1] === 'n' && k[2] === k[2].toUpperCase() && k !== 'options') {
+                        if (!mergedEvents) mergedEvents = {};
+                        if (!mergedEvents[k]) mergedEvents[k] = item[k];
+                    }
+                }
+                if (mergedEvents) this._wireItemEvents(this.controlsMap[item.name], mergedEvents);
             }
         } catch(e) {}
     }
@@ -2283,6 +2296,31 @@ class DataForm extends Form {
             onBlur:        'blur',
             onContextMenu: 'contextmenu',
         };
+        const formSelf = this;
+        // Нормализация binding: строка 'fnName' → { clientScript: form._clientScript, fn: 'fnName' }
+        // Объект без clientScript → подставляем form._clientScript
+        const normalizeBinding = (raw) => {
+            if (typeof raw === 'string') {
+                return { clientScript: formSelf._clientScript, fn: raw };
+            }
+            if (raw && typeof raw === 'object') {
+                if (!raw.clientScript && formSelf._clientScript) {
+                    raw = Object.assign({}, raw, { clientScript: formSelf._clientScript });
+                }
+                return raw;
+            }
+            return null;
+        };
+        // Резолв {data.field} плейсхолдеров из _dataMap формы
+        const resolveParams = (val) => {
+            if (typeof val === 'string') return val.replace(/\{data\.([^}]+)\}/g, (_, field) => {
+                const entry = formSelf._dataMap && formSelf._dataMap[field];
+                return (entry && entry.value !== undefined) ? entry.value : '';
+            });
+            if (Array.isArray(val)) return val.map(resolveParams);
+            if (val && typeof val === 'object') { const out = {}; for (const k in val) out[k] = resolveParams(val[k]); return out; }
+            return val;
+        };
         const loadAndCallScript = async (binding, args) => {
             try {
                 const uid = binding.clientScript;
@@ -2295,13 +2333,23 @@ class DataForm extends Form {
                     window._clientScriptCache[uid] = (new Function(await resp.text()))();
                 }
                 const mod = window._clientScriptCache[uid];
-                if (mod && typeof mod[fn] === 'function') await mod[fn](...args);
+                if (mod && typeof mod[fn] === 'function') {
+                    // Контекст: форма + резолвленные fnParams
+                    const ctx = { form: formSelf };
+                    if (binding.fnParams) ctx.fnParams = resolveParams(binding.fnParams);
+                    await mod[fn](...args, ctx);
+                }
             } catch(e) { console.error('[_wireItemEvents] script error:', e); }
         };
-        for (const [eventName, binding] of Object.entries(events || {})) {
+        for (const [eventName, rawBinding] of Object.entries(events || {})) {
+            if (!rawBinding) continue;
+            const binding = normalizeBinding(rawBinding);
             if (!binding) continue;
             const domEvt = DOM_MAP[eventName];
-            if (domEvt) {
+            // Если у контрола уже есть свойство с именем события (напр. Button.onClick) —
+            // обрабатываем как объектный колбэк, а не DOM, чтобы избежать двойного вызова.
+            const hasOwnCallback = (eventName in ctrl) || (typeof ctrl[eventName] === 'function');
+            if (domEvt && !hasOwnCallback) {
                 // DOM-событие: вешаем на element
                 const el = ctrl.element || (typeof ctrl.getElement === 'function' && ctrl.getElement());
                 if (el) {
@@ -2314,7 +2362,7 @@ class DataForm extends Form {
                     new ResizeObserver(entries => loadAndCallScript(binding, [entries])).observe(el);
                 }
             } else {
-                // Объектный калбэк: onRowActivate, onSelect, onChange...
+                // Объектный калбэк: onRowActivate, onSelect, onChange, onAction...
                 // Цепляем поверх уже установленного обработчика (напр. masterFor), не перезаписываем.
                 const existing = ctrl[eventName];
                 ctrl[eventName] = typeof existing === 'function'
@@ -2379,6 +2427,7 @@ class DataForm extends Form {
             if (both && (Array.isArray(both.layout) || Array.isArray(both.data))) {
                 this.layout = Array.isArray(both.layout) ? both.layout : (both.layout && Array.isArray(both.layout.layout) ? both.layout.layout : []);
                 try { this._datasetId = both.datasetId || null; } catch (e) { this._datasetId = null; }
+                try { this._clientScript = both.clientScript || null; } catch (e) {}
                 this._dataMap = {};
                 if (both.data && Array.isArray(both.data)) {
                     for (const rec of both.data) {

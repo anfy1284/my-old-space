@@ -51,7 +51,7 @@ async function getLayoutWithData(params, sessionID) {
                     table: params.tableName,
                     id: params.recordID || params.recordId || params.id
                 });
-                return { layout: spec.layout, data: spec.data, datasetId };
+                return { layout: spec.layout, data: spec.data, datasetId, clientScript: spec.clientScript || null };
             } catch (e) {
                 // fallthrough to default behaviour on error
                 console.error('[uniRecordForm/getLayoutWithData] generateFormSpec error:', e && e.message || e);
@@ -501,6 +501,7 @@ async function generateFormSpec(tableName, params, sessionID) {
 
         // Check for a custom layout stored in server memory before building the default one
         let layout;
+        let clientScript = null;
         try {
             const layoutMemory = require('../../drive_root/layoutMemory');
             // Быстрая sync-проверка: есть ли вообще кастомный лейаут для этой таблицы.
@@ -511,6 +512,7 @@ async function generateFormSpec(tableName, params, sessionID) {
                 if (customLayout) {
                     // Deep clone to avoid mutating the cached array (splice/push below would corrupt it)
                     layout = JSON.parse(JSON.stringify(customLayout.layout || customLayout));
+                    clientScript = customLayout.clientScript || null;
                 }
             }
         } catch (e) {
@@ -821,7 +823,7 @@ async function generateFormSpec(tableName, params, sessionID) {
             time: Date.now()
         });
 
-        return { data, layout, datasetId };
+        return { data, layout, datasetId, clientScript };
     } catch (e) {
         console.error('[uniRecordForm/generateFormSpec] failed:', e && e.message || e);
         return { data: [], layout: [] };

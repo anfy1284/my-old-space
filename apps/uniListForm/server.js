@@ -45,9 +45,11 @@ async function getLayoutWithData(params, sessionID) {
                     const customLayout = await layoutMemory.getLayoutForUser('uniListForm', tableName, userRole);
                     if (customLayout) {
                         const data = getData(params);
-                        const payload = { layout: customLayout, data: data || [], params: params || {} };
+                        const clLayout = customLayout.layout || customLayout;
+                        const clientScript = customLayout.clientScript || null;
+                        const payload = { layout: clLayout, data: data || [], params: params || {} };
                         const datasetId = dataApp.storeDataset(payload);
-                        return { layout: customLayout, data: payload.data, datasetId };
+                        return { layout: clLayout, data: payload.data, datasetId, clientScript };
                     }
                 }
             } catch (e) {

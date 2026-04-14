@@ -5,13 +5,15 @@
 // apps look up a stored layout here.
 //
 // Public API:
-//   saveLayout({ appName, tableName, roles, layout, events })
-//     — saves layout and optional event handlers for one or more roles.
+//   saveLayout({ appName, tableName, roles, layout, events, clientScript })
+//     — saves layout, optional event handlers, and optional clientScript UID.
 //       Pass roles: '*'  to match any role.
 //       events: { onBeforeSave: { serverScript, fn } } — server-side event bindings.
+//       clientScript: UID клиентского скрипта (loadScript), используется как дефолт
+//       для всех events в лейауте (чтобы не дублировать clientScript в каждом binding).
 //
 //   getLayoutForUser(appName, tableName, userRole)
-//     — returns { layout, events } or null if not found.
+//     — returns { layout, events, clientScript } or null if not found.
 //       First tries exact role match, then falls back to wildcard '*'.
 //
 //   getUserRoleBySession(sessionID)
@@ -64,14 +66,16 @@ function makePrefix(appName, tableName) {
  * @param {Array}           opts.layout    — layout JSON array
  * @param {object}          [opts.events]  — server-side event handlers, e.g.:
  *   { onBeforeSave: { serverScript: 'myScript', fn: 'onBeforeSave' } }
+ * @param {string}          [opts.clientScript] — UID клиентского скрипта (loadScript).
+ *   Используется как дефолт для всех events в лейауте, чтобы не дублировать clientScript в каждом binding.
  */
-async function saveLayout({ appName, tableName, roles, layout, events }) {
+async function saveLayout({ appName, tableName, roles, layout, events, clientScript }) {
     if (!appName || !tableName || !Array.isArray(layout)) {
         throw new Error('[layoutMemory.saveLayout] appName, tableName and layout (Array) are required');
     }
     const roleList = Array.isArray(roles) ? roles : (roles ? [String(roles)] : ['*']);
     for (const role of roleList) {
-        await memoryStore.set(NAMESPACE, makeKey(appName, tableName, role), { layout, events: events || null });
+        await memoryStore.set(NAMESPACE, makeKey(appName, tableName, role), { layout, events: events || null, clientScript: clientScript || null });
     }
     // Register prefix so hot-path can skip tables with no layouts at all
     _registeredPrefixes.add(makePrefix(appName, tableName));
@@ -99,13 +103,13 @@ async function getLayoutForUser(appName, tableName, userRole) {
     // 1. Exact role match (in-memory Map → instant)
     if (userRole) {
         const stored = memoryStore.getSync(NAMESPACE, makeKey(appName, tableName, userRole));
-        if (stored) return stored.layout !== undefined ? stored : { layout: stored, events: null };
+        if (stored) return stored.layout !== undefined ? stored : { layout: stored, events: null, clientScript: null };
     }
 
     // 2. Wildcard match (any role)
     const fallback = memoryStore.getSync(NAMESPACE, makeKey(appName, tableName, '*'));
     if (!fallback) return null;
-    return fallback.layout !== undefined ? fallback : { layout: fallback, events: null };
+    return fallback.layout !== undefined ? fallback : { layout: fallback, events: null, clientScript: null };
 }
 
 /**
