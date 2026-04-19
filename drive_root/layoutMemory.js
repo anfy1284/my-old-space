@@ -39,6 +39,11 @@ const NAMESPACE = 'layouts';
 // no custom layout is registered for the given table.
 const _registeredPrefixes = new Set();
 
+// Table-level icon registry: tableName → iconPath.
+// Populated automatically by saveLayout when formIcon is provided.
+// Any app can query getTableIcon(tableName) without needing its own layout.
+const _tableIcons = new Map();
+
 
 
 /**
@@ -68,17 +73,20 @@ function makePrefix(appName, tableName) {
  *   { onBeforeSave: { serverScript: 'myScript', fn: 'onBeforeSave' } }
  * @param {string}          [opts.clientScript] — UID клиентского скрипта (loadScript).
  *   Используется как дефолт для всех events в лейауте, чтобы не дублировать clientScript в каждом binding.
+ * @param {string}          [opts.formIcon] — URL иконки формы для заголовка и таскбара.
  */
-async function saveLayout({ appName, tableName, roles, layout, events, clientScript }) {
+async function saveLayout({ appName, tableName, roles, layout, events, clientScript, formIcon }) {
     if (!appName || !tableName || !Array.isArray(layout)) {
         throw new Error('[layoutMemory.saveLayout] appName, tableName and layout (Array) are required');
     }
     const roleList = Array.isArray(roles) ? roles : (roles ? [String(roles)] : ['*']);
     for (const role of roleList) {
-        await memoryStore.set(NAMESPACE, makeKey(appName, tableName, role), { layout, events: events || null, clientScript: clientScript || null });
+        await memoryStore.set(NAMESPACE, makeKey(appName, tableName, role), { layout, events: events || null, clientScript: clientScript || null, formIcon: formIcon || null });
     }
     // Register prefix so hot-path can skip tables with no layouts at all
     _registeredPrefixes.add(makePrefix(appName, tableName));
+    // Auto-register table-level icon
+    if (formIcon) _tableIcons.set(tableName, formIcon);
     console.log(`[layoutMemory] saved layout for ${appName}/${tableName} roles=[${roleList.join(',')}]`);
 }
 
@@ -103,13 +111,13 @@ async function getLayoutForUser(appName, tableName, userRole) {
     // 1. Exact role match (in-memory Map → instant)
     if (userRole) {
         const stored = memoryStore.getSync(NAMESPACE, makeKey(appName, tableName, userRole));
-        if (stored) return stored.layout !== undefined ? stored : { layout: stored, events: null, clientScript: null };
+        if (stored) return stored.layout !== undefined ? stored : { layout: stored, events: null, clientScript: null, formIcon: null };
     }
 
     // 2. Wildcard match (any role)
     const fallback = memoryStore.getSync(NAMESPACE, makeKey(appName, tableName, '*'));
     if (!fallback) return null;
-    return fallback.layout !== undefined ? fallback : { layout: fallback, events: null, clientScript: null };
+    return fallback.layout !== undefined ? fallback : { layout: fallback, events: null, clientScript: null, formIcon: null };
 }
 
 /**
@@ -145,4 +153,13 @@ function hasRegistered(appName, tableName) {
     return _registeredPrefixes.has(makePrefix(appName, tableName));
 }
 
-module.exports = { saveLayout, getLayoutForUser, getUserRoleBySession, hasRegistered };
+/**
+ * Get the icon registered for a table (set by any saveLayout with formIcon).
+ * @param {string} tableName
+ * @returns {string|null}
+ */
+function getTableIcon(tableName) {
+    return _tableIcons.get(tableName) || null;
+}
+
+module.exports = { saveLayout, getLayoutForUser, getUserRoleBySession, hasRegistered, getTableIcon };

@@ -42,6 +42,7 @@ try {
                     const tableName = params && (params.tableName);
                     const recordID = params && (params.recordID); 
                     if (!instanceOnOpen(tableName)) return;
+
                     // Capture the open params so loader overrides can forward them to server
                     const openParams = Object.assign({}, params || {});
                     // Normalize tableName/table -> tableName so server resolvers receive `params.tableName`

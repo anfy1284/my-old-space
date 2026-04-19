@@ -1,0 +1,6 @@
+{
+    "name": "general_icons",
+    "description": "Общие системные иконки фреймворка (CRUD, навигация, файлы, система...)",
+    "autoStart": false,
+    "access": { "user": true, "admin": true }
+}

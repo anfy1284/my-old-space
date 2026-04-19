@@ -259,6 +259,7 @@ try {
                 async onOpen(params) {
                     const tableName = params && (params.dbTable || params.table);
                     if (!instanceOnOpen(tableName)) return;
+
                     const openParams = Object.assign({}, params || {});
                     openParams.tableName = openParams.tableName || openParams.dbTable || openParams.table || '';
                     // Respect selectMode from openParams; default to false when absent

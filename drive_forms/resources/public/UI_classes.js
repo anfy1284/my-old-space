@@ -2123,7 +2123,9 @@ class DataForm extends Form {
                     const btnProps = Object.assign({}, properties || {}, { 
                         action: item.action, 
                         params: item.params || {},
-                        isStandard: (item.isStandard !== undefined) ? item.isStandard : true // По умолчанию считаем кнопки стандартными
+                        isStandard: (item.isStandard !== undefined) ? item.isStandard : true, // По умолчанию считаем кнопки стандартными
+                        icon: item.icon || properties.icon || null,
+                        showIcon: !!(item.icon || properties.icon)
                     });
                     if (typeof Button === 'function') {
                         btn = new Button(contentArea, btnProps);
@@ -7504,16 +7506,16 @@ class Table extends UIObject {
                 wrapper.appendChild(toolbarContainer);
 
                 const toolbarButtons = [
-                    { action: 'select',       caption: 'Выбрать' },
-                    { action: 'cancel',       caption: 'Отмена' },
-                    { action: 'recordOpen',   caption: 'Открыть' },
-                    { action: 'recordAdd',    caption: 'Добавить' },
-                    { action: 'recordDelete', caption: 'Удалить' },
-                    { action: 'listSettings', caption: 'Настройки' }
+                    { action: 'select',       caption: 'Выбрать',    icon: '/apps/general_icons/resources/public/16x16/select.png' },
+                    { action: 'cancel',       caption: 'Отмена',     icon: '/apps/general_icons/resources/public/16x16/cancel.png' },
+                    { action: 'recordOpen',   caption: 'Открыть',    icon: '/apps/general_icons/resources/public/16x16/open.png' },
+                    { action: 'recordAdd',    caption: 'Добавить',   icon: '/apps/general_icons/resources/public/16x16/add.png' },
+                    { action: 'recordDelete', caption: 'Удалить',    icon: '/apps/general_icons/resources/public/16x16/delete.png' },
+                    { action: 'listSettings', caption: 'Настройки',  icon: '/apps/general_icons/resources/public/16x16/settings.png' }
                 ];
 
                 for (const btnDef of toolbarButtons) {
-                    const btn = new Button(toolbarContainer, { caption: btnDef.caption });
+                    const btn = new Button(toolbarContainer, { caption: btnDef.caption, icon: btnDef.icon, showIcon: !!btnDef.icon });
                     btn.Draw(toolbarContainer);
                     const action = btnDef.action;
                     const self = this;
@@ -8387,7 +8389,6 @@ class DynamicTable extends Table {
                 filters: serverFilters
             });
             // Expect new format only: { columns, rows, totalRows }
-            try { console.log('[DynamicTable.loadData] server response for', this.tableName, { hasData: !!data, keys: data ? Object.keys(data) : null }); } catch(e) {}
             const columnsRaw = data && data.columns ? data.columns : [];
             const rows = data && data.rows ? data.rows : [];
             const total = data && data.totalRows ? data.totalRows : 0;
@@ -8411,7 +8412,6 @@ class DynamicTable extends Table {
                 // Try to infer columns from first row if server didn't provide them
                 if (rows && rows.length > 0 && typeof rows[0] === 'object') {
                     columns = Object.keys(rows[0]).map(k => ({ data: k, caption: k }));
-                    try { console.log('[DynamicTable.loadData] inferred columns from first row:', columns.map(c=>c.data)); } catch(e) {}
                 }
             }
             // Preload lookup lists once per column (avoid per-row lookups)
@@ -8471,7 +8471,6 @@ class DynamicTable extends Table {
             } catch (e) {
                 try { console.error('[DynamicTable.loadData] preload lookup lists error', e); } catch(_){}
             }
-            try { console.log('[DynamicTable.loadData] normalized columns count=', columns.length, 'captions=', columns.map(c=>c.caption).slice(0,50)); } catch(e) {}
             
             // Preserve manual column widths between refreshes
             if (this.columns && this.columns.length > 0) {
@@ -8585,7 +8584,20 @@ class DynamicTable extends Table {
                             if (d && d.type === 'dataChanged') {
                                 // Only react if message matches this table
                                 if (d.app === this.appName && d.tableName === this.tableName) {
-                                    try { const subs = window._dynamicTableSubscribers.get(sessionSharedKey); if (subs) subs.forEach(sub => { try { sub.dataCache = {}; } catch(e){}; try { if (typeof sub.refresh === 'function') sub.refresh(); } catch(e){} }); } catch(e){}
+                                    try {
+                                        const subs = window._dynamicTableSubscribers.get(sessionSharedKey);
+                                        if (subs) subs.forEach(sub => {
+                                            try { sub.dataCache = {}; } catch(e){}
+                                            // Debounce SSE refresh to avoid rapid cascading refreshes
+                                            try {
+                                                if (sub._sseRefreshTimer) clearTimeout(sub._sseRefreshTimer);
+                                                sub._sseRefreshTimer = setTimeout(() => {
+                                                    sub._sseRefreshTimer = null;
+                                                    if (typeof sub.refresh === 'function' && !sub._sseDestroyed) sub.refresh();
+                                                }, 300);
+                                            } catch(e){}
+                                        });
+                                    } catch(e){}
                                 }
                             }
                         } catch (e) { console.error('[DynamicTable] session SSE parse error', e); }
@@ -8664,7 +8676,14 @@ class DynamicTable extends Table {
                         if (subs && subs.size > 0) {
                             subs.forEach(sub => {
                                 try { sub.dataCache = {}; } catch (e) {}
-                                try { if (typeof sub.refresh === 'function') sub.refresh(); } catch (e) {}
+                                // Debounce SSE refresh
+                                try {
+                                    if (sub._sseRefreshTimer) clearTimeout(sub._sseRefreshTimer);
+                                    sub._sseRefreshTimer = setTimeout(() => {
+                                        sub._sseRefreshTimer = null;
+                                        if (typeof sub.refresh === 'function' && !sub._sseDestroyed) sub.refresh();
+                                    }, 300);
+                                } catch (e) {}
                             });
                         }
                     } catch (e) {}
@@ -8700,6 +8719,7 @@ class DynamicTable extends Table {
             this._sseDestroyed = true;
             console.log('[DynamicTable] destroy() called for', this.appName, this.tableName);
             try { if (this._scrollDebounce) { clearTimeout(this._scrollDebounce); this._scrollDebounce = null; } } catch (e) {}
+            try { if (this._sseRefreshTimer) { clearTimeout(this._sseRefreshTimer); this._sseRefreshTimer = null; } } catch (e) {}
             try {
                 if (this._scrollHandler && this.bodyContainer) {
                     this.bodyContainer.removeEventListener('scroll', this._scrollHandler);

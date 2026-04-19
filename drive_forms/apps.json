@@ -56,6 +56,10 @@
         {
             "name": "printPreview",
             "path": "/printPreview"
+        },
+        {
+            "name": "general_icons",
+            "path": "/general_icons"
         }
     ]
 }

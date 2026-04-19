@@ -779,8 +779,6 @@ async function getDynamicTableData(options) {
         // Auto-generate from model
         fields = await getTableMetadata(modelName);
     }
-    console.log(`[PERF] getTableMetadata: ${Date.now() - t1}ms`);
-
     // Build WHERE clause from filters
     const where = {};
     if (filters && Array.isArray(filters)) {
@@ -815,7 +813,7 @@ async function getDynamicTableData(options) {
     const t2 = Date.now();
     const dbGW = require('./dbGateway');
     const totalRows = await dbGW.execute({ operation: 'count', table: Model.tableName, where, context: dbContext });
-    console.log(`[PERF] Model.count: ${Date.now() - t2}ms`);
+
 
     // Calculate range with buffer (limited by server config)
     const bufferSize = Math.min(config.defaultBufferRows || 10, config.maxBufferRows);
@@ -840,12 +838,12 @@ async function getDynamicTableData(options) {
         },
         context: dbContext
     });
-    console.log(`[PERF] Model.findAll via dbGateway: ${Date.now() - t3}ms`);
+
 
     // Resolve foreign keys
     const t4 = Date.now();
     const resolvedData = await resolveTableForeignKeys(modelName, data, fields);
-    console.log(`[PERF] resolveTableForeignKeys: ${Date.now() - t4}ms`);
+
     
     // Add computed fields if fieldConfig is provided
     if (fieldConfig) {
@@ -861,7 +859,7 @@ async function getDynamicTableData(options) {
         fields = [...fields, ...computedFields];
     }
     
-    console.log(`[PERF] TOTAL getDynamicTableData: ${Date.now() - startTime}ms`);
+
 
     // Generate edit session ID for editable tables
     const editSessionId = crypto.randomBytes(16).toString('hex');
@@ -883,8 +881,34 @@ async function getDynamicTableData(options) {
     };
 }
 
+// In-memory LRU cache for FK display values: key = "table::UID" → displayValue
+const _fkDisplayCache = new Map();
+const _FK_CACHE_MAX = 2000;
+const _FK_CACHE_TTL = 60000; // 60 seconds
+
+function _fkCacheGet(table, uid) {
+    const key = `${table}::${uid}`;
+    const entry = _fkDisplayCache.get(key);
+    if (!entry) return undefined;
+    if (Date.now() - entry.ts > _FK_CACHE_TTL) {
+        _fkDisplayCache.delete(key);
+        return undefined;
+    }
+    return entry.val;
+}
+
+function _fkCacheSet(table, uid, displayValue) {
+    const key = `${table}::${uid}`;
+    if (_fkDisplayCache.size >= _FK_CACHE_MAX) {
+        // Evict oldest entry
+        const firstKey = _fkDisplayCache.keys().next().value;
+        _fkDisplayCache.delete(firstKey);
+    }
+    _fkDisplayCache.set(key, { val: displayValue, ts: Date.now() });
+}
+
 /**
- * Resolve foreign key display values
+ * Resolve foreign key display values (batched + cached)
  * @param {string} modelName - Source model name
  * @param {Array} dataArray - Array of data rows
  * @param {Array} fields - Field metadata from getTableMetadata
@@ -893,48 +917,87 @@ async function getDynamicTableData(options) {
 async function resolveTableForeignKeys(modelName, dataArray, fields) {
     const fkFields = fields.filter(f => f.foreignKey !== null);
 
-    console.log(`[resolveTableForeignKeys] Model: ${modelName}, FK fields:`, fkFields.map(f => f.name));
-
     if (fkFields.length === 0) {
         return dataArray;
     }
 
+    const fkDbGW = require('./dbGateway');
+    const { Op } = require('sequelize');
+
+    // Phase 1: Collect unique FK values per target table, check cache
+    // Map: fkTableName -> { displayField, uids: Set of uncached UIDs }
+    const tableBatches = new Map();
+
+    for (const fkField of fkFields) {
+        const fkTableName = fkField.foreignKey.table;
+        const displayField = fkField.foreignKey.displayField;
+        if (!tableBatches.has(fkTableName)) {
+            tableBatches.set(fkTableName, { displayField, uids: new Set() });
+        }
+        const batch = tableBatches.get(fkTableName);
+        for (const row of dataArray) {
+            const fkValue = row[fkField.name];
+            if (fkValue === null || fkValue === undefined) continue;
+            // Only add to batch if not already cached
+            if (_fkCacheGet(fkTableName, fkValue) === undefined) {
+                batch.uids.add(fkValue);
+            }
+        }
+    }
+
+    // Phase 2: Batch-fetch all uncached FK values (1 query per FK table)
+    const fetchPromises = [];
+    for (const [fkTableName, batch] of tableBatches) {
+        if (batch.uids.size === 0) continue;
+        const uidsArray = Array.from(batch.uids);
+        fetchPromises.push(
+            fkDbGW.execute({
+                operation: 'read',
+                table: fkTableName,
+                where: { UID: { [Op.in]: uidsArray } },
+                options: { raw: true, attributes: ['UID', batch.displayField] },
+                context: { sessionID: SYSTEM_SESSION_ID }
+            }).then(rows => {
+                // Populate cache from results
+                const rowMap = new Map();
+                if (Array.isArray(rows)) {
+                    for (const r of rows) {
+                        const displayValue = r[batch.displayField] || r.UID.toString();
+                        _fkCacheSet(fkTableName, r.UID, displayValue);
+                        rowMap.set(r.UID, displayValue);
+                    }
+                }
+                // Mark UIDs not found in DB as "(not found)"
+                for (const uid of uidsArray) {
+                    if (!rowMap.has(uid)) {
+                        _fkCacheSet(fkTableName, uid, `(not found: ${uid})`);
+                    }
+                }
+            }).catch(e => {
+                console.error(`[resolveTableForeignKeys] Batch FK error for ${fkTableName}:`, e.message);
+                // Cache error results so we don't retry immediately
+                for (const uid of uidsArray) {
+                    _fkCacheSet(fkTableName, uid, `(error: ${uid})`);
+                }
+            })
+        );
+    }
+    await Promise.all(fetchPromises);
+
+    // Phase 3: Assign display values from cache
     const result = [];
     for (const row of dataArray) {
         const resolvedRow = { ...row };
-
         for (const fkField of fkFields) {
             const fkValue = row[fkField.name];
-
-            console.log(`[FK] Field: ${fkField.name}, value: ${fkValue}, FK config:`, fkField.foreignKey);
-
             if (fkValue === null || fkValue === undefined) {
                 resolvedRow[`__${fkField.name}_display`] = '';
                 continue;
             }
-
-            // Find target model via dbGateway
             const fkTableName = fkField.foreignKey.table;
-            const fkDbGW = require('./dbGateway');
-            console.log(`[FK] Resolving FK for table ${fkTableName}`);
-
-            // Fetch display value
-            try {
-                const targetRow = await fkDbGW.execute({ operation: 'findByPk', table: fkTableName, where: { UID: fkValue }, options: { raw: true }, context: { sessionID: SYSTEM_SESSION_ID } });
-                console.log(`[FK] Found target row:`, targetRow);
-                if (targetRow) {
-                    const displayValue = targetRow[fkField.foreignKey.displayField] || targetRow.UID.toString();
-                    resolvedRow[`__${fkField.name}_display`] = displayValue;
-                    console.log(`[FK] Set __${fkField.name}_display = ${displayValue}`);
-                } else {
-                    resolvedRow[`__${fkField.name}_display`] = `(not found: ${fkValue})`;
-                }
-            } catch (e) {
-                console.error(`[resolveTableForeignKeys] Error resolving FK ${fkField.name}:`, e.message);
-                resolvedRow[`__${fkField.name}_display`] = `(error: ${fkValue})`;
-            }
+            const cached = _fkCacheGet(fkTableName, fkValue);
+            resolvedRow[`__${fkField.name}_display`] = cached !== undefined ? cached : '';
         }
-
         result.push(resolvedRow);
     }
 
@@ -1069,6 +1132,14 @@ module.exports.getDynamicTableData = getDynamicTableData;
 module.exports.resolveTableForeignKeys = resolveTableForeignKeys;
 module.exports.recordTableEdit = recordTableEdit;
 module.exports.commitTableEdits = commitTableEdits;
+module.exports.invalidateFkCache = function(tableName) {
+    // Invalidate FK display cache entries for a specific table
+    // Called by dbGateway after create/update/delete operations
+    if (!tableName) { _fkDisplayCache.clear(); return; }
+    for (const key of _fkDisplayCache.keys()) {
+        if (key.startsWith(tableName + '::')) _fkDisplayCache.delete(key);
+    }
+};
 
 /**
  * Lightweight lookup: return id and display field for a table (for dropdowns/lookups)

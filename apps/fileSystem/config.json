@@ -28,7 +28,8 @@
                     "items": [
                         {
                             "caption": "File System",
-                            "action": "open"
+                            "action": "open",
+                            "icon": "/apps/general_icons/resources/public/16x16/folder_open.png"
                         }
                     ]
                 }

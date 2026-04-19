@@ -18,7 +18,8 @@
                     "items": [
                         {
                             "caption": "User Settings",
-                            "action": "open"
+                            "action": "open",
+                            "icon": "/apps/general_icons/resources/public/16x16/settings.png"
                         }
                     ]
                 }

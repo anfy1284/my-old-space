@@ -16,7 +16,7 @@ module.exports = async function(modelsDB) {
         // Build submenu items for administration
         const adminItems = defs.map(d => {
             const tableName = d.tableName || d.name;
-            return { caption: tableName, action: 'open', appName: 'uniListForm', params: { dbTable: tableName } };
+            return { caption: tableName, action: 'open', appName: 'uniListForm', params: { dbTable: tableName }, icon: '/apps/general_icons/resources/public/16x16/catalog.png' };
         });
 
         // Add Administration submenu under 'main'

@@ -47,9 +47,10 @@ async function getLayoutWithData(params, sessionID) {
                         const data = getData(params);
                         const clLayout = customLayout.layout || customLayout;
                         const clientScript = customLayout.clientScript || null;
+                        const formIcon = customLayout.formIcon || null;
                         const payload = { layout: clLayout, data: data || [], params: params || {} };
                         const datasetId = dataApp.storeDataset(payload);
-                        return { layout: clLayout, data: payload.data, datasetId, clientScript };
+                        return { layout: clLayout, data: payload.data, datasetId, clientScript, formIcon };
                     }
                 }
             } catch (e) {
@@ -61,7 +62,10 @@ async function getLayoutWithData(params, sessionID) {
         // Store the returned payload in server memory and expose a datasetId
         const payload = { layout: layout || [], data: data || [], params: params || {} };
         const datasetId = dataApp.storeDataset(payload);
-        return { layout: payload.layout, data: payload.data, datasetId };
+        // Table icon: check registry (set by any saveLayout), fallback to catalog
+        const layoutMemory2 = require('../../drive_root/layoutMemory');
+        const formIcon = (tableName && layoutMemory2.getTableIcon(tableName)) || '/apps/general_icons/resources/public/16x16/catalog.png';
+        return { layout: payload.layout, data: payload.data, datasetId, formIcon };
     } catch (e) {
         return { layout: [], data: [], datasetId: null };
     }

@@ -51,7 +51,7 @@ async function getLayoutWithData(params, sessionID) {
                     table: params.tableName,
                     id: params.recordID || params.recordId || params.id
                 });
-                return { layout: spec.layout, data: spec.data, datasetId, clientScript: spec.clientScript || null };
+                return { layout: spec.layout, data: spec.data, datasetId, clientScript: spec.clientScript || null, formIcon: spec.formIcon || null };
             } catch (e) {
                 // fallthrough to default behaviour on error
                 console.error('[uniRecordForm/getLayoutWithData] generateFormSpec error:', e && e.message || e);
@@ -514,6 +514,7 @@ async function generateFormSpec(tableName, params, sessionID) {
         // Check for a custom layout stored in server memory before building the default one
         let layout;
         let clientScript = null;
+        let formIcon = null;
         try {
             const layoutMemory = require('../../drive_root/layoutMemory');
             // Быстрая sync-проверка: есть ли вообще кастомный лейаут для этой таблицы.
@@ -525,6 +526,7 @@ async function generateFormSpec(tableName, params, sessionID) {
                     // Deep clone to avoid mutating the cached array (splice/push below would corrupt it)
                     layout = JSON.parse(JSON.stringify(customLayout.layout || customLayout));
                     clientScript = customLayout.clientScript || null;
+                    formIcon = customLayout.formIcon || null;
                 }
             }
         } catch (e) {
@@ -835,7 +837,13 @@ async function generateFormSpec(tableName, params, sessionID) {
             time: Date.now()
         });
 
-        return { data, layout, datasetId, clientScript };
+        // Default formIcon: check table icon registry (set by any saveLayout), fallback to catalog
+        if (!formIcon) {
+            const layoutMemory2 = require('../../drive_root/layoutMemory');
+            formIcon = layoutMemory2.getTableIcon(tableName) || '/apps/general_icons/resources/public/16x16/catalog.png';
+        }
+
+        return { data, layout, datasetId, clientScript, formIcon };
     } catch (e) {
         console.error('[uniRecordForm/generateFormSpec] failed:', e && e.message || e);
         return { data: [], layout: [] };

@@ -110,7 +110,10 @@ async function executor(request) {
                     data.UID = `${time}-${hash}-${random}`;
                 }
             }
-            return await Model.create(data, options);
+            const createResult = await Model.create(data, options);
+            // Invalidate FK display cache for this table (display values may have changed)
+            try { require('./globalServerContext').invalidateFkCache(Model.tableName); } catch(e) {}
+            return createResult;
         }
 
         case 'update': {
@@ -127,12 +130,18 @@ async function executor(request) {
                 });
             }
 
-            return await Model.update(data, { where, ...options });
+            const updateResult = await Model.update(data, { where, ...options });
+            // Invalidate FK display cache for this table
+            try { require('./globalServerContext').invalidateFkCache(Model.tableName); } catch(e) {}
+            return updateResult;
         }
 
         case 'delete': {
             if (!where) throw new Error('[dbGateway] delete requires where');
-            return await Model.destroy({ where, ...options });
+            const deleteResult = await Model.destroy({ where, ...options });
+            // Invalidate FK display cache for this table
+            try { require('./globalServerContext').invalidateFkCache(Model.tableName); } catch(e) {}
+            return deleteResult;
         }
 
         default:

@@ -6,7 +6,7 @@
     "mainMenuCommands": [
         {"id": "main", "items": [
             { "caption": "apps", "items": [
-                { "caption": "Messenger", "action": "open"}
+                { "caption": "Messenger", "action": "open", "icon": "/apps/general_icons/resources/public/16x16/email.png"}
             ]}
         ]}
     ]

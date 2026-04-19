@@ -75,6 +75,21 @@ const Taskbar = {
         text.style.whiteSpace = 'nowrap';
         text.style.overflow = 'hidden';
         text.style.textOverflow = 'ellipsis';
+
+        // Icon before text (always created, hidden until formIcon is set)
+        const icon = document.createElement('img');
+        icon.style.width = '16px';
+        icon.style.height = '16px';
+        icon.style.marginRight = '3px';
+        icon.style.flexShrink = '0';
+        if (form.formIcon) {
+            icon.src = form.formIcon;
+            icon.style.display = 'inline';
+        } else {
+            icon.style.display = 'none';
+        }
+        form._taskbarIcon = icon;
+        btn.appendChild(icon);
         btn.appendChild(text);
         
         btn.onclick = () => {
