@@ -1,5 +1,7 @@
 {
     "level": "app",
+    "type": "DataForm",
+    "autoStart": true,
     "system": [
         "mySpace"
     ],

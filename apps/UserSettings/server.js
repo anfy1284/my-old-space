@@ -41,9 +41,9 @@ async function getSettings(params, sessionID) {
                 typeId: typeId
             };
 
-            // Add options for enum type
-            if (typeId === 5 && field.options) {
-                fieldData.options = field.options; // Already JSON in SQLite
+            // Add options for enum type and reference fields
+            if (field.options) {
+                fieldData.options = field.options;
             }
 
             // Get value table name from type
@@ -73,6 +73,23 @@ async function getSettings(params, sessionID) {
             }
 
             fieldData.value = value;
+
+            // Для ссылочных полей (referenceTable в options) — резолвим отображаемое значение
+            if (field.options && typeof field.options === 'object' && !Array.isArray(field.options) && field.options.referenceTable) {
+                const refTableName = field.options.referenceTable;
+                const refModelName = refTableName.split('_').map(p => p.charAt(0).toUpperCase() + p.slice(1)).join('');
+                if (modelsDB[refModelName] && value) {
+                    try {
+                        const refRecord = await modelsDB[refModelName].findByPk(value);
+                        if (refRecord) {
+                            fieldData.referenceDisplay = refRecord[field.options.displayField || 'name'];
+                        }
+                    } catch (e) {
+                        console.warn('[UserSettings] Failed to resolve reference for field:', field.name, e.message);
+                    }
+                }
+            }
+
             fields.push(fieldData);
         }
 

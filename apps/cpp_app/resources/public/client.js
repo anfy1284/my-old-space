@@ -1,69 +1,95 @@
-{
-    // Load the WebAssembly module
-    const params = (window.AppParams && window.AppParams['cpp_app']) || {};
-    const programName = params.program || 'CppApp';
-    const wasmJsUrl = `/apps/cpp_app/resources/public/${programName}.js`;
-    const factoryFuncName = 'create' + programName;
+(function () {
+    const APP_NAME = 'cpp_app';
 
-    const form = new Form();
-    form.setTitle('C++ Application: ' + programName);
-    form.setX(100);
-    form.setY(100);
-    form.setWidth(600);
-    form.setHeight(400);
-    form.setAnchorToWindow('center');
+    const descriptor = {
+        config: { allowMultipleInstances: true },
 
-    // Create a text area to show output
-    const outputArea = document.createElement('textarea');
-    outputArea.style.width = '100%';
-    outputArea.style.height = '100%';
-    outputArea.style.backgroundColor = 'black';
-    outputArea.style.color = '#00ff00';
-    outputArea.style.fontFamily = 'monospace';
-    outputArea.style.border = 'none';
-    outputArea.style.resize = 'none';
-    outputArea.readOnly = true;
+        createInstance: async function (params) {
+            const openParams = params || {};
+            const programName = openParams.program || 'CppApp';
+            const wasmJsUrl = `/apps/cpp_app/resources/public/${programName}.js`;
+            const factoryFuncName = 'create' + programName;
 
-    form.Draw(document.body);
-    form.getContentArea().appendChild(outputArea);
+            const appForm = new DataForm(APP_NAME);
+            appForm.setTitle('C++ Application: ' + programName);
+            appForm.setWidth(600);
+            appForm.setHeight(400);
+            appForm.setAnchorToWindow('center');
 
-    // Function to append text to the output area
-    function print(text) {
-        outputArea.value += text + '\n';
-        outputArea.scrollTop = outputArea.scrollHeight;
-    }
+            let outputArea = null;
 
-    // Check if script is already loaded to avoid re-declaring the global function if not modularized properly,
-    // but since we use MODULARIZE, we get a factory function.
-    // However, we need to load the script tag to get that factory function into the global scope (or handle it manually).
+            function print(text) {
+                if (!outputArea) return;
+                outputArea.value += text + '\n';
+                outputArea.scrollTop = outputArea.scrollHeight;
+            }
 
-    const script = document.createElement('script');
-    script.src = wasmJsUrl;
-    script.onload = () => {
-        if (typeof window[factoryFuncName] === 'function') {
-            print(`Loading WebAssembly module (${programName})...`);
-            window[factoryFuncName]({
-                print: function (text) {
-                    print(text);
+            function loadWasmModule() {
+                const script = document.createElement('script');
+                script.src = wasmJsUrl;
+                script.onload = () => {
+                    if (typeof window[factoryFuncName] === 'function') {
+                        print('Loading WebAssembly module (' + programName + ')...');
+                        window[factoryFuncName]({
+                            print: function (text) { print(text); },
+                            printErr: function (text) { print('[ERR] ' + text); },
+                            canvas: null
+                        }).then(() => {
+                            print('Module loaded successfully!');
+                        }).catch(err => {
+                            print('Error loading module: ' + err);
+                        });
+                    } else {
+                        print('Error: ' + factoryFuncName + ' function not found. Build might be incorrect.');
+                    }
+                };
+                script.onerror = () => { print('Failed to load ' + wasmJsUrl); };
+                document.body.appendChild(script);
+            }
+
+            const instance = {
+                appName: APP_NAME,
+                form: appForm,
+
+                onOpen: async () => {
+                    appForm.getLayoutWithData = async () => ({ layout: [], data: [] });
+                    await appForm.Draw();
+
+                    const content = appForm.contentArea || (appForm.getContentArea && appForm.getContentArea());
+                    if (!content) return;
+                    content.innerHTML = '';
+                    content.style.padding = '0';
+
+                    outputArea = document.createElement('textarea');
+                    outputArea.style.width = '100%';
+                    outputArea.style.height = '100%';
+                    outputArea.style.backgroundColor = 'black';
+                    outputArea.style.color = '#00ff00';
+                    outputArea.style.fontFamily = 'monospace';
+                    outputArea.style.border = 'none';
+                    outputArea.style.resize = 'none';
+                    outputArea.readOnly = true;
+                    content.appendChild(outputArea);
+
+                    loadWasmModule();
                 },
-                printErr: function (text) {
-                    print('[ERR] ' + text);
-                },
-                canvas: null // No canvas for now, just text
-            }).then(module => {
-                print('Module loaded successfully!');
-                // The main() function in C++ is automatically called by default in Emscripten
-                // unless we set -s INVOKE_RUN=0. 
-                // If main() returns, the program exits.
-            }).catch(err => {
-                print('Error loading module: ' + err);
-            });
-        } else {
-            print(`Error: ${factoryFuncName} function not found. Build might be incorrect.`);
+
+                onAction: async () => false,
+
+                destroy: () => {
+                    try { appForm.close(); } catch (e) {}
+                }
+            };
+
+            appForm.instance = instance;
+            await instance.onOpen();
+            return instance;
         }
     };
-    script.onerror = () => {
-        print('Failed to load ' + wasmJsUrl);
-    };
-    document.body.appendChild(script);
-}
+
+    if (window.MySpace) {
+        window.MySpace.register(APP_NAME, descriptor);
+    } else {
+        console.error('[cpp_app] window.MySpace not found!');
+    }
+})();

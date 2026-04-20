@@ -80,6 +80,30 @@
             "displayName": "День рождения",
             "typeId": "000000000-roles-0004",
             "UID": "000000000-users-0006"
+        },
+        {
+            "name": "Language",
+            "displayName": "Язык",
+            "typeId": "000000000-roles-0001",
+            "options": { "referenceTable": "languages", "displayField": "name" },
+            "UID": "000000000-users-0007"
+        }
+    ],
+    "languages": [
+        {
+            "name": "English",
+            "code": "en",
+            "UID": "000000000-lang-0001"
+        },
+        {
+            "name": "Русский",
+            "code": "ru",
+            "UID": "000000000-lang-0002"
+        },
+        {
+            "name": "Deutsch",
+            "code": "de",
+            "UID": "000000000-lang-0003"
         }
     ]
 }

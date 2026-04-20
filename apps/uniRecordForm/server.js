@@ -106,6 +106,29 @@ async function applyChanges(payload, sessionID) {
             return { ok: false, error: 'No table context found in dataset' };
         }
 
+        // ── onSave: если для этой таблицы зарегистрировано событие onSave,
+        // сохранение выполняет прикладной серверный скрипт, а не стандартный dbGateway.
+        // Это нужно для виртуальных таблиц (EAV и др.), у которых нет Sequelize-модели.
+        try {
+            const layoutMemory = require('../../drive_root/layoutMemory');
+            if (layoutMemory.hasRegistered('uniRecordForm', tableName)) {
+                const userRole = await layoutMemory.getUserRoleBySession(sessionID);
+                const stored = await layoutMemory.getLayoutForUser('uniRecordForm', tableName, userRole);
+                if (stored && stored.events && stored.events.onSave) {
+                    const serverScriptStore = require('../../drive_root/serverScriptStore');
+                    const binding = stored.events.onSave;
+                    const entry = serverScriptStore.getServerScript(binding.serverScript, userRole || '*');
+                    const fn = entry && entry.scriptObj && entry.scriptObj[binding.fn || 'onSave'];
+                    if (typeof fn === 'function') {
+                        const result = await fn({ changes, tableName }, { sessionID });
+                        return result || { ok: true };
+                    }
+                }
+            }
+        } catch (e) {
+            console.error('[uniRecordForm] onSave event error:', e && e.message || e);
+        }
+
         const modelName = globalServerContext.getModelNameForTable(tableName) || tableName;
         const Model = globalServerContext.modelsDB[modelName];
 
@@ -422,6 +445,59 @@ async function generateFormSpec(tableName, params, sessionID) {
     console.log('[generateFormSpec] called with tableName:', tableName, 'params:', params);
     try {
         if (!tableName) return { data: [], layout: [] };
+
+        // ── Проверяем кастомный лейаут ДО загрузки модели ───────────────
+        // Это позволяет работать с «виртуальными» таблицами (EAV и др.),
+        // у которых нет собственной Sequelize-модели.
+        let customLayoutObj = null;
+        let clientScript = null;
+        let formIcon = null;
+        try {
+            const layoutMemory = require('../../drive_root/layoutMemory');
+            if (layoutMemory.hasRegistered('uniRecordForm', tableName)) {
+                const userRole = await layoutMemory.getUserRoleBySession(sessionID);
+                customLayoutObj = await layoutMemory.getLayoutForUser('uniRecordForm', tableName, userRole);
+                if (customLayoutObj) {
+                    clientScript = customLayoutObj.clientScript || null;
+                    formIcon = customLayoutObj.formIcon || null;
+                }
+            }
+        } catch (e) {
+            console.error('[generateFormSpec] custom layout early check error:', e && e.message || e);
+        }
+
+        // ── onLoadData: если в кастомном лейауте есть событие onLoadData,
+        // данные загружаются прикладным серверным скриптом, а не из модели БД.
+        if (customLayoutObj && customLayoutObj.events && customLayoutObj.events.onLoadData) {
+            try {
+                const serverScriptStore = require('../../drive_root/serverScriptStore');
+                const layoutMemory = require('../../drive_root/layoutMemory');
+                const userRole = await layoutMemory.getUserRoleBySession(sessionID);
+                const binding = customLayoutObj.events.onLoadData;
+                const entry = serverScriptStore.getServerScript(binding.serverScript, userRole || '*');
+                const fn = entry && entry.scriptObj && entry.scriptObj[binding.fn || 'onLoadData'];
+                if (typeof fn === 'function') {
+                    const result = await fn({ tableName, params }, { sessionID });
+                    const layout = JSON.parse(JSON.stringify(customLayoutObj.layout || []));
+                    const data = (result && result.data) || [];
+
+                    // Подставляем caption из result, если передан
+                    if (result && result.caption && layout[0]) {
+                        layout[0].caption = result.caption;
+                    }
+
+                    const datasetId = dataApp.storeDataset({
+                        layout, data, params: params || {},
+                        table: tableName,
+                        id: params && (params.recordID || params.recordId || params.id)
+                    });
+                    return { layout, data, datasetId, clientScript, formIcon };
+                }
+            } catch (e) {
+                console.error('[generateFormSpec] onLoadData dispatch error:', e && e.message || e);
+            }
+        }
+
         const fields = await buildTableFieldsFromModel(tableName);
         if (!Array.isArray(fields)) return { data: [], layout: [] };
 
@@ -513,24 +589,9 @@ async function generateFormSpec(tableName, params, sessionID) {
 
         // Check for a custom layout stored in server memory before building the default one
         let layout;
-        let clientScript = null;
-        let formIcon = null;
-        try {
-            const layoutMemory = require('../../drive_root/layoutMemory');
-            // Быстрая sync-проверка: есть ли вообще кастомный лейаут для этой таблицы.
-            // Если нет — сразу выходим, ни одного запроса в БД не делается.
-            if (layoutMemory.hasRegistered('uniRecordForm', tableName)) {
-                const userRole = await layoutMemory.getUserRoleBySession(sessionID);
-                const customLayout = await layoutMemory.getLayoutForUser('uniRecordForm', tableName, userRole);
-                if (customLayout) {
-                    // Deep clone to avoid mutating the cached array (splice/push below would corrupt it)
-                    layout = JSON.parse(JSON.stringify(customLayout.layout || customLayout));
-                    clientScript = customLayout.clientScript || null;
-                    formIcon = customLayout.formIcon || null;
-                }
-            }
-        } catch (e) {
-            console.error('[generateFormSpec] custom layout check error:', e && e.message || e);
+        if (customLayoutObj) {
+            // Deep clone to avoid mutating the cached array (splice/push below would corrupt it)
+            layout = JSON.parse(JSON.stringify(customLayoutObj.layout || customLayoutObj));
         }
         // Для новой записи генерируем UID заранее (нужен и для загрузки строк ТЧ)
         let effectiveRecordId = recordId;
