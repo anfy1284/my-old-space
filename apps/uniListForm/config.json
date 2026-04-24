@@ -1,6 +1,6 @@
 {
     "name": "uniListForm",
-    "autoStart": false,
+    "autoStart": true,
     "system": ["mySpace"],
     "access": ["admin", "user", "public"],
     "dependencies": {},

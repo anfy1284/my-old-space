@@ -3830,8 +3830,8 @@ class TextBox extends FormInput {
                         try { this._updateDateDisplay && this._updateDateDisplay(); } catch (_) {}
                         try { setTimeout(() => { try { this._setDateSection && this._setDateSection(this._dateSection || 0); } catch(_){} }, 0); } catch (_) {}
                     }
-                    // Open list on focus when in listMode
-                    if (this.listMode) {
+                    // Open list on focus when in listMode — only if triggered by user interaction (click/tab), not programmatic focus
+                    if (this.listMode && this._userInteracted) {
                         try { this._openList && this._openList(); } catch (_) {}
                     }
                 } catch (_) {}
@@ -3839,7 +3839,12 @@ class TextBox extends FormInput {
                 // this.element.style.borderLeft = '2px solid #000080';
             });
 
+            // Track user interaction to distinguish programmatic focus from real clicks/tabs
+            this.element.addEventListener('mousedown', () => { this._userInteracted = true; });
+            this.element.addEventListener('keydown', () => { this._userInteracted = true; });
+
             this.element.addEventListener('blur', (e) => {
+                this._userInteracted = false;
                 // this.element.style.borderTop = '2px solid #808080';
                 // this.element.style.borderLeft = '2px solid #808080';
             });
@@ -4359,7 +4364,7 @@ class TextBox extends FormInput {
                         const id = await window.MySpace.open('uniListForm', { dbTable: table, onSelectCallBack: cb, selectMode: true, readOnly: true });
                         console.log('[TextBox.onSelectionStart] Opened uniListForm instance:', id, 'for TextBox:', textBoxId);
                         const inst = (window.MySpace && typeof window.MySpace.getInstance === 'function') ? window.MySpace.getInstance(id) : null;
-                    } catch (e) {}
+                    } catch (e) { console.error('[TextBox.onSelectionStart] ERROR opening uniListForm for table:', table, e); }
                 })();
                 return;
             }

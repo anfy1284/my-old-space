@@ -2,6 +2,7 @@ const crypto = require('crypto');
 
 // Use the generic framework memory store (namespace: 'datasets')
 const memoryStore = require('../../drive_root/memory_store');
+const { tForSession, tfForSession } = require('../../drive_forms/globalServerContext');
 
 // UID generation utility
 let _util = null;
@@ -94,7 +95,7 @@ async function applyChanges(payload, sessionID) {
         } catch (e) { console.log('[uniRecordForm] dataset retrieval error', e); }
 
         if (!datasetId) {
-            return { ok: false, error: 'missing datasetId' };
+            return { ok: false, error: await tForSession('missing_datasetId', sessionID) };
         } else if (!dsObj) {
             return { ok: false, error: 'unknown datasetId: ' + datasetId };
         }
@@ -103,7 +104,7 @@ async function applyChanges(payload, sessionID) {
         const recordId = dsObj.id || (dsObj.params && (dsObj.params.recordID || dsObj.params.recordId || dsObj.params.id));
 
         if (!tableName) {
-            return { ok: false, error: 'No table context found in dataset' };
+            return { ok: false, error: await tForSession('no_table_context', sessionID) };
         }
 
         // ── onSave: если для этой таблицы зарегистрировано событие onSave,
@@ -279,7 +280,7 @@ async function applyChanges(payload, sessionID) {
                                     // Если поле допускает NULL — пропускаем проверку, это нормально
                                     if (fieldDef.allowNull === true) continue;
                                     // Поле обязательное (межсекционный FK) — без него INSERT всё равно упадёт
-                                    const msg = `Строка ${ri + 1} секции «${sectionTableName}»: поле «${fieldName}» не заполнено — строка пропущена`;
+                                const msg = await tfForSession('row_field_required', sessionID, { row: ri + 1, section: sectionTableName, field: fieldName });
                                     console.warn('[TS_SECURITY]', msg);
                                     saveWarnings.push(msg);
                                     securityOk = false;
@@ -288,7 +289,7 @@ async function applyChanges(payload, sessionID) {
                                 // Проверяем, что FK-значение принадлежит текущей записи (из реальных данных БД)
                                 const validSet = validSiblingUIDs[refTable];
                                 if (validSet && !validSet.has(fkVal)) {
-                                    const msg = `Строка ${ri + 1} секции «${sectionTableName}»: поле «${fieldName}» ссылается на запись, не принадлежащую текущему объекту — строка отклонена`;
+                                const msg = await tfForSession('row_field_fk_mismatch', sessionID, { row: ri + 1, section: sectionTableName, field: fieldName });
                                     console.error('[TS_SECURITY]', msg, `(fkVal=${fkVal})`);
                                     saveWarnings.push(msg);
                                     securityOk = false;
@@ -309,7 +310,7 @@ async function applyChanges(payload, sessionID) {
                             } catch (insertErr) {
                                 const errMsg = insertErr && insertErr.message || String(insertErr);
                                 console.error(`[TS_DEBUG] INSERT row[${ri}] FAILED:`, errMsg);
-                                saveWarnings.push(`Строка ${ri + 1} секции «${sectionTableName}»: ошибка сохранения — ${errMsg}`);
+                                saveWarnings.push(await tfForSession('row_save_error', sessionID, { row: ri + 1, section: sectionTableName, error: errMsg }));
                             }
                         }
                     }

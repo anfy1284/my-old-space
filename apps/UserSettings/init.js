@@ -113,7 +113,7 @@ module.exports = async function (modelsDB) {
 
         const controls = [];
         for (const field of settingsFields) {
-            const typeId = Number(field.typeId);
+            const typeName = field.type ? field.type.name : '';
             const ctrl = {
                 name: field.name,
                 data: field.name,
@@ -132,15 +132,15 @@ module.exports = async function (modelsDB) {
                         displayField: opts.displayField || 'name'
                     }
                 };
-            } else if (typeId === 3) {
+            } else if (typeName === 'boolean') {
                 ctrl.type = 'checkbox';
-            } else if (typeId === 4) {
+            } else if (typeName === 'date') {
                 ctrl.type = 'date';
-            } else if (typeId === 5 && field.options) {
+            } else if (typeName === 'enum' && field.options) {
                 ctrl.type = 'emunList';
-                const opts = Array.isArray(field.options) ? field.options :
+                const enumOpts = Array.isArray(field.options) ? field.options :
                     (typeof field.options === 'string' ? JSON.parse(field.options) : []);
-                ctrl.options = opts.map(function (o) { return { value: o, caption: o }; });
+                ctrl.options = enumOpts.map(function (o) { return { value: o, caption: o }; });
             } else {
                 ctrl.type = 'textbox';
             }

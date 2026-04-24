@@ -3,10 +3,16 @@
 const fs = require('fs');
 const path = require('path');
 const globalRoot = require('../drive_root/globalServerContext');
+const i18n = require('../drive_root/i18n');
 
 // Initialize dbGateway forms-level middleware
 require('./dbGateway');
 console.log('[drive_forms/init] dbGateway forms middleware initialized');
+
+// Load i18n registry: cascade-collect all i18n.json files
+const projectRoot = globalRoot.getProjectRoot() || process.cwd();
+i18n.loadI18n(projectRoot);
+console.log('[drive_forms/init] i18n registry loaded');
 
 async function runAppInits() {
 	try {

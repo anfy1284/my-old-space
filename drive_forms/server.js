@@ -1,6 +1,7 @@
 // Use getContentType from global context via globalRoot
 const formsGlobal = require('./globalServerContext');
 const globalRoot = require('../drive_root/globalServerContext');
+const { t } = require('../drive_root/i18n');
 const fs = require('fs');
 const path = require('path');
 
@@ -75,7 +76,7 @@ function loadApp(name) {
 function invokeAppMethod(appName, methodName, params, sessionID, callback, req, res) {
 	// Path to app server.js
 	const appEntry = appsConfig.apps.find(a => a.name === appName);
-	if (!appEntry) return callback(new Error('App not found'));
+	if (!appEntry) return callback(new Error(t('App not found', 'en')));
 	const appsBasePath = (appsConfig.path || '/apps').replace(/^[/\\]+/, '');
 	
 	// Try project root first (for user apps), then framework
@@ -96,7 +97,7 @@ function invokeAppMethod(appName, methodName, params, sessionID, callback, req, 
 	if (!appServerPath) {
 		console.error('[invokeAppMethod] server.js not found for app:', appName);
 		console.error('[invokeAppMethod] Tried paths:', possiblePaths);
-		return callback(new Error('App server.js not found'));
+		return callback(new Error(t('App server.js not found', 'en')));
 	}
 	
 	console.log('[invokeAppMethod] Loading server.js from:', appServerPath);
@@ -108,9 +109,9 @@ function invokeAppMethod(appName, methodName, params, sessionID, callback, req, 
 		appModule = require(appServerPath);
 	} catch (e) {
 		console.error('[invokeAppMethod] Failed to load server.js:', e);
-		return callback(new Error('Failed to load app server.js: ' + e.message));
+		return callback(new Error(t('Failed to load app server.js:', 'en') + ' ' + e.message));
 	}
-	if (typeof appModule[methodName] !== 'function') return callback(new Error('Method not found in app'));
+	if (typeof appModule[methodName] !== 'function') return callback(new Error(t('Method not found in app', 'en')));
 	// Call function with sessionID as separate parameter
 	try {
 		// params is object, sessionID is string, req, res for SSE
@@ -140,10 +141,10 @@ function handleRequest(req, res, appDir, appAlias) {
 				if (match) sessionID = decodeURIComponent(match[1]);
 			}
 			// Verify user
-			globalRoot.getUserBySessionID(sessionID).then(user => {
+			globalRoot.getUserBySessionID(sessionID).then(async user => {
 				if (!user) {
 					res.writeHead(401, { 'Content-Type': 'application/json' });
-					res.end(JSON.stringify({ error: 'User not authorized' }));
+					res.end(JSON.stringify({ error: await formsGlobal.tForSession('User not authorized', sessionID) }));
 					return;
 				}
 				res.writeHead(200, {
@@ -202,11 +203,11 @@ function handleRequest(req, res, appDir, appAlias) {
 					if (match) sessionID = decodeURIComponent(match[1]);
 				}
 
-				invokeAppMethod(appName, methodName, params, sessionID, (err, result) => {
-					if (err) {
-						console.error('[drive_forms] Error invoking method:', err.message);
-						res.writeHead(500, { 'Content-Type': 'application/json' });
-						res.end(JSON.stringify({ error: err.message }));
+				invokeAppMethod(appName, methodName, params, sessionID, async (err, result) => {
+						if (err) {
+							console.error('[drive_forms] Error invoking method:', err.message);
+							res.writeHead(500, { 'Content-Type': 'application/json' });
+							res.end(JSON.stringify({ error: await formsGlobal.tForSession(err.message, sessionID) }));
 					} else {
 						// Check if request handled inside method (SSE, etc)
 						if (result && (result._sse || result._handled)) {
@@ -265,14 +266,14 @@ function handleRequest(req, res, appDir, appAlias) {
 					const checkProtectedAccess = (sessionId, filePath) => false;
 					if (!checkProtectedAccess(sessionID, filePath)) {
 						res.writeHead(403, { 'Content-Type': 'text/plain' });
-						res.end('Forbidden');
-						return;
-					}
-					const contentType = globalRoot.getContentType(filePath);
-					fs.readFile(filePath, (err, data) => {
-						if (err) {
-							res.writeHead(500, { 'Content-Type': 'text/plain' });
-							res.end('Error reading file');
+							res.end(t('Forbidden', 'en'));
+							return;
+						}
+						const contentType = globalRoot.getContentType(filePath);
+						fs.readFile(filePath, (err, data) => {
+							if (err) {
+								res.writeHead(500, { 'Content-Type': 'text/plain' });
+								res.end(t('Error reading file', 'en'));
 							return;
 						}
 						res.writeHead(200, { 'Content-Type': contentType });
@@ -318,13 +319,13 @@ function handleRequest(req, res, appDir, appAlias) {
 			upload.single('file')(req, res, (err) => {
 				if (err) {
 					res.writeHead(400, { 'Content-Type': 'application/json' });
-					res.end(JSON.stringify({ error: 'Upload error: ' + err.message }));
+					res.end(JSON.stringify({ error: t('Upload error:', 'en') + ' ' + err.message }));
 					return;
 				}
 				const { app, method } = req.body;
 				if (!app || !method) {
 					res.writeHead(400, { 'Content-Type': 'application/json' });
-					res.end(JSON.stringify({ error: 'Missing app or method' }));
+					res.end(JSON.stringify({ error: t('Missing app or method', 'en') }));
 					return;
 				}
 				// Извлекаем sessionID из cookie
@@ -333,10 +334,10 @@ function handleRequest(req, res, appDir, appAlias) {
 					const match = req.headers.cookie.match(/(?:^|; )sessionID=([^;]+)/i);
 					if (match) sessionID = decodeURIComponent(match[1]);
 				}
-				invokeAppMethod(app, method, req.body, sessionID, (err, result) => {
+				invokeAppMethod(app, method, req.body, sessionID, async (err, result) => {
 					if (err) {
 						res.writeHead(500, { 'Content-Type': 'application/json' });
-						res.end(JSON.stringify({ error: err.message }));
+						res.end(JSON.stringify({ error: await formsGlobal.tForSession(err.message, sessionID) }));
 					} else {
 						res.writeHead(200, { 'Content-Type': 'application/json' });
 						res.end(JSON.stringify({ result }));
@@ -356,13 +357,13 @@ function handleRequest(req, res, appDir, appAlias) {
 					data = JSON.parse(body);
 				} catch (e) {
 					res.writeHead(400, { 'Content-Type': 'application/json' });
-					res.end(JSON.stringify({ error: 'Invalid JSON' }));
+					res.end(JSON.stringify({ error: t('Invalid JSON', 'en') }));
 					return;
 				}
 				const { app, method, params } = data;
 				if (!app || !method) {
 					res.writeHead(400, { 'Content-Type': 'application/json' });
-					res.end(JSON.stringify({ error: 'Missing app or method' }));
+					res.end(JSON.stringify({ error: t('Missing app or method', 'en') }));
 					return;
 				}
 				// Извлекаем sessionID из cookie
@@ -373,10 +374,10 @@ function handleRequest(req, res, appDir, appAlias) {
 				}
 				console.log('[drive_forms/call] Cookie header:', req.headers.cookie);
 				console.log('[drive_forms/call] Extracted sessionID:', sessionID);
-				invokeAppMethod(app, method, params || {}, sessionID, (err, result) => {
+				invokeAppMethod(app, method, params || {}, sessionID, async (err, result) => {
 					if (err) {
 						res.writeHead(500, { 'Content-Type': 'application/json' });
-						res.end(JSON.stringify({ error: err.message }));
+						res.end(JSON.stringify({ error: await formsGlobal.tForSession(err.message, sessionID) }));
 					} else {
 						res.writeHead(200, { 'Content-Type': 'application/json' });
 						res.end(JSON.stringify({ result }));
@@ -388,11 +389,11 @@ function handleRequest(req, res, appDir, appAlias) {
 
 		// Everything else - 404
 		res.writeHead(404, { 'Content-Type': 'text/plain' });
-		res.end('Not Found');
+		res.end(t('Not Found', 'en'));
 	} catch (e) {
 		console.error('[drive_forms] handleRequest error:', e);
 		res.writeHead(500, { 'Content-Type': 'text/plain' });
-		res.end('Internal Server Error');
+		res.end(t('Internal Server Error', 'en'));
 	}
 }
 

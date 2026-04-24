@@ -1,0 +1,17 @@
+{
+    "User not authorized": {
+        "en": "User not authorized",
+        "ru": "Пользователь не авторизован",
+        "de": "Benutzer nicht autorisiert"
+    },
+    "Session not found": {
+        "en": "Session not found",
+        "ru": "Сессия не найдена",
+        "de": "Sitzung nicht gefunden"
+    },
+    "Database models not available": {
+        "en": "Database models not available",
+        "ru": "Модели базы данных недоступны",
+        "de": "Datenbankmodelle nicht verfügbar"
+    }
+}

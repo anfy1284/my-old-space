@@ -1,5 +1,6 @@
 const global = require('../../drive_root/globalServerContext');
 const { modelsDB } = global;
+const { invalidateSessionContext, tForSession } = require('../../drive_forms/globalServerContext');
 
 // Get settings schema and user values from DB
 async function getSettings(params, sessionID) {
@@ -9,16 +10,16 @@ async function getSettings(params, sessionID) {
             if (modelsDB) {
                 console.error('[UserSettings] Available models:', Object.keys(modelsDB).join(', '));
             }
-            return { error: 'Database models not available' };
+            return { error: await tForSession('Database models not available', sessionID) };
         }
 
         // Get user from session
         const user = await global.getUserBySessionID(sessionID);
         if (!user) {
-            return { error: 'User not authorized' };
+            return { error: await tForSession('User not authorized', sessionID) };
         }
 
-        console.log('[UserSettings] Loading settings for user:', user.name, 'id:', user.id);
+        console.log('[UserSettings] Loading settings for user:', user.name, 'UID:', user.UID);
 
         // Load all settings fields with type information
         const settingsFields = await modelsDB.UserSettingsFields.findAll({
@@ -35,7 +36,7 @@ async function getSettings(params, sessionID) {
         for (const field of settingsFields) {
             const typeId = field.typeId;
             const fieldData = {
-                id: field.UID || field.id,
+                id: field.UID,
                 name: field.name, // Original name for data keys
                 displayName: field.displayName, // Display name for UI labels
                 typeId: typeId
@@ -64,9 +65,10 @@ async function getSettings(params, sessionID) {
             let value = null;
             if (modelsDB[modelName]) {
                 const record = await modelsDB[modelName].findOne({
-                    where: { userId: user.id, settingsFieldId: field.id }
+                    where: { userId: user.UID, settingsFieldId: field.UID }
                 });
-                value = record ? record.value : (typeId === 3 ? false : null);
+                const typeName = field.type ? field.type.name : '';
+                value = record ? record.value : (typeName === 'boolean' ? false : null);
                 console.log('[UserSettings] Field:', field.name, '| Model:', modelName, '| Value:', value);
             } else {
                 console.warn('[UserSettings] Model not found:', modelName);
@@ -107,13 +109,13 @@ async function getSettings(params, sessionID) {
 async function saveSettings(params, sessionID) {
     try {
         if (!modelsDB || !modelsDB.UserSettingsFields) {
-            return { error: 'Database models not available' };
+            return { error: await tForSession('Database models not available', sessionID) };
         }
 
         // Get user from session
         const user = await global.getUserBySessionID(sessionID);
         if (!user) {
-            return { error: 'User not authorized' };
+            return { error: await tForSession('User not authorized', sessionID) };
         }
 
         console.log('[UserSettings] Saving settings for user:', user.name, params);
@@ -157,10 +159,10 @@ async function saveSettings(params, sessionID) {
                 continue;
             }
 
-            // Prepare value based on type
+            // Prepare value based on type name
             let preparedValue = value;
-            const typeId = Number(field.typeId);
-            if (typeId === 2) {
+            const typeName = field.type ? field.type.name : 'string';
+            if (typeName === 'number') {
                 // Number: parse and handle invalid numbers (avoid NaN stored in DB)
                 if (value === null || value === undefined || value === '') {
                     preparedValue = null;
@@ -173,10 +175,10 @@ async function saveSettings(params, sessionID) {
                         preparedValue = num;
                     }
                 }
-            } else if (typeId === 3) {
+            } else if (typeName === 'boolean') {
                 // Boolean
                 preparedValue = value === true || value === 'true';
-            } else if (field.typeId === 4) {
+            } else if (typeName === 'date') {
                 // Date - validate and handle empty/invalid dates
                 if (!value || value === '' || value === 'Invalid date') {
                     preparedValue = null;
@@ -196,13 +198,15 @@ async function saveSettings(params, sessionID) {
 
             // Upsert value
             await modelsDB[modelName].upsert({
-                userId: user.id,
-                settingsFieldId: field.id,
+                userId: user.UID,
+                settingsFieldId: field.UID,
                 value: preparedValue
             });
         }
 
         console.log('[UserSettings] Settings saved successfully');
+        // Invalidate session context cache so language and other settings are re-read on next request
+        invalidateSessionContext(sessionID);
         return { success: true };
     } catch (e) {
         console.error('[UserSettings] saveSettings error:', e);

@@ -3,11 +3,12 @@ const global = require('../../drive_root/globalServerContext');
 const formsGlobal = require('../../drive_forms/globalServerContext');
 const rootGlobal = require('../../drive_root/globalServerContext');
 const { hashPassword, validatePassword } = require('../../drive_root/db/utilites');
+const { tForSession } = formsGlobal;
 
 // Server function for connection test
 async function testConnection(params, sessionID) {
 	if (!sessionID) {
-		return { error: 'sessionID required' };
+		return { error: await tForSession('sessionID required', sessionID) };
 	}
 	// Here we can add sessionID validity check
 	let user = await global.getUserBySessionID(sessionID);
@@ -23,14 +24,14 @@ async function loginAsGuest(params, sessionID) {
 async function createUser(params, sessionID) {
     const { username, password } = params;
     if (!username || !password) {
-        return { success: false, error: 'Username and password required' };
+        return { success: false, error: await tForSession('Username and password required', sessionID) };
     }
 
     try {
         // Check if user exists
         const existingUser = await global.modelsDB.Users.findOne({ where: { name: username } });
         if (existingUser) {
-            return { success: false, error: 'User already exists' };
+            return { success: false, error: await tForSession('User already exists', sessionID) };
         }
 
         // Create user
@@ -51,24 +52,24 @@ async function createUser(params, sessionID) {
 async function login(params, sessionID) {
     const { username, password } = params;
     if (!username || !password) {
-        return { success: false, error: 'Username and password required' };
+        return { success: false, error: await tForSession('Username and password required', sessionID) };
     }
 
     try {
         // Find user with password hash
         const user = await global.modelsDB.Users.scope('withPassword').findOne({ where: { name: username } });
         if (!user) {
-            return { success: false, error: 'User not found' };
+            return { success: false, error: await tForSession('User not found', sessionID) };
         }
 
         if (user.isGuest) {
-             return { success: false, error: 'Cannot login as guest with password' };
+             return { success: false, error: await tForSession('Cannot login as guest with password', sessionID) };
         }
 
         // Validate password
         const isValid = await validatePassword(password, user.password_hash);
         if (!isValid) {
-            return { success: false, error: 'Invalid password' };
+            return { success: false, error: await tForSession('Invalid password', sessionID) };
         }
 
         // Update session

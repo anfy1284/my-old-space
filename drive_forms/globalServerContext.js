@@ -118,8 +118,104 @@ async function getUserAccessRole(user) {
   return result;
 }
 
+// Session context cache namespace
+const _SESSION_CTX_NS = 'session_context';
+const _SYSTEM_SESSION_ID = '__SYS_INTERNAL__';
+
+/**
+ * Returns unified session context for the current user.
+ * Cached per sessionID; invalidate via invalidateSessionContext() on settings change.
+ *
+ * Returned object: { userId, name, role, language }
+ *   - userId:   user UID string
+ *   - name:     display name
+ *   - role:     access role ('admin', 'user', 'nologged', ...)
+ *   - language: ISO 639-1 code from user's Language setting ('en' by default)
+ */
+async function getSessionContext(sessionID) {
+    if (!sessionID || sessionID === _SYSTEM_SESSION_ID) {
+        return { userId: null, name: null, role: null, language: 'en' };
+    }
+
+    // L1: same-process Map
+    const cachedL1 = _memStoreForRoles.getSync(_SESSION_CTX_NS, sessionID);
+    if (cachedL1 !== null && cachedL1 !== undefined) return cachedL1;
+
+    // L2: cross-process shared store
+    const cachedL2 = await _memStoreForRoles.get(_SESSION_CTX_NS, sessionID);
+    if (cachedL2 !== null && cachedL2 !== undefined) return cachedL2;
+
+    // L3: build from DB
+    const user = await global.getUserBySessionID(sessionID);
+    if (!user) return { userId: null, name: null, role: null, language: 'en' };
+
+    const role = await getUserAccessRole(user);
+
+    // Resolve user's language preference from settings
+    let language = 'en';
+    try {
+        const mdb = global.modelsDB;
+        if (mdb && mdb.UserSettingsFields && mdb.UserSettingsStringValues && mdb.Languages) {
+            const langField = await mdb.UserSettingsFields.findOne({ where: { name: 'Language' } });
+            if (langField) {
+                const val = await mdb.UserSettingsStringValues.findOne({
+                    where: { userId: user.UID, settingsFieldId: langField.UID }
+                });
+                if (val && val.value) {
+                    const langRecord = await mdb.Languages.findByPk(val.value);
+                    if (langRecord) language = langRecord.code;
+                }
+            }
+        }
+    } catch (e) {
+        console.error('[getSessionContext] Error resolving language:', e.message);
+    }
+
+    const ctx = { userId: user.UID, name: user.name, role, language };
+    await _memStoreForRoles.set(_SESSION_CTX_NS, sessionID, ctx);
+    return ctx;
+}
+
+/**
+ * Invalidate session context cache for a user (call after settings change).
+ * @param {string} sessionID
+ */
+function invalidateSessionContext(sessionID) {
+    if (!sessionID) return;
+    _memStoreForRoles.del(_SESSION_CTX_NS, sessionID).catch(() => {});
+}
+
+/**
+ * Translate a key using the language from the session context.
+ * Async convenience wrapper around drive_root/i18n.t().
+ * @param {string} key - translation key
+ * @param {string} sessionID
+ * @returns {Promise<string>}
+ */
+async function tForSession(key, sessionID) {
+    const { language } = await getSessionContext(sessionID);
+    const i18n = require('../drive_root/i18n');
+    return i18n.t(key, language);
+}
+
+/**
+ * Translate a key with named placeholder substitution {{varName}}.
+ * @param {string} key
+ * @param {string} sessionID
+ * @param {Object} [vars={}]
+ * @returns {Promise<string>}
+ */
+async function tfForSession(key, sessionID, vars = {}) {
+    const { language } = await getSessionContext(sessionID);
+    const i18n = require('../drive_root/i18n');
+    return i18n.tf(key, language, vars);
+}
+
 module.exports = {
-  getUserAccessRole,
-  loadApps,
-  // User management is no longer at this level
+    getUserAccessRole,
+    loadApps,
+    getSessionContext,
+    invalidateSessionContext,
+    tForSession,
+    tfForSession,
 };

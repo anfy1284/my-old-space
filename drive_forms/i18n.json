@@ -1,0 +1,57 @@
+{
+    "App not found": {
+        "en": "App not found",
+        "ru": "Приложение не найдено",
+        "de": "Anwendung nicht gefunden"
+    },
+    "App server.js not found": {
+        "en": "App server.js not found",
+        "ru": "Серверный файл приложения не найден",
+        "de": "Server-Datei der Anwendung nicht gefunden"
+    },
+    "Failed to load app server.js:": {
+        "en": "Failed to load app server.js:",
+        "ru": "Ошибка загрузки серверного файла приложения:",
+        "de": "Fehler beim Laden der Server-Datei:"
+    },
+    "Method not found in app": {
+        "en": "Method not found in app",
+        "ru": "Метод не найден в приложении",
+        "de": "Methode in der Anwendung nicht gefunden"
+    },
+    "Missing app or method": {
+        "en": "Missing app or method",
+        "ru": "Не указано приложение или метод",
+        "de": "Anwendung oder Methode fehlt"
+    },
+    "Invalid JSON": {
+        "en": "Invalid JSON",
+        "ru": "Некорректный формат JSON",
+        "de": "Ungültiges JSON-Format"
+    },
+    "Not Found": {
+        "en": "Not Found",
+        "ru": "Не найдено",
+        "de": "Nicht gefunden"
+    },
+    "Error reading file": {
+        "en": "Error reading file",
+        "ru": "Ошибка чтения файла",
+        "de": "Fehler beim Lesen der Datei"
+    },
+    "Upload error:": {
+        "en": "Upload error:",
+        "ru": "Ошибка загрузки файла:",
+        "de": "Upload-Fehler:"
+    },
+    "Internal Server Error": {
+        "en": "Internal Server Error",
+        "ru": "Внутренняя ошибка сервера",
+        "de": "Interner Serverfehler"
+    },
+    "Forbidden": {
+        "en": "Forbidden",
+        "ru": "Доступ запрещён",
+        "de": "Zugriff verweigert"
+    }
+}
