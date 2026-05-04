@@ -376,6 +376,26 @@
             "options": {
                 "timestamps": true
             }
+        },
+        {
+            "name": "Translations",
+            "tableName": "translations",
+            "fields": {
+                "recordId":  { "type": "STRING", "allowNull": false },
+                "tableName": { "type": "STRING", "allowNull": false },
+                "fieldName": { "type": "STRING", "allowNull": false },
+                "language":  { "type": "STRING", "allowNull": false },
+                "value":     { "type": "TEXT",   "allowNull": true }
+            },
+            "options": {
+                "timestamps": false,
+                "indexes": [
+                    {
+                        "unique": true,
+                        "fields": ["recordId", "tableName", "fieldName", "language"]
+                    }
+                ]
+            }
         }
     ],
     "associations": [

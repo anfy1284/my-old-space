@@ -44,6 +44,7 @@ async function optimizeJS(text) {
         const result = await terser.minify(text, {
             compress: true,
             mangle: false,
+            parse: { bare_returns: true }, // allow top-level return (CommonJS modules)
             output: { quote_style: 1 }, // force single quotes to preserve __t('key') pattern
         });
         if (result.error) throw result.error;

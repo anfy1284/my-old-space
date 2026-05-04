@@ -272,6 +272,12 @@ function initModelsDB() {
 // Initialization on startup
 initModelsDB();
 
+// Register translation middleware (deferred to avoid circular require at module load)
+process.nextTick(function() {
+    try { require('./translationMiddleware').install(); } catch (e) {
+        console.error('[globalServerContext] Failed to install translation middleware:', e.message);
+    }
+});
 
 function getServerTime() {
     return new Date().toISOString();
