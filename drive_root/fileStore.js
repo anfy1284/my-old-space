@@ -9,10 +9,15 @@
  *   getFile(uid, userRole)          → string | null
  */
 
+const fs = require('fs');
+const path = require('path');
 const memoryStore = require('./memory_store');
 const { generateUID } = require('./db/utilites');
 
 const FILE_STORE_NS = 'client_files';
+
+// Cache for files served from disk: key = `${filePath}|${role}|${language}` -> processed text
+const _fileCache = new Map();
 
 /**
  * Проверка доступа: есть ли у пользователя требуемая роль.
@@ -29,56 +34,60 @@ function hasRoleAccess(userRole, requiredRole) {
 }
 
 /**
- * Оптимизирует JS-скрипт: удаляет комментарии, схлопывает пробелы,
- * делает код нечитаемым (однострочным, без форматирования).
+ * Оптимизирует JS-скрипт через terser.
  * @param {string} text - Исходный JS-текст
- * @returns {string}
+ * @returns {Promise<string>}
  */
-function optimizeJS(text) {
-    // Strategy: extract all string literals into a placeholder map,
-    // run minification on the skeleton, then restore strings.
-    // This prevents the optimizer from corrupting string contents.
-
-    const strings = [];
-    const PLACEHOLDER = '\x00STR\x00';
-
-    // Extract single-quoted, double-quoted, and template literal strings
-    let skeleton = text.replace(/(`[^`\\]*(?:\\[\s\S][^`\\]*)*`|'[^'\\\n]*(?:\\[\s\S][^'\\\n]*)*'|"[^"\\\n]*(?:\\[\s\S][^"\\\n]*)*")/g, (match) => {
-        strings.push(match);
-        return PLACEHOLDER + (strings.length - 1) + PLACEHOLDER;
-    });
-
-    // Удалить блочные комментарии /* ... */
-    skeleton = skeleton.replace(/\/\*[\s\S]*?\*\//g, '');
-
-    // Удалить однострочные комментарии // ...
-    skeleton = skeleton.replace(/\/\/[^\n]*/g, '');
-
-    // Заменить все последовательности пробелов/переносов/табуляций одним пробелом
-    skeleton = skeleton.replace(/\s+/g, ' ');
-
-    // Убрать пробелы перед и после безопасных знаков пунктуации
-    skeleton = skeleton.replace(/ *([{}\(\)\[\];,]) */g, '$1');
-
-    // Убрать пробелы вокруг оператора присваивания и сравнения (безопасно для JS)
-    skeleton = skeleton.replace(/ *(===|!==|==|!=|>=|<=|=>|&&|\|\||[=+\-*%<>!&|^~?:]) */g, '$1');
-
-    // Restore string literals
-    skeleton = skeleton.replace(new RegExp('\x00STR\x00(\\d+)\x00STR\x00', 'g'), (_, i) => strings[parseInt(i, 10)]);
-
-    return skeleton.trim();
+async function optimizeJS(text) {
+    try {
+        const terser = require('terser');
+        const result = await terser.minify(text, {
+            compress: true,
+            mangle: false,
+        });
+        if (result.error) throw result.error;
+        return result.code;
+    } catch (e) {
+        console.warn('[optimizeJS] terser failed, returning original:', e.message);
+        return text;
+    }
 }
 
 /**
- * Переводит текст на указанный язык.
- * TODO: реализовать перевод на разные языки.
- * @param {string} text
- * @param {string|null} language - Целевой язык (например 'ru', 'en')
+ * Заменяет маркеры __t('key') в JS-тексте переведёнными строками.
+ * @param {string} text     - JS-текст с маркерами __t('...')
+ * @param {string} language - Целевой язык (например 'ru', 'en')
  * @returns {string}
  */
-function translateText(text, language) {
-    // TODO: реализовать перевод на разные языки
-    return text;
+function translateJsMarkers(text, language) {
+    if (!language || !text.includes('__t(')) return text;
+    const i18n = require('./i18n');
+    return text.replace(/__t\('([^']+)'\)/g, (_, key) => JSON.stringify(i18n.t(key, language)));
+}
+
+/**
+ * Читает файл с диска, обрабатывает по расширению (JS: оптимизация + перевод),
+ * кеширует результат по (filePath, role, language).
+ * @param {string} filePath - Абсолютный путь к файлу
+ * @param {string} role     - Роль пользователя (для ключа кеша)
+ * @param {string} language - Язык пользователя
+ * @returns {Promise<string>}
+ */
+async function serveFileFromPath(filePath, role, language) {
+    const cacheKey = `${filePath}|${role}|${language}`;
+    if (_fileCache.has(cacheKey)) return _fileCache.get(cacheKey);
+
+    const raw = fs.readFileSync(filePath, 'utf8');
+    const ext = path.extname(filePath).slice(1).toLowerCase();
+
+    let result = raw;
+    if (ext === 'js') {
+        result = await optimizeJS(raw);
+        result = translateJsMarkers(result, language);
+    }
+
+    _fileCache.set(cacheKey, result);
+    return result;
 }
 
 /**
@@ -96,11 +105,8 @@ async function loadFile(text, role, fileType) {
     let content = text;
 
     if (fileType === 'js') {
-        content = optimizeJS(content);
+        content = await optimizeJS(content);
     }
-
-    // Перевод (язык пока не передаётся — TODO)
-    content = translateText(content, null);
 
     const uid = generateUID('file_store');
 
@@ -145,4 +151,6 @@ module.exports = {
     loadFile,
     loadScript,
     getFile,
+    translateJsMarkers,
+    serveFileFromPath,
 };

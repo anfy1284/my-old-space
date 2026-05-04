@@ -143,17 +143,38 @@ async function handleRequest(req, res) {
                     res.end('404 Not Found');
                     return;
                 }
-                // Serve file without check
                 const contentType = getContentType(filePath);
-                fs.readFile(filePath, (err, data) => {
-                    if (err) {
-                        res.writeHead(500, { 'Content-Type': 'text/plain' });
-                        res.end('Error reading file');
-                        return;
+                const fileStore = require('./fileStore');
+                const ext = path.extname(filePath).slice(1).toLowerCase();
+                if (ext === 'js') {
+                    let sessionID = null;
+                    if (req.headers && req.headers.cookie) {
+                        const m = req.headers.cookie.match(/(?:^|; )sessionID=([^;]+)/i);
+                        if (m) sessionID = decodeURIComponent(m[1]);
                     }
-                    res.writeHead(200, { 'Content-Type': contentType });
-                    res.end(data);
-                });
+                    (async () => {
+                        let language = null;
+                        if (sessionID) {
+                            try {
+                                const { getSessionContext } = require('../drive_forms/globalServerContext');
+                                const ctx = await getSessionContext(sessionID);
+                                language = ctx && ctx.language;
+                            } catch (e) { /* no session */ }
+                        }
+                        res.writeHead(200, { 'Content-Type': contentType });
+                        res.end(await fileStore.serveFileFromPath(filePath, 'public', language));
+                    })();
+                } else {
+                    fs.readFile(filePath, (err, data) => {
+                        if (err) {
+                            res.writeHead(500, { 'Content-Type': 'text/plain' });
+                            res.end('Error reading file');
+                            return;
+                        }
+                        res.writeHead(200, { 'Content-Type': contentType });
+                        res.end(data);
+                    });
+                }
                 return;
             } else if (resType === 'protected') {
                 filePath = path.join(__dirname, 'resources', 'protected', relPath);
@@ -320,9 +341,8 @@ async function handleRequest(req, res) {
             if (result.fileType === 'js' && fileText.includes('__t(')) {
                 try {
                     const { getSessionContext } = require('../drive_forms/globalServerContext');
-                    const i18n = require('./i18n');
                     const { language } = await getSessionContext(sessionID);
-                    fileText = fileText.replace(/__t\('([^']+)'\)/g, (_, key) => JSON.stringify(i18n.t(key, language)));
+                    fileText = fileStore.translateJsMarkers(fileText, language);
                 } catch (e) {
                     console.error('[/files] i18n translation error:', e && e.message || e);
                 }

@@ -13,15 +13,20 @@
     "main_server.js",
     "server.config.json",
     "АРХИТЕКТУРА_ПРОЕКТА.md",
-    "ИНСТРУКЦИИ_ДЛЯ_AI.md"    
+    "ИНСТРУКЦИИ_ДЛЯ_AI.md"
   ],
-  "keywords": ["framework", "core", "my-old-space"],
+  "keywords": [
+    "framework",
+    "core",
+    "my-old-space"
+  ],
   "author": "Andrey",
   "license": "MIT",
   "dependencies": {
     "dotenv": "^16.0.0",
     "selfsigned": "^2.0.0",
     "sequelize": "^6.0.0",
+    "terser": "^5.46.2",
     "ws": "^8.1.0",
     "yauzl": "^2.10.0"
   }

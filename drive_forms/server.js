@@ -225,10 +225,16 @@ function handleRequest(req, res, appDir, appAlias) {
 
 		// Universal resource serving: /<appAlias>/res/public/..., /<appAlias>/res/protected/...
 		if (req.url.startsWith(`/${appAlias}/res/`)) {
+			let sessionID = null;
+			if (req.headers && req.headers.cookie) {
+				const m = req.headers.cookie.match(/(?:^|; )sessionID=([^;]+)/);
+				if (m) sessionID = decodeURIComponent(m[1]);
+			}
 			const parts = req.url.split('/').filter(Boolean); // ['', appAlias, 'res', 'public', ...] => ['appAlias', 'res', 'public', ...]
 			if (parts.length >= 4) {
 				const resType = parts[2]; // public or protected
-				const relPath = parts.slice(3).join(path.sep);
+				const relPathRaw = parts.slice(3).join(path.sep);
+				const relPath = relPathRaw.split('?')[0]; // strip query string (e.g. ?t=...)
 				let filePath;
 				if (resType === 'public') {
 					filePath = path.join(__dirname, 'resources', 'public', relPath);
@@ -238,15 +244,31 @@ function handleRequest(req, res, appDir, appAlias) {
 						return;
 					}
 					const contentType = globalRoot.getContentType(filePath);
-					fs.readFile(filePath, (err, data) => {
-						if (err) {
-							res.writeHead(500, { 'Content-Type': 'text/plain' });
-							res.end('Error reading file');
-							return;
-						}
-						res.writeHead(200, { 'Content-Type': contentType });
-						res.end(data);
-					});
+					const fileStore = require('../drive_root/fileStore');
+					const ext = path.extname(filePath).slice(1).toLowerCase();
+					if (ext === 'js') {
+						(async () => {
+							let language = null;
+							if (sessionID) {
+								try {
+									const ctx = await formsGlobal.getSessionContext(sessionID);
+									language = ctx && ctx.language;
+								} catch (e) { /* no session */ }
+							}
+							res.writeHead(200, { 'Content-Type': contentType });
+							res.end(await fileStore.serveFileFromPath(filePath, 'public', language));
+						})();
+					} else {
+						fs.readFile(filePath, (err, data) => {
+							if (err) {
+								res.writeHead(500, { 'Content-Type': 'text/plain' });
+								res.end('Error reading file');
+								return;
+							}
+							res.writeHead(200, { 'Content-Type': contentType });
+							res.end(data);
+						});
+					}
 					return;
 				} else if (resType === 'protected') {
 					filePath = path.join(__dirname, 'resources', 'protected', relPath);
@@ -295,7 +317,7 @@ function handleRequest(req, res, appDir, appAlias) {
 				if (match) sessionID = decodeURIComponent(match[1]);
 			}
 			globalRoot.getUserBySessionID(sessionID).then(user => {
-				return formsGlobal.loadApps(user);
+				return formsGlobal.loadApps(user, sessionID);
 			}).then(result => {
 				if (req.method === 'GET') {
 					res.writeHead(200, { 'Content-Type': 'application/javascript' });

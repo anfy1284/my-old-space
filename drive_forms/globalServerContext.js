@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const { Sequelize, DataTypes } = require('sequelize');
 const sequelize = require('../drive_root/db/sequelize_instance');
-async function loadApps(user) {
+async function loadApps(user, sessionID) {
   const accessRole = await getUserAccessRole(user);
   console.log(`[loadApps] Loading apps for user: ${user ? user.name : 'null'}, role: ${accessRole}`);
   const localAppsPath = path.join(__dirname, 'apps.json');
@@ -48,6 +48,16 @@ async function loadApps(user) {
   
   // Don't convert nologged to public - keep as is to load login app
   const effectiveRole = accessRole || 'nologged';
+
+  // Resolve user language once before the loop
+  const fileStore = require('../drive_root/fileStore');
+  let language = null;
+  if (sessionID) {
+    try {
+      const ctx = await getSessionContext(sessionID);
+      language = ctx && ctx.language;
+    } catch (e) { /* no session, serve without translation */ }
+  }
   
   console.log('[loadApps] effectiveRole:', effectiveRole);
   
@@ -67,7 +77,7 @@ async function loadApps(user) {
       if (config.autoStart === true) {
         const clientPath = path.resolve(baseDir, appsBasePath, cleanAppPath, 'resources', 'public', 'client.js');
         if (fs.existsSync(clientPath)) {
-          allCode += fs.readFileSync(clientPath, 'utf8') + '\n\n';
+          allCode += await fileStore.serveFileFromPath(clientPath, effectiveRole, language) + '\n\n';
         }
       }
     } else {
