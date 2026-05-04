@@ -1663,7 +1663,7 @@ Form.prototype.doAction = function(action, params) {
                 try {
                     const tableName = this.dbTable || (params && params.tableName) || '';
                     if (!tableName) {
-                        if (typeof showAlert === 'function') showAlert('Не указана таблица!');
+                        if (typeof showAlert === 'function') showAlert(__t('No table specified!'));
                         return;
                     }
                     if (window.MySpace && typeof window.MySpace.open === 'function') {
@@ -1677,7 +1677,7 @@ Form.prototype.doAction = function(action, params) {
                 try {
                     const row = (typeof this.getCurrentRow === 'function') ? this.getCurrentRow() : null;
                     if (!row || !row.UID) {
-                        if (typeof showAlert === 'function') showAlert('Выберите запись');
+                        if (typeof showAlert === 'function') showAlert(__t('Please select a record'));
                         return;
                     }
                     const tableName = this.dbTable || (params && params.tableName) || '';
@@ -1692,13 +1692,13 @@ Form.prototype.doAction = function(action, params) {
                 try {
                     const row = (typeof this.getCurrentRow === 'function') ? this.getCurrentRow() : null;
                     if (!row || !row.UID) {
-                        if (typeof showAlert === 'function') showAlert('Выберите запись для удаления');
+                        if (typeof showAlert === 'function') showAlert(__t('Please select a record to delete'));
                         return;
                     }
                     const tableName = this.dbTable || (params && params.tableName) || '';
                     const self = this;
                     if (typeof window.showConfirm === 'function') {
-                        window.showConfirm('Вы действительно хотите удалить эту запись?', async (res) => {
+                        window.showConfirm(__t('Are you sure you want to delete this record?'), async (res) => {
                             if (res === 'yes') {
                                 try {
                                     const result = await callServerMethod('uniRecordForm', 'applyChanges', { 
@@ -1708,7 +1708,7 @@ Form.prototype.doAction = function(action, params) {
                                     if (result && result.ok) {
                                         if (self.table && typeof self.table.refresh === 'function') self.table.refresh();
                                     } else {
-                                        if (typeof showAlert === 'function') showAlert('Ошибка удаления: ' + (result.error || 'неизвестная ошибка'));
+                                        if (typeof showAlert === 'function') showAlert(__t('Delete error: ') + (result.error || __t('unknown error')));
                                     }
                                 } catch(e) { console.error(e); }
                             }
@@ -1814,7 +1814,7 @@ class DataForm extends Form {
         // Show confirmation dialog
         const self = this;
         if (typeof showConfirm === 'function') {
-            showConfirm('Данные были изменены. Сохранить изменения?', async () => {
+            showConfirm(__t('Data has been modified. Save changes?'), async () => {
                 // "Да" — save then close
                 try { await self.doAction('save'); } catch(e) { console.error(e); }
                 self._closing = true;
@@ -2483,7 +2483,7 @@ class DataForm extends Form {
             if (error && error.message && error.message.indexOf('Method not found') !== -1) {
                 this.layout = [];
             }
-            if (typeof showAlert === 'function') showAlert('Ошибка загрузки макета: ' + (error && error.message ? error.message : String(error)));
+            if (typeof showAlert === 'function') showAlert(__t('Layout load error: ') + (error && error.message ? error.message : String(error)));
         } finally {
             this.showLoading = false;
         }
@@ -2527,8 +2527,8 @@ class DataForm extends Form {
             const uid      = params && params.uid;
             const fn       = params && params.fn;
             const fnParams = params && params.fnParams;
-            if (!uid) { if (typeof showAlert === 'function') showAlert('runScript: не указан uid'); return; }
-            if (!fn)  { if (typeof showAlert === 'function') showAlert('runScript: не указан fn'); return; }
+            if (!uid) { if (typeof showAlert === 'function') showAlert(__t('runScript: uid not specified')); return; }
+            if (!fn)  { if (typeof showAlert === 'function') showAlert(__t('runScript: fn not specified')); return; }
             // Резолвинг {data.fieldName} — подставляет значения полей формы в fnParams
             const resolveParams = (val) => {
                 if (!val) return val;
@@ -2542,17 +2542,17 @@ class DataForm extends Form {
             };
             try {
                 const resp = await fetch(`/files/${uid}`);
-                if (!resp.ok) { if (typeof showAlert === 'function') showAlert('Файл не найден или нет доступа'); return; }
+                if (!resp.ok) { if (typeof showAlert === 'function') showAlert(__t('File not found or access denied')); return; }
                 const code = await resp.text();
                 // eslint-disable-next-line no-new-func
                 const mod = (new Function(code))();
                 if (mod && typeof mod[fn] === 'function') {
                     await mod[fn](resolveParams(fnParams));
                 } else {
-                    if (typeof showAlert === 'function') showAlert(`runScript: функция "${fn}" не найдена в скрипте`);
+                    if (typeof showAlert === 'function') showAlert(__t('runScript: function "') + fn + __t('" not found in script'));
                 }
             } catch (e) {
-                if (typeof showAlert === 'function') showAlert('Ошибка выполнения скрипта: ' + e.message);
+                if (typeof showAlert === 'function') showAlert(__t('Script execution error: ') + e.message);
             }
             return;
         }
@@ -2576,18 +2576,18 @@ class DataForm extends Form {
                 if (res && res.ok) {
                     this._modified = false;
                     if (res.warnings && res.warnings.length > 0) {
-                        const msg = 'Сохранено, но часть строк не записана:\n' + res.warnings.join('\n');
+                        const msg = __t('Saved, but some rows were not written:\n') + res.warnings.join('\n');
                         if (typeof showAlert === 'function') showAlert(msg);
                         else alert(msg);
                     }
                 } else {
-                    const errMsg = (res && res.error ? res.error : 'Неизвестная ошибка');
-                    if (typeof showAlert === 'function') showAlert('Ошибка сохранения: ' + errMsg);
-                    else alert('Ошибка сохранения: ' + errMsg);
+                    const errMsg = (res && res.error ? res.error : __t('Unknown error'));
+                    if (typeof showAlert === 'function') showAlert(__t('Save error: ') + errMsg);
+                    else alert(__t('Save error: ') + errMsg);
                 }
             } catch (e) {
-                if (typeof showAlert === 'function') showAlert('Ошибка сохранения: ' + e.message);
-                else alert('Ошибка сохранения: ' + e.message);
+                if (typeof showAlert === 'function') showAlert(__t('Save error: ') + e.message);
+                else alert(__t('Save error: ') + e.message);
             }
             return;
         }
@@ -3164,7 +3164,7 @@ class TextBox extends FormInput {
                     calBtn.type = 'button';
                     calBtn.tabIndex = -1;
                     calBtn.textContent = '▾';
-                    calBtn.title = 'Выбрать дату';
+                    calBtn.title = __t('Select date');
                     try { calBtn.classList.add('input-field-button'); } catch (e) {}
                     calBtn.addEventListener('click', (ev) => {
                         try { ev.stopPropagation(); ev.preventDefault(); this._toggleCalendar && this._toggleCalendar(); } catch (_) {}
@@ -4188,7 +4188,7 @@ class TextBox extends FormInput {
         const btnPrev = mkNavBtn('◄');
         btnPrev.addEventListener('click', (e) => { e.stopPropagation(); this._navigateCalendar(0, -1); });
 
-        const MONTHS_RU = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+        const MONTHS_RU = [__t('January'),__t('February'),__t('March'),__t('April'),__t('May'),__t('June'),__t('July'),__t('August'),__t('September'),__t('October'),__t('November'),__t('December')];
         const titleEl = document.createElement('span');
         titleEl.style.cssText = 'font-weight:bold;cursor:default;font-family:MS Sans Serif,sans-serif;font-size:11px;user-select:none;';
         titleEl.textContent = MONTHS_RU[month - 1] + ' ' + year;
@@ -4208,7 +4208,7 @@ class TextBox extends FormInput {
         table.style.cssText = 'border-collapse:collapse;width:100%;table-layout:fixed;';
 
         // Day-of-week headers (Mon…Sun)
-        const DAYS_SHORT = ['Пн','Вт','Ср','Чт','Пт','Сб','Вс'];
+        const DAYS_SHORT = [__t('Mo'),__t('Tu'),__t('We'),__t('Th'),__t('Fr'),__t('Sa'),__t('Su')];
         const thead = document.createElement('thead');
         const headRow = document.createElement('tr');
         for (let i = 0; i < 7; i++) {
@@ -4317,7 +4317,7 @@ class TextBox extends FormInput {
         footer.style.cssText = 'display:flex;justify-content:center;padding:2px 0 0;';
         const btnToday = document.createElement('button');
         btnToday.type = 'button';
-        btnToday.textContent = 'Сегодня';
+        btnToday.textContent = __t('Today');
         btnToday.style.cssText = 'background:' + base + ';border-top:2px solid ' + light + ';border-left:2px solid ' + light + ';' +
             'border-right:2px solid ' + dark + ';border-bottom:2px solid ' + dark + ';' +
             'cursor:default;padding:1px 10px;font-size:11px;font-family:MS Sans Serif,sans-serif;';
@@ -4371,12 +4371,12 @@ class TextBox extends FormInput {
 
             // Fallback to simple prompt when framework not available
             try {
-                const input = prompt('Введите текст для поиска (' + (table || 'таблица') + ')');
+                const input = prompt(__t('Enter search text') + ' (' + (table || __t('table')) + ')');
                 if (input !== null) setSelected({ id: input, [selMeta.displayField || 'name']: input });
             } catch (e) {}
         } catch (e) {
             try {
-                const input = prompt('Введите текст для поиска');
+                const input = prompt(__t('Enter search text'));
                 if (input !== null) {
                     try { if (typeof this.setText === 'function') this.setText(String(input)); } catch (_) { try { if (this.element) this.element.value = input; } catch(_){} }
                     try { if (this.element) this.element.dispatchEvent(new Event('input', { bubbles: true })); } catch (_) {}
@@ -5258,7 +5258,7 @@ class ModalForm extends Form {
 
 class AlertForm extends ModalForm {
     constructor(message, onOk) {
-        super('Alert', 300, 150);
+        super(__t('Alert'), 300, 150);
         this.message = message;
         this.onOk = onOk;
     }
@@ -5279,7 +5279,7 @@ class AlertForm extends ModalForm {
         UIObject.styleElement(lblMessage, 10, 10, this.width - 20, this.height - 80, 14);
 
         const btnOk = new Button(this.contentArea);
-        btnOk.setCaption('OK');
+        btnOk.setCaption(__t('OK'));
         btnOk.Draw(this.contentArea);
         btnOk.onClick = () => {
             this.close();
@@ -5303,7 +5303,7 @@ class AlertForm extends ModalForm {
 
 class ConfirmForm extends ModalForm {
     constructor(message, onOk, onCancel) {
-        super('Подтверждение', 400, 180);
+        super(__t('Confirm'), 400, 180);
         this.message = message;
         this.onOk = onOk;
         this.onCancel = onCancel;
@@ -5325,7 +5325,7 @@ class ConfirmForm extends ModalForm {
         UIObject.styleElement(lblMessage, 10, 10, this.width - 20, this.height - 80, 13);
 
         const btnOk = new Button(this.contentArea);
-        btnOk.setCaption('Да');
+        btnOk.setCaption(__t('Yes'));
         btnOk.Draw(this.contentArea);
         btnOk.onClick = () => {
             this.close();
@@ -5333,7 +5333,7 @@ class ConfirmForm extends ModalForm {
         };
 
         const btnCancel = new Button(this.contentArea);
-        btnCancel.setCaption('Нет');
+        btnCancel.setCaption(__t('No'));
         btnCancel.Draw(this.contentArea);
         btnCancel.onClick = () => {
             this.close();
@@ -6101,7 +6101,7 @@ class DatePicker extends FormInput {
 
         // Create calendar popup form
         const calendar = new Form();
-        calendar.setTitle('Выбор даты');
+        calendar.setTitle(__t('Date selection'));
         calendar.setWidth(280);
         calendar.setHeight(this.showTime ? 270 : 240);
         calendar.setResizable(false);
@@ -6145,8 +6145,8 @@ class DatePicker extends FormInput {
             };
 
             const monthLabel = new Label();
-            const monthNames = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь',
-                'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
+            const monthNames = [__t('January'), __t('February'), __t('March'), __t('April'), __t('May'), __t('June'),
+                __t('July'), __t('August'), __t('September'), __t('October'), __t('November'), __t('December')];
             monthLabel.setText(`${monthNames[currentMonth]} ${currentYear}`);
             monthLabel.setFontWeight('bold');
 
@@ -6246,7 +6246,7 @@ class DatePicker extends FormInput {
 
             // Today button
             const todayBtn = new Button();
-            todayBtn.setCaption('Сегодня');
+            todayBtn.setCaption(__t('Today'));
             todayBtn.setWidth(80);
             todayBtn.setHeight(22);
             todayBtn.setX(100);
@@ -6789,7 +6789,7 @@ class Table extends UIObject {
         input.style.fontSize = 'inherit';
 
         const ok = document.createElement('button');
-        ok.textContent = 'OK';
+        ok.textContent = __t('OK');
         ok.style.fontFamily = 'inherit';
         ok.style.fontSize = 'inherit';
 
@@ -7511,12 +7511,12 @@ class Table extends UIObject {
                 wrapper.appendChild(toolbarContainer);
 
                 const toolbarButtons = [
-                    { action: 'select',       caption: 'Выбрать',    icon: '/apps/general_icons/resources/public/16x16/select.png' },
-                    { action: 'cancel',       caption: 'Отмена',     icon: '/apps/general_icons/resources/public/16x16/cancel.png' },
-                    { action: 'recordOpen',   caption: 'Открыть',    icon: '/apps/general_icons/resources/public/16x16/open.png' },
-                    { action: 'recordAdd',    caption: 'Добавить',   icon: '/apps/general_icons/resources/public/16x16/add.png' },
-                    { action: 'recordDelete', caption: 'Удалить',    icon: '/apps/general_icons/resources/public/16x16/delete.png' },
-                    { action: 'listSettings', caption: 'Настройки',  icon: '/apps/general_icons/resources/public/16x16/settings.png' }
+                    { action: 'select',       caption: __t('Select'),   icon: '/apps/general_icons/resources/public/16x16/select.png' },
+                    { action: 'cancel',       caption: __t('Cancel'),   icon: '/apps/general_icons/resources/public/16x16/cancel.png' },
+                    { action: 'recordOpen',   caption: __t('Open'),     icon: '/apps/general_icons/resources/public/16x16/open.png' },
+                    { action: 'recordAdd',    caption: __t('Add'),      icon: '/apps/general_icons/resources/public/16x16/add.png' },
+                    { action: 'recordDelete', caption: __t('Delete'),   icon: '/apps/general_icons/resources/public/16x16/delete.png' },
+                    { action: 'listSettings', caption: __t('Settings'), icon: '/apps/general_icons/resources/public/16x16/settings.png' }
                 ];
 
                 for (const btnDef of toolbarButtons) {
@@ -7577,7 +7577,7 @@ class Table extends UIObject {
                             const cb = document.createElement('input');
                             cb.type = 'checkbox';
                             cb.checked = f.enabled !== false;
-                            cb.title = 'Включить / выключить фильтр';
+                            cb.title = __t('Enable / disable filter');
                             cb.addEventListener('change', () => {
                                 f.enabled = cb.checked;
                                 chip.classList.toggle('ui-filter-chip--off', !f.enabled);
@@ -7608,7 +7608,7 @@ class Table extends UIObject {
                             const del = document.createElement('span');
                             del.className = 'ui-filter-chip-del';
                             del.textContent = '×';
-                            del.title = 'Убрать фильтр';
+                            del.title = __t('Remove filter');
                             del.addEventListener('click', () => { this.removeFilter(f.field); });
                             chip.appendChild(del);
                         }
@@ -8329,7 +8329,7 @@ class DynamicTable extends Table {
         } catch (error) {
             console.error('[DynamicTable] Refresh error:', error);
             if (typeof showAlert === 'function') {
-                showAlert('Ошибка обновления данных: ' + error.message);
+                showAlert(__t('Data refresh error: ') + error.message);
             }
         } finally {
             this.hideLoadingIndicator();
@@ -8360,7 +8360,7 @@ class DynamicTable extends Table {
             overlay.style.justifyContent = 'center';
             overlay.style.zIndex = '1000';
             const label = document.createElement('div');
-            label.textContent = 'Loading...';
+            label.textContent = __t('Loading...');
             label.style.padding = '6px 12px';
             label.style.background = '#c0c0c0';
             overlay.appendChild(label);

@@ -10,28 +10,28 @@
     // -----------------------------------------------------------------------
 
     const ALL_OPERATORS = [
-        { value: '=',          caption: 'Равно' },
-        { value: '!=',         caption: 'Не равно' },
-        { value: '>',          caption: 'Больше' },
-        { value: '>=',         caption: 'Больше или равно' },
-        { value: '<',          caption: 'Меньше' },
-        { value: '<=',         caption: 'Меньше или равно' },
-        { value: 'contains',   caption: 'Содержит' },
-        { value: 'startsWith', caption: 'Начинается с' },
-        { value: 'endsWith',   caption: 'Заканчивается на' },
-        { value: 'isNull',     caption: 'Не задано' },
-        { value: 'isNotNull',  caption: 'Задано' }
+        { value: '=',          caption: __t('Equals') },
+        { value: '!=',         caption: __t('Not equals') },
+        { value: '>',          caption: __t('Greater than') },
+        { value: '>=',         caption: __t('Greater than or equal') },
+        { value: '<',          caption: __t('Less than') },
+        { value: '<=',         caption: __t('Less than or equal') },
+        { value: 'contains',   caption: __t('Contains') },
+        { value: 'startsWith', caption: __t('Starts with') },
+        { value: 'endsWith',   caption: __t('Ends with') },
+        { value: 'isNull',     caption: __t('Is empty') },
+        { value: 'isNotNull',  caption: __t('Is not empty') }
     ];
 
     const FILTER_TYPES = [
-        { value: 'server', caption: 'Серверный (SQL)' },
-        { value: 'client', caption: 'Клиентский' }
+        { value: 'server', caption: __t('Server (SQL)') },
+        { value: 'client', caption: __t('Client-side') }
     ];
 
     const VISIBILITIES = [
-        { value: 'visible',  caption: 'Видимый (редактируемый)' },
-        { value: 'readonly', caption: 'Видимый (только чтение)' },
-        { value: 'hidden',   caption: 'Скрытый' }
+        { value: 'visible',  caption: __t('Visible (editable)') },
+        { value: 'readonly', caption: __t('Visible (read-only)') },
+        { value: 'hidden',   caption: __t('Hidden') }
     ];
 
     // -----------------------------------------------------------------------
@@ -53,7 +53,7 @@
 
                 onOpen: async (openParams) => {
                     const targetTitle = openParams.title || openParams.appName || 'списка';
-                    appForm.setTitle('Настройки: ' + targetTitle);
+                    appForm.setTitle(__t('Settings') + ': ' + targetTitle);
                     appForm.params = openParams;
 
                     // tableInstance — ссылка на DynamicTable, переданная из кнопки «Настройки»
@@ -130,19 +130,19 @@
                             name: 'mainTabs',
                             tabs: [
                                 {
-                                    caption: 'Фильтры',
+                                    caption: __t('Filters'),
                                     layout: [
                                         {
                                             type: 'table',
                                             name: 'filtersTable',
                                             data: '__filters',
                                             columns: [
-                                                { caption: 'Вкл',       data: 'enabled',    inputType: 'checkbox', width: 35  },
-                                                { caption: 'Поле',      data: 'field',      inputType: 'emunList', options: fieldOptions,  width: 155 },
-                                                { caption: 'Условие',   data: 'operator',   inputType: 'emunList', options: ALL_OPERATORS, width: 150 },
-                                                { caption: 'Значение',  data: 'value',      inputType: 'textbox',  width: 135 },
-                                                { caption: 'Тип',       data: 'type',       inputType: 'emunList', options: FILTER_TYPES,  width: 125 },
-                                                { caption: 'Видимость', data: 'visibility', inputType: 'emunList', options: VISIBILITIES,  width: 175 }
+                                                { caption: __t('On'),         data: 'enabled',    inputType: 'checkbox', width: 35  },
+                                                { caption: __t('Field'),      data: 'field',      inputType: 'emunList', options: fieldOptions,  width: 155 },
+                                                { caption: __t('Condition'),  data: 'operator',   inputType: 'emunList', options: ALL_OPERATORS, width: 150 },
+                                                { caption: __t('Value'),      data: 'value',      inputType: 'textbox',  width: 135 },
+                                                { caption: __t('Type'),       data: 'type',       inputType: 'emunList', options: FILTER_TYPES,  width: 125 },
+                                                { caption: __t('Visibility'), data: 'visibility', inputType: 'emunList', options: VISIBILITIES,  width: 175 }
                                             ],
                                             properties: {
                                                 editMode: 'row-activate',
@@ -154,16 +154,16 @@
                                             type: 'group',
                                             orientation: 'horizontal',
                                             layout: [
-                                                { type: 'button', caption: '+ Добавить фильтр', action: 'addFilter',    properties: { isStandard: false } },
-                                                { type: 'button', caption: 'Удалить',           action: 'deleteFilter', properties: { isStandard: false } },
-                                                { type: 'button', caption: 'Применить',         action: 'applyFilters', properties: { isStandard: false } },
-                                                { type: 'button', caption: 'Очистить всё',      action: 'clearFilters', properties: { isStandard: false } }
+                                                { type: 'button', caption: __t('+ Add filter'), action: 'addFilter',    properties: { isStandard: false } },
+                                                { type: 'button', caption: __t('Delete'),       action: 'deleteFilter', properties: { isStandard: false } },
+                                                { type: 'button', caption: __t('Apply'),        action: 'applyFilters', properties: { isStandard: false } },
+                                                { type: 'button', caption: __t('Clear all'),    action: 'clearFilters', properties: { isStandard: false } }
                                             ]
                                         }
                                     ]
                                 },
                                 {
-                                    caption: 'Поля',
+                                    caption: __t('Fields'),
                                     layout: []
                                 }
                             ]

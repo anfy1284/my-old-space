@@ -257,12 +257,18 @@
 
 ### Клиентский i18n — реализован
 
-#### Перевод строк в `loadScript` (клиентские JS-файлы)
+#### Перевод строк в статических клиентских JS-файлах (`resources/public/`)
 
-- **Маркер:** `__t('key')` в `.client.js` файлах. `optimizeJS` его не трогает (обычный вызов).
-- **Механизм:** `GET /files/:uid` (`drive_root/server.js`) — перед отдачей файла если `fileType === 'js'` и текст содержит `__t(`, применяется regex-замена `/__t\('([^']+)'\)/g` → `JSON.stringify(i18n.t(key, userLang))`. Язык берётся из `getSessionContext(sessionID)`.
-- **Правило ключей:** ВСЕГДА используй `snake_case` семантические ключи без пробелов/запятых/двоеточий. Символы `, : ;` в значениях строк включай в перевод (в i18n.json), а не в клиентский код — `optimizeJS` наивно удаляет пробелы вокруг них в тексте файла.
-- **Пример:** `showAlert(__t('error_prefix') + result.error)` где `"error_prefix": { "en": "Error: ", "ru": "Ошибка: " }`
+- **Маркер:** `__t('key')` в `.client.js` и `UI_classes.js`. Браузер маркер НИКОГДА не видит — он заменяется на сервере перед отдачей.
+- **Механизм:** `fileStore.serveFileFromPath(filePath, role, language)` (`drive_root/fileStore.js`) — вызывается из трёх HTTP-роутов: `/res/public/` и `/apps/<name>/resources/public/` (drive_root/server.js), `/<alias>/res/public/` (drive_forms/server.js), а также из `globalServerContext.loadApps()` при загрузке `client.js`-бандла.
+- **Pipeline (в `serveFileFromPath`):**
+  1. `optimizeJS(raw)` — minify через `terser` с `{ compress: true, mangle: false, output: { quote_style: 1 } }`. `quote_style: 1` КРИТИЧНО — принудительно сохраняет одинарные кавычки, иначе `__t('key')` превратится в `__t("key")` и regex не сработает.
+  2. `translateJsMarkers(text, language)` — regex `/__t\((['"])([^'"]+)\1\)/g` заменяет маркеры на `JSON.stringify(i18n.t(key, lang))`. Обрабатывает оба типа кавычек как fallback.
+  3. Результат кешируется в `_fileCache` (Map) по ключу `` `${filePath}|${role}|${language}` ``.
+- **Если `__t` добрался до браузера** → `ReferenceError: __t is not defined` → `Draw()` / `loadLayout()` молча падает внутри try-catch → форма показывает пустое серое окно. Причина: неверный `quote_style` или баг в regex.
+- **Правило ключей:** используй **саму строку на английском** как ключ (например, `__t('Error: ')`, `__t('Save')`). Ключи с пробелами/двоеточиями допустимы — terser с `quote_style: 1` их сохраняет. ❌ snake_case-ключи — больше НЕ нужны (это была заплатка до фикса terser).
+- **Пример:** `showAlert(__t('Error: ') + result.error)` где `"Error: ": { "en": "Error: ", "ru": "Ошибка: ", "de": "Fehler: " }`
+- **Сброс кеша:** `_fileCache` очищается только при перезапуске сервера (in-memory Map). После изменения i18n.json — рестарт обязателен.
 
 #### Перевод `caption` в лейаутах
 

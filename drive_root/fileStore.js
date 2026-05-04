@@ -44,6 +44,7 @@ async function optimizeJS(text) {
         const result = await terser.minify(text, {
             compress: true,
             mangle: false,
+            output: { quote_style: 1 }, // force single quotes to preserve __t('key') pattern
         });
         if (result.error) throw result.error;
         return result.code;
@@ -60,9 +61,10 @@ async function optimizeJS(text) {
  * @returns {string}
  */
 function translateJsMarkers(text, language) {
-    if (!language || !text.includes('__t(')) return text;
+    if (!text.includes('__t(')) return text;
     const i18n = require('./i18n');
-    return text.replace(/__t\('([^']+)'\)/g, (_, key) => JSON.stringify(i18n.t(key, language)));
+    const effectiveLang = language || 'en';
+    return text.replace(/__t\((['"])([^'"]+)\1\)/g, (_, _q, key) => JSON.stringify(i18n.t(key, effectiveLang)));
 }
 
 /**

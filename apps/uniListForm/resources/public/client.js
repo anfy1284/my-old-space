@@ -29,7 +29,7 @@ try {
             function instanceOnOpen(dbTable) {
                 appForm.dbTable = dbTable || null;
                 if (!dbTable) {
-                    if (typeof showAlert === 'function') showAlert('Не указана таблица базы данных!');
+                    if (typeof showAlert === 'function') showAlert(__t('No database table specified!'));
                     return false;
                 }
                 return true;

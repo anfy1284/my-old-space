@@ -250,19 +250,43 @@ async function handleRequest(req, res) {
             const appsDirProject = path.join(process.cwd(), appsBasePath);
 
             if (resType === 'public') {
+                const fileStore = require('./fileStore');
+                const serveAppFile = async (resolvedPath) => {
+                    let sessionID = null;
+                    if (req.headers && req.headers.cookie) {
+                        const m = req.headers.cookie.match(/(?:^|; )sessionID=([^;]+)/i);
+                        if (m) sessionID = decodeURIComponent(m[1]);
+                    }
+                    let language = null;
+                    if (sessionID) {
+                        try {
+                            const { getSessionContext } = require('../drive_forms/globalServerContext');
+                            const ctx = await getSessionContext(sessionID);
+                            language = ctx && ctx.language;
+                        } catch (e) { /* no session */ }
+                    }
+                    const contentType = getContentType(resolvedPath);
+                    const ext = path.extname(resolvedPath).slice(1).toLowerCase();
+                    if (ext === 'js') {
+                        res.writeHead(200, { 'Content-Type': contentType });
+                        res.end(await fileStore.serveFileFromPath(resolvedPath, 'public', language));
+                    } else {
+                        fs.readFile(resolvedPath, (err, data) => {
+                            if (err) {
+                                res.writeHead(500, { 'Content-Type': 'text/plain' });
+                                res.end('Error reading file');
+                                return;
+                            }
+                            res.writeHead(200, { 'Content-Type': contentType });
+                            res.end(data);
+                        });
+                    }
+                };
+
                 // Prefer project apps directory if file exists there
                 const projectFilePath = path.join(appsDirProject, appName, 'resources', 'public', relPath);
                 if (fs.existsSync(projectFilePath) && fs.statSync(projectFilePath).isFile()) {
-                    const contentType = getContentType(projectFilePath);
-                    fs.readFile(projectFilePath, (err, data) => {
-                        if (err) {
-                            res.writeHead(500, { 'Content-Type': 'text/plain' });
-                            res.end('Error reading file');
-                            return;
-                        }
-                        res.writeHead(200, { 'Content-Type': contentType });
-                        res.end(data);
-                    });
+                    serveAppFile(projectFilePath);
                     return;
                 }
 
@@ -275,16 +299,7 @@ async function handleRequest(req, res) {
                     return;
                 }
 
-                const contentType = getContentType(filePath);
-                fs.readFile(filePath, (err, data) => {
-                    if (err) {
-                        res.writeHead(500, { 'Content-Type': 'text/plain' });
-                        res.end('Error reading file');
-                        return;
-                    }
-                    res.writeHead(200, { 'Content-Type': contentType });
-                    res.end(data);
-                });
+                serveAppFile(filePath);
                 return;
             }
             // TODO: protected resources for apps

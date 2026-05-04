@@ -13,5 +13,425 @@
         "en": "Database models not available",
         "ru": "Модели базы данных недоступны",
         "de": "Datenbankmodelle nicht verfügbar"
+    },
+    "Alert": {
+        "en": "Alert",
+        "ru": "Предупреждение",
+        "de": "Hinweis"
+    },
+    "OK": {
+        "en": "OK",
+        "ru": "OK",
+        "de": "OK"
+    },
+    "Confirm": {
+        "en": "Confirm",
+        "ru": "Подтверждение",
+        "de": "Bestätigung"
+    },
+    "Yes": {
+        "en": "Yes",
+        "ru": "Да",
+        "de": "Ja"
+    },
+    "No": {
+        "en": "No",
+        "ru": "Нет",
+        "de": "Nein"
+    },
+    "Loading...": {
+        "en": "Loading...",
+        "ru": "Загрузка...",
+        "de": "Wird geladen..."
+    },
+    "No table specified!": {
+        "en": "No table specified!",
+        "ru": "Не указана таблица!",
+        "de": "Keine Tabelle angegeben!"
+    },
+    "No database table specified!": {
+        "en": "No database table specified!",
+        "ru": "Не указана таблица базы данных!",
+        "de": "Keine Datenbanktabelle angegeben!"
+    },
+    "Please select a record": {
+        "en": "Please select a record",
+        "ru": "Выберите запись",
+        "de": "Bitte einen Datensatz auswählen"
+    },
+    "Please select a record to delete": {
+        "en": "Please select a record to delete",
+        "ru": "Выберите запись для удаления",
+        "de": "Bitte einen Datensatz zum Löschen auswählen"
+    },
+    "Are you sure you want to delete this record?": {
+        "en": "Are you sure you want to delete this record?",
+        "ru": "Вы действительно хотите удалить эту запись?",
+        "de": "Möchten Sie diesen Datensatz wirklich löschen?"
+    },
+    "Delete error: ": {
+        "en": "Delete error: ",
+        "ru": "Ошибка удаления: ",
+        "de": "Löschfehler: "
+    },
+    "unknown error": {
+        "en": "unknown error",
+        "ru": "неизвестная ошибка",
+        "de": "unbekannter Fehler"
+    },
+    "Data has been modified. Save changes?": {
+        "en": "Data has been modified. Save changes?",
+        "ru": "Данные были изменены. Сохранить изменения?",
+        "de": "Daten wurden geändert. Änderungen speichern?"
+    },
+    "Layout load error: ": {
+        "en": "Layout load error: ",
+        "ru": "Ошибка загрузки макета: ",
+        "de": "Layoutladefehler: "
+    },
+    "runScript: uid not specified": {
+        "en": "runScript: uid not specified",
+        "ru": "runScript: не указан uid",
+        "de": "runScript: uid nicht angegeben"
+    },
+    "runScript: fn not specified": {
+        "en": "runScript: fn not specified",
+        "ru": "runScript: не указан fn",
+        "de": "runScript: fn nicht angegeben"
+    },
+    "File not found or access denied": {
+        "en": "File not found or access denied",
+        "ru": "Файл не найден или нет доступа",
+        "de": "Datei nicht gefunden oder kein Zugriff"
+    },
+    "runScript: function \"": {
+        "en": "runScript: function \"",
+        "ru": "runScript: функция \"",
+        "de": "runScript: Funktion \""
+    },
+    "\" not found in script": {
+        "en": "\" not found in script",
+        "ru": "\" не найдена в скрипте",
+        "de": "\" nicht im Skript gefunden"
+    },
+    "Script execution error: ": {
+        "en": "Script execution error: ",
+        "ru": "Ошибка выполнения скрипта: ",
+        "de": "Skriptausführungsfehler: "
+    },
+    "Unknown error": {
+        "en": "Unknown error",
+        "ru": "Неизвестная ошибка",
+        "de": "Unbekannter Fehler"
+    },
+    "Saved, but some rows were not written:\n": {
+        "en": "Saved, but some rows were not written:\n",
+        "ru": "Сохранено, но часть строк не записана:\n",
+        "de": "Gespeichert, aber einige Zeilen wurden nicht geschrieben:\n"
+    },
+    "Save error: ": {
+        "en": "Save error: ",
+        "ru": "Ошибка сохранения: ",
+        "de": "Speicherfehler: "
+    },
+    "Data refresh error: ": {
+        "en": "Data refresh error: ",
+        "ru": "Ошибка обновления данных: ",
+        "de": "Datenaktualisierungsfehler: "
+    },
+    "Select": {
+        "en": "Select",
+        "ru": "Выбрать",
+        "de": "Auswählen"
+    },
+    "Cancel": {
+        "en": "Cancel",
+        "ru": "Отмена",
+        "de": "Abbrechen"
+    },
+    "Open": {
+        "en": "Open",
+        "ru": "Открыть",
+        "de": "Öffnen"
+    },
+    "Add": {
+        "en": "Add",
+        "ru": "Добавить",
+        "de": "Hinzufügen"
+    },
+    "Delete": {
+        "en": "Delete",
+        "ru": "Удалить",
+        "de": "Löschen"
+    },
+    "Settings": {
+        "en": "Settings",
+        "ru": "Настройки",
+        "de": "Einstellungen"
+    },
+    "Enable / disable filter": {
+        "en": "Enable / disable filter",
+        "ru": "Включить / выключить фильтр",
+        "de": "Filter ein-/ausschalten"
+    },
+    "Remove filter": {
+        "en": "Remove filter",
+        "ru": "Убрать фильтр",
+        "de": "Filter entfernen"
+    },
+    "Select date": {
+        "en": "Select date",
+        "ru": "Выбрать дату",
+        "de": "Datum auswählen"
+    },
+    "Date selection": {
+        "en": "Date selection",
+        "ru": "Выбор даты",
+        "de": "Datumsauswahl"
+    },
+    "January": {
+        "en": "January",
+        "ru": "Январь",
+        "de": "Januar"
+    },
+    "February": {
+        "en": "February",
+        "ru": "Февраль",
+        "de": "Februar"
+    },
+    "March": {
+        "en": "March",
+        "ru": "Март",
+        "de": "März"
+    },
+    "April": {
+        "en": "April",
+        "ru": "Апрель",
+        "de": "April"
+    },
+    "May": {
+        "en": "May",
+        "ru": "Май",
+        "de": "Mai"
+    },
+    "June": {
+        "en": "June",
+        "ru": "Июнь",
+        "de": "Juni"
+    },
+    "July": {
+        "en": "July",
+        "ru": "Июль",
+        "de": "Juli"
+    },
+    "August": {
+        "en": "August",
+        "ru": "Август",
+        "de": "August"
+    },
+    "September": {
+        "en": "September",
+        "ru": "Сентябрь",
+        "de": "September"
+    },
+    "October": {
+        "en": "October",
+        "ru": "Октябрь",
+        "de": "Oktober"
+    },
+    "November": {
+        "en": "November",
+        "ru": "Ноябрь",
+        "de": "November"
+    },
+    "December": {
+        "en": "December",
+        "ru": "Декабрь",
+        "de": "Dezember"
+    },
+    "Mo": {
+        "en": "Mo",
+        "ru": "Пн",
+        "de": "Mo"
+    },
+    "Tu": {
+        "en": "Tu",
+        "ru": "Вт",
+        "de": "Di"
+    },
+    "We": {
+        "en": "We",
+        "ru": "Ср",
+        "de": "Mi"
+    },
+    "Th": {
+        "en": "Th",
+        "ru": "Чт",
+        "de": "Do"
+    },
+    "Fr": {
+        "en": "Fr",
+        "ru": "Пт",
+        "de": "Fr"
+    },
+    "Sa": {
+        "en": "Sa",
+        "ru": "Сб",
+        "de": "Sa"
+    },
+    "Su": {
+        "en": "Su",
+        "ru": "Вс",
+        "de": "So"
+    },
+    "Today": {
+        "en": "Today",
+        "ru": "Сегодня",
+        "de": "Heute"
+    },
+    "Enter search text": {
+        "en": "Enter search text",
+        "ru": "Введите текст для поиска",
+        "de": "Suchtext eingeben"
+    },
+    "table": {
+        "en": "table",
+        "ru": "таблица",
+        "de": "Tabelle"
+    },
+    "Filters": {
+        "en": "Filters",
+        "ru": "Фильтры",
+        "de": "Filter"
+    },
+    "Fields": {
+        "en": "Fields",
+        "ru": "Поля",
+        "de": "Felder"
+    },
+    "On": {
+        "en": "On",
+        "ru": "Вкл",
+        "de": "An"
+    },
+    "Field": {
+        "en": "Field",
+        "ru": "Поле",
+        "de": "Feld"
+    },
+    "Condition": {
+        "en": "Condition",
+        "ru": "Условие",
+        "de": "Bedingung"
+    },
+    "Value": {
+        "en": "Value",
+        "ru": "Значение",
+        "de": "Wert"
+    },
+    "Type": {
+        "en": "Type",
+        "ru": "Тип",
+        "de": "Typ"
+    },
+    "Visibility": {
+        "en": "Visibility",
+        "ru": "Видимость",
+        "de": "Sichtbarkeit"
+    },
+    "Equals": {
+        "en": "Equals",
+        "ru": "Равно",
+        "de": "Gleich"
+    },
+    "Not equals": {
+        "en": "Not equals",
+        "ru": "Не равно",
+        "de": "Ungleich"
+    },
+    "Greater than": {
+        "en": "Greater than",
+        "ru": "Больше",
+        "de": "Größer als"
+    },
+    "Greater than or equal": {
+        "en": "Greater than or equal",
+        "ru": "Больше или равно",
+        "de": "Größer oder gleich"
+    },
+    "Less than": {
+        "en": "Less than",
+        "ru": "Меньше",
+        "de": "Kleiner als"
+    },
+    "Less than or equal": {
+        "en": "Less than or equal",
+        "ru": "Меньше или равно",
+        "de": "Kleiner oder gleich"
+    },
+    "Contains": {
+        "en": "Contains",
+        "ru": "Содержит",
+        "de": "Enthält"
+    },
+    "Starts with": {
+        "en": "Starts with",
+        "ru": "Начинается с",
+        "de": "Beginnt mit"
+    },
+    "Ends with": {
+        "en": "Ends with",
+        "ru": "Заканчивается на",
+        "de": "Endet mit"
+    },
+    "Is empty": {
+        "en": "Is empty",
+        "ru": "Не задано",
+        "de": "Leer"
+    },
+    "Is not empty": {
+        "en": "Is not empty",
+        "ru": "Задано",
+        "de": "Nicht leer"
+    },
+    "Server (SQL)": {
+        "en": "Server (SQL)",
+        "ru": "Серверный (SQL)",
+        "de": "Server (SQL)"
+    },
+    "Client-side": {
+        "en": "Client-side",
+        "ru": "Клиентский",
+        "de": "Clientseitig"
+    },
+    "Visible (editable)": {
+        "en": "Visible (editable)",
+        "ru": "Видимый (редактируемый)",
+        "de": "Sichtbar (bearbeitbar)"
+    },
+    "Visible (read-only)": {
+        "en": "Visible (read-only)",
+        "ru": "Видимый (только чтение)",
+        "de": "Sichtbar (nur lesen)"
+    },
+    "Hidden": {
+        "en": "Hidden",
+        "ru": "Скрытый",
+        "de": "Versteckt"
+    },
+    "+ Add filter": {
+        "en": "+ Add filter",
+        "ru": "+ Добавить фильтр",
+        "de": "+ Filter hinzufügen"
+    },
+    "Apply": {
+        "en": "Apply",
+        "ru": "Применить",
+        "de": "Anwenden"
+    },
+    "Clear all": {
+        "en": "Clear all",
+        "ru": "Очистить всё",
+        "de": "Alles löschen"
     }
 }
