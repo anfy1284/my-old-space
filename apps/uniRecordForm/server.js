@@ -457,7 +457,7 @@ async function generateFormSpec(tableName, params, sessionID) {
             const layoutMemory = require('../../drive_root/layoutMemory');
             if (layoutMemory.hasRegistered('uniRecordForm', tableName)) {
                 const userRole = await layoutMemory.getUserRoleBySession(sessionID);
-                customLayoutObj = await layoutMemory.getLayoutForUser('uniRecordForm', tableName, userRole);
+                customLayoutObj = await layoutMemory.getLayoutForUser('uniRecordForm', tableName, userRole, sessionID);
                 if (customLayoutObj) {
                     clientScript = customLayoutObj.clientScript || null;
                     formIcon = customLayoutObj.formIcon || null;

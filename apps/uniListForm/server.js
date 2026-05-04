@@ -42,7 +42,7 @@ async function getLayoutWithData(params, sessionID) {
                 // Если нет — сразу выходим, ни одного запроса в БД не делается.
                 if (layoutMemory.hasRegistered('uniListForm', tableName)) {
                     const userRole = await layoutMemory.getUserRoleBySession(sessionID);
-                    const customLayout = await layoutMemory.getLayoutForUser('uniListForm', tableName, userRole);
+                    const customLayout = await layoutMemory.getLayoutForUser('uniListForm', tableName, userRole, sessionID);
                     if (customLayout) {
                         const data = getData(params);
                         const clLayout = customLayout.layout || customLayout;

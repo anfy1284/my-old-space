@@ -314,7 +314,21 @@ async function handleRequest(req, res) {
             const contentType = MIME_TYPES[result.fileType] || 'text/plain';
 
             res.writeHead(200, { 'Content-Type': contentType + '; charset=utf-8' });
-            res.end(result.text);
+
+            // Translate __t('key') markers in JS files
+            let fileText = result.text;
+            if (result.fileType === 'js' && fileText.includes('__t(')) {
+                try {
+                    const { getSessionContext } = require('../drive_forms/globalServerContext');
+                    const i18n = require('./i18n');
+                    const { language } = await getSessionContext(sessionID);
+                    fileText = fileText.replace(/__t\('([^']+)'\)/g, (_, key) => JSON.stringify(i18n.t(key, language)));
+                } catch (e) {
+                    console.error('[/files] i18n translation error:', e && e.message || e);
+                }
+            }
+
+            res.end(fileText);
         } catch (e) {
             console.error('[/files] Error serving file:', e);
             res.writeHead(500, { 'Content-Type': 'text/plain' });

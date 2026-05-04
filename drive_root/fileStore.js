@@ -35,24 +35,38 @@ function hasRoleAccess(userRole, requiredRole) {
  * @returns {string}
  */
 function optimizeJS(text) {
-    let result = text;
+    // Strategy: extract all string literals into a placeholder map,
+    // run minification on the skeleton, then restore strings.
+    // This prevents the optimizer from corrupting string contents.
+
+    const strings = [];
+    const PLACEHOLDER = '\x00STR\x00';
+
+    // Extract single-quoted, double-quoted, and template literal strings
+    let skeleton = text.replace(/(`[^`\\]*(?:\\[\s\S][^`\\]*)*`|'[^'\\\n]*(?:\\[\s\S][^'\\\n]*)*'|"[^"\\\n]*(?:\\[\s\S][^"\\\n]*)*")/g, (match) => {
+        strings.push(match);
+        return PLACEHOLDER + (strings.length - 1) + PLACEHOLDER;
+    });
 
     // Удалить блочные комментарии /* ... */
-    result = result.replace(/\/\*[\s\S]*?\*\//g, '');
+    skeleton = skeleton.replace(/\/\*[\s\S]*?\*\//g, '');
 
     // Удалить однострочные комментарии // ...
-    result = result.replace(/\/\/[^\n]*/g, '');
+    skeleton = skeleton.replace(/\/\/[^\n]*/g, '');
 
     // Заменить все последовательности пробелов/переносов/табуляций одним пробелом
-    result = result.replace(/\s+/g, ' ');
+    skeleton = skeleton.replace(/\s+/g, ' ');
 
     // Убрать пробелы перед и после безопасных знаков пунктуации
-    result = result.replace(/ *([{}\(\)\[\];,]) */g, '$1');
+    skeleton = skeleton.replace(/ *([{}\(\)\[\];,]) */g, '$1');
 
     // Убрать пробелы вокруг оператора присваивания и сравнения (безопасно для JS)
-    result = result.replace(/ *(===|!==|==|!=|>=|<=|=>|&&|\|\||[=+\-*%<>!&|^~?:]) */g, '$1');
+    skeleton = skeleton.replace(/ *(===|!==|==|!=|>=|<=|=>|&&|\|\||[=+\-*%<>!&|^~?:]) */g, '$1');
 
-    return result.trim();
+    // Restore string literals
+    skeleton = skeleton.replace(new RegExp('\x00STR\x00(\\d+)\x00STR\x00', 'g'), (_, i) => strings[parseInt(i, 10)]);
+
+    return skeleton.trim();
 }
 
 /**

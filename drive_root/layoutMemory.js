@@ -91,6 +91,26 @@ async function saveLayout({ appName, tableName, roles, layout, events, clientScr
 }
 
 /**
+ * Recursively translate all { i18n: 'key' } caption objects in a layout node tree.
+ * Mutates nodes in-place (call only on a deep-cloned layout).
+ * @param {Array|object} nodes - layout array or single node
+ * @param {Function} tFn - synchronous translate function: (key) => string
+ */
+function translateLayoutCaptions(nodes, tFn) {
+    if (!nodes) return;
+    const arr = Array.isArray(nodes) ? nodes : [nodes];
+    for (const node of arr) {
+        if (!node || typeof node !== 'object') continue;
+        if (node.caption && typeof node.caption === 'object' && node.caption.i18n) {
+            node.caption = tFn(node.caption.i18n);
+        }
+        if (Array.isArray(node.layout))   translateLayoutCaptions(node.layout, tFn);
+        if (Array.isArray(node.columns))  translateLayoutCaptions(node.columns, tFn);
+        if (Array.isArray(node.options))  translateLayoutCaptions(node.options, tFn);
+    }
+}
+
+/**
  * Retrieve a custom layout for the given user role.
  * Returns the layout array, or null if no custom layout was stored.
  *
@@ -100,24 +120,46 @@ async function saveLayout({ appName, tableName, roles, layout, events, clientScr
  * @param {string} appName
  * @param {string} tableName
  * @param {string|null} userRole
+ * @param {string} [sessionID] - when provided, captions with { i18n: 'key' } are translated
  * @returns {Promise<Array|null>}
  */
-async function getLayoutForUser(appName, tableName, userRole) {
+async function getLayoutForUser(appName, tableName, userRole, sessionID) {
     if (!appName || !tableName) return null;
 
     // Fast-path: nothing registered for this table — immediate return
     if (!_registeredPrefixes.has(makePrefix(appName, tableName))) return null;
 
+    let result = null;
+
     // 1. Exact role match (in-memory Map → instant)
     if (userRole) {
         const stored = memoryStore.getSync(NAMESPACE, makeKey(appName, tableName, userRole));
-        if (stored) return stored.layout !== undefined ? stored : { layout: stored, events: null, clientScript: null, formIcon: null };
+        if (stored) result = stored.layout !== undefined ? stored : { layout: stored, events: null, clientScript: null, formIcon: null };
     }
 
     // 2. Wildcard match (any role)
-    const fallback = memoryStore.getSync(NAMESPACE, makeKey(appName, tableName, '*'));
-    if (!fallback) return null;
-    return fallback.layout !== undefined ? fallback : { layout: fallback, events: null, clientScript: null, formIcon: null };
+    if (!result) {
+        const fallback = memoryStore.getSync(NAMESPACE, makeKey(appName, tableName, '*'));
+        if (!fallback) return null;
+        result = fallback.layout !== undefined ? fallback : { layout: fallback, events: null, clientScript: null, formIcon: null };
+    }
+
+    // 3. Translate { i18n: 'key' } captions when sessionID is provided
+    if (result && sessionID) {
+        try {
+            const formsCtx = require('../drive_forms/globalServerContext');
+            const i18n = require('./i18n');
+            const { language } = await formsCtx.getSessionContext(sessionID);
+            // Deep-clone to avoid mutating the cached original (anti-pattern: mutable memory_store object)
+            const cloned = JSON.parse(JSON.stringify(result));
+            translateLayoutCaptions(cloned.layout, (key) => i18n.t(key, language));
+            return cloned;
+        } catch (e) {
+            console.error('[layoutMemory.getLayoutForUser] i18n translation error:', e && e.message || e);
+        }
+    }
+
+    return result;
 }
 
 /**
