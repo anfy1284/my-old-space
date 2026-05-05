@@ -1,11 +1,18 @@
 'use strict';
 
+const { Op } = require('sequelize');
+
 const SYSTEM_SESSION_ID = '__SYS_INTERNAL__';
 const READ_OPS = new Set(['read', 'findOne', 'findByPk']);
 
-let _cache = null;
+// Cache of translatable fields per tableName: Map<tableName, string[]>
+let _fieldsCache = null;
 
-function _buildCache() {
+// Cache of translation values: Map<"tableName|language", Map<"recordId|fieldName", value>>
+// Populated lazily per (table, language) pair; cleared by invalidateCache()
+const _valueCache = new Map();
+
+function _buildFieldsCache() {
     const map = new Map();
     try {
         const { collectAllModelDefs } = require('./globalServerContext');
@@ -19,14 +26,14 @@ function _buildCache() {
         }
         console.log('[translationMW] Translatable tables:', [...map.keys()].join(', ') || '(none)');
     } catch (e) {
-        console.error('[translationMW] Error building cache:', e.message);
+        console.error('[translationMW] Error building fields cache:', e.message);
     }
     return map;
 }
 
-function _getCache() {
-    if (!_cache) _cache = _buildCache();
-    return _cache;
+function _getFieldsCache() {
+    if (!_fieldsCache) _fieldsCache = _buildFieldsCache();
+    return _fieldsCache;
 }
 
 async function _getLanguage(sessionID) {
@@ -37,39 +44,50 @@ async function _getLanguage(sessionID) {
     } catch (e) { return 'en'; }
 }
 
-async function _applyTranslations(plainRows, tableName, fieldNames, language, modelsDB) {
-    if (!plainRows.length || !modelsDB.Translations) return plainRows;
-    const { Op } = require('sequelize');
-    const recordIds = plainRows.map(r => r && r.UID).filter(Boolean);
-    if (!recordIds.length) return plainRows;
-    let tRows;
+/**
+ * Returns lookup Map for (tableName, language).
+ * Queries DB once per (tableName, language) pair, then caches indefinitely.
+ * Cache is invalidated by invalidateCache().
+ */
+async function _getLookup(tableName, fieldNames, language, modelsDB) {
+    const cacheKey = `${tableName}|${language}`;
+    if (_valueCache.has(cacheKey)) return _valueCache.get(cacheKey);
+
+    const lookup = new Map();
+    if (!modelsDB.Translations) {
+        _valueCache.set(cacheKey, lookup);
+        return lookup;
+    }
     try {
-        tRows = await modelsDB.Translations.findAll({
-            where: {
-                tableName,
-                fieldName: { [Op.in]: fieldNames },
-                language,
-                recordId: { [Op.in]: recordIds }
-            },
+        const rows = await modelsDB.Translations.findAll({
+            where: { tableName, fieldName: { [Op.in]: fieldNames }, language },
+            attributes: ['recordId', 'fieldName', 'value'],
             raw: true
         });
+        for (const r of rows) lookup.set(`${r.recordId}|${r.fieldName}`, r.value);
     } catch (e) {
-        console.error('[translationMW] DB error:', e.message);
-        return plainRows;
+        console.error('[translationMW] DB error loading translations:', e.message);
     }
-    if (!tRows || !tRows.length) return plainRows;
-    const lookup = new Map();
-    for (const t of tRows) lookup.set(`${t.recordId}|${t.fieldName}`, t.value);
+    _valueCache.set(cacheKey, lookup);
+    return lookup;
+}
+
+async function _applyTranslations(plainRows, tableName, fieldNames, language, modelsDB) {
+    if (!plainRows.length) return plainRows;
+    const lookup = await _getLookup(tableName, fieldNames, language, modelsDB);
+    if (!lookup.size) return plainRows;
     return plainRows.map(row => {
         const id = row && row.UID;
         if (!id) return row;
-        const newRow = { ...row };
-        let changed = false;
+        let newRow = null;
         for (const f of fieldNames) {
             const val = lookup.get(`${id}|${f}`);
-            if (val !== undefined) { newRow[f] = val; changed = true; }
+            if (val !== undefined) {
+                if (!newRow) newRow = { ...row };
+                newRow[f] = val;
+            }
         }
-        return changed ? newRow : row;
+        return newRow || row;
     });
 }
 
@@ -80,10 +98,11 @@ async function translationMiddleware(request, next) {
     if (!READ_OPS.has(operation)) return result;
     if (!sessionID || sessionID === SYSTEM_SESSION_ID) return result;
     if (!result) return result;
-    const fieldNames = _getCache().get(table);
+    const fieldNames = _getFieldsCache().get(table);
     if (!fieldNames || !fieldNames.length) return result;
     try {
         const language = await _getLanguage(sessionID);
+        if (language === 'en') return result; // 'en' is native language — no translation needed
         const globalCtx = require('./globalServerContext');
         const modelsDB = globalCtx.modelsDB;
         const isArray = Array.isArray(result);
@@ -102,6 +121,9 @@ function install() {
     console.log('[translationMW] Installed at dbGateway root level.');
 }
 
-function invalidateCache() { _cache = null; }
+function invalidateCache() {
+    _fieldsCache = null;
+    _valueCache.clear();
+}
 
 module.exports = { install, invalidateCache };
