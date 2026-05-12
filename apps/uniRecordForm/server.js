@@ -52,7 +52,7 @@ async function getLayoutWithData(params, sessionID) {
                     table: params.tableName,
                     id: params.recordID || params.recordId || params.id
                 });
-                return { layout: spec.layout, data: spec.data, datasetId, clientScript: spec.clientScript || null, formIcon: spec.formIcon || null };
+                return { layout: spec.layout, data: spec.data, datasetId, clientScript: spec.clientScript || null, formIcon: spec.formIcon || null, windowState: spec.windowState || null };
             } catch (e) {
                 // fallthrough to default behaviour on error
                 console.error('[uniRecordForm/getLayoutWithData] generateFormSpec error:', e && e.message || e);
@@ -453,6 +453,7 @@ async function generateFormSpec(tableName, params, sessionID) {
         let customLayoutObj = null;
         let clientScript = null;
         let formIcon = null;
+        let windowState = null;
         try {
             const layoutMemory = require('../../drive_root/layoutMemory');
             if (layoutMemory.hasRegistered('uniRecordForm', tableName)) {
@@ -461,6 +462,7 @@ async function generateFormSpec(tableName, params, sessionID) {
                 if (customLayoutObj) {
                     clientScript = customLayoutObj.clientScript || null;
                     formIcon = customLayoutObj.formIcon || null;
+                    windowState = customLayoutObj.windowState || null;
                 }
             }
         } catch (e) {
@@ -492,7 +494,7 @@ async function generateFormSpec(tableName, params, sessionID) {
                         table: tableName,
                         id: params && (params.recordID || params.recordId || params.id)
                     });
-                    return { layout, data, datasetId, clientScript, formIcon };
+                    return { layout, data, datasetId, clientScript, formIcon, windowState };
                 }
             } catch (e) {
                 console.error('[generateFormSpec] onLoadData dispatch error:', e && e.message || e);
@@ -905,7 +907,7 @@ async function generateFormSpec(tableName, params, sessionID) {
             formIcon = layoutMemory2.getTableIcon(tableName) || '/apps/general_icons/resources/public/16x16/catalog.png';
         }
 
-        return { data, layout, datasetId, clientScript, formIcon };
+        return { data, layout, datasetId, clientScript, formIcon, windowState };
     } catch (e) {
         console.error('[uniRecordForm/generateFormSpec] failed:', e && e.message || e);
         return { data: [], layout: [] };

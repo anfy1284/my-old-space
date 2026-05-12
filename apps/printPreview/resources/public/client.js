@@ -42,6 +42,33 @@ try {
 
             // Клиентские функции формы
             const htmlContent = (params && params.html) || '';
+            const autoPrint   = !!(params && params.autoPrint);
+
+            if (autoPrint) {
+                // Скрытое окно: автоматически печатаем и закрываем
+                var iframe = document.createElement('iframe');
+                iframe.style.cssText = 'position:fixed;width:0;height:0;border:none;visibility:hidden;';
+                iframe.setAttribute('sandbox', 'allow-same-origin allow-scripts allow-modals');
+                document.body.appendChild(iframe);
+                var doc = iframe.contentDocument || iframe.contentWindow.document;
+                doc.open(); doc.write(htmlContent); doc.close();
+                iframe.onload = function () {
+                    iframe.contentWindow.focus();
+                    iframe.contentWindow.print();
+                    setTimeout(function () {
+                        document.body.removeChild(iframe);
+                    }, 1000);
+                };
+                // Возвращаем заглушку без окна
+                const instance = {
+                    id: instanceId, appName: APP_NAME, form: null,
+                    onOpen: function () {},
+                    destroy: function () {
+                        try { document.body.removeChild(iframe); } catch(e) {}
+                    }
+                };
+                return instance;
+            }
 
             appForm.getLayoutWithData = async function () {
                 return {

@@ -1,4 +1,4 @@
-
+﻿
 class UIObject {
     constructor() {
         this.element = null;
@@ -2456,6 +2456,7 @@ class DataForm extends Form {
                 this.layout = Array.isArray(both.layout) ? both.layout : (both.layout && Array.isArray(both.layout.layout) ? both.layout.layout : []);
                 try { this._datasetId = both.datasetId || null; } catch (e) { this._datasetId = null; }
                 try { this._clientScript = both.clientScript || null; } catch (e) {}
+                try { this._windowState = both.windowState || null; } catch (e) {}
                 this._dataMap = {};
                 if (both.data && Array.isArray(both.data)) {
                     for (const rec of both.data) {
@@ -2600,6 +2601,11 @@ class DataForm extends Form {
 
     async Draw(parent) {
         super.Draw(parent);
+
+        // Hide form until layout is fully loaded and windowState applied —
+        // prevents flicker of an empty/small window before maximize.
+        try { if (this.element) this.element.style.visibility = 'hidden'; } catch (e) {}
+
         const contentArea = this.getContentArea();
         try { if (contentArea) contentArea.style.display = 'flex'; } catch (e) {}
         try { if (contentArea) contentArea.style.flexDirection = 'column'; } catch (e) {}
@@ -2611,6 +2617,16 @@ class DataForm extends Form {
 
         await this.loadLayout();
         await this.renderLayout();
+
+        // Apply windowState specified in layout metadata
+        try {
+            if (this._windowState === 'maximized' && !this.isMaximized) {
+                this.maximize();
+            }
+        } catch (e) {}
+
+        // Show form now that layout is ready and window state applied
+        try { if (this.element) this.element.style.visibility = 'visible'; } catch (e) {}
 
         try {
             setTimeout(() => {
@@ -2959,6 +2975,13 @@ class TextBox extends FormInput {
         // For selection controls, rawValue holds the FK ID which differs from displayed text
         if ((this.showSelectionButton || this.listMode) && this.rawValue !== undefined && this.rawValue !== null) {
             return this.rawValue;
+        }
+        // For numeric inputs, return a Number (not a string)
+        if (this.digitsOnly) {
+            const txt = this.getText();
+            if (txt === '' || txt === null || txt === undefined) return null;
+            const n = Number(txt);
+            return isNaN(n) ? txt : n;
         }
         // For regular text/number inputs, return what the user actually typed
         return this.getText();
@@ -6868,6 +6891,8 @@ class Table extends UIObject {
         cellItem.caption = '';
         cellItem.properties = Object.assign({}, col.properties || {}, { noCaption: true, showBorder: false });
         cellItem.value = this.data_getValue(cellKey, (row && row[col.data]));
+        // Map inputType → type so renderItem picks up the right control
+        if (!cellItem.type && cellItem.inputType) cellItem.type = cellItem.inputType;
 
         // If server returned a separate display value for this FK (e.g. __accommodationTypeId_display),
         // prefer it for non-editor rendering so the cell shows human-friendly text.
@@ -7127,7 +7152,21 @@ class Table extends UIObject {
                     // fall through to focusing logic below
                 } else {
                     // cell-immediate: activate row (if needed) and then focus the cell
-                    if (this._activeRowIndex !== clickedRow) this.activateRow(clickedRow);
+                    const wasInactive = (this._activeRowIndex !== clickedRow);
+                    if (wasInactive) this.activateRow(clickedRow);
+                    // If a checkbox cell was clicked while the row was inactive, the checkbox
+                    // was disabled so the native click had no effect. Toggle it now that the
+                    // row is active (activateRow just enabled it via updateAllRowsReadOnly).
+                    if (wasInactive && td) {
+                        try {
+                            const nativeCb = td.querySelector('input[type="checkbox"]');
+                            if (nativeCb && !nativeCb.disabled) {
+                                nativeCb.checked = !nativeCb.checked;
+                                nativeCb.dispatchEvent(new Event('change', { bubbles: true }));
+                                ev.__checkboxHandled = true;
+                            }
+                        } catch (e) {}
+                    }
                 }
 
                 // Focus appropriate editor/control inside clicked cell

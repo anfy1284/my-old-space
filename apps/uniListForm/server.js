@@ -48,9 +48,10 @@ async function getLayoutWithData(params, sessionID) {
                         const clLayout = customLayout.layout || customLayout;
                         const clientScript = customLayout.clientScript || null;
                         const formIcon = customLayout.formIcon || null;
+                        const windowState = customLayout.windowState || 'maximized';
                         const payload = { layout: clLayout, data: data || [], params: params || {} };
                         const datasetId = dataApp.storeDataset(payload);
-                        return { layout: clLayout, data: payload.data, datasetId, clientScript, formIcon };
+                        return { layout: clLayout, data: payload.data, datasetId, clientScript, formIcon, windowState };
                     }
                 }
             } catch (e) {
@@ -65,7 +66,7 @@ async function getLayoutWithData(params, sessionID) {
         // Table icon: check registry (set by any saveLayout), fallback to catalog
         const layoutMemory2 = require('../../drive_root/layoutMemory');
         const formIcon = (tableName && layoutMemory2.getTableIcon(tableName)) || '/apps/general_icons/resources/public/16x16/catalog.png';
-        return { layout: payload.layout, data: payload.data, datasetId, formIcon };
+        return { layout: payload.layout, data: payload.data, datasetId, formIcon, windowState: 'maximized' };
     } catch (e) {
         return { layout: [], data: [], datasetId: null };
     }

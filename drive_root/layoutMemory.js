@@ -75,13 +75,13 @@ function makePrefix(appName, tableName) {
  *   Используется как дефолт для всех events в лейауте, чтобы не дублировать clientScript в каждом binding.
  * @param {string}          [opts.formIcon] — URL иконки формы для заголовка и таскбара.
  */
-async function saveLayout({ appName, tableName, roles, layout, events, clientScript, formIcon }) {
+async function saveLayout({ appName, tableName, roles, layout, events, clientScript, formIcon, windowState }) {
     if (!appName || !tableName || !Array.isArray(layout)) {
         throw new Error('[layoutMemory.saveLayout] appName, tableName and layout (Array) are required');
     }
     const roleList = Array.isArray(roles) ? roles : (roles ? [String(roles)] : ['*']);
     for (const role of roleList) {
-        await memoryStore.set(NAMESPACE, makeKey(appName, tableName, role), { layout, events: events || null, clientScript: clientScript || null, formIcon: formIcon || null });
+        await memoryStore.set(NAMESPACE, makeKey(appName, tableName, role), { layout, events: events || null, clientScript: clientScript || null, formIcon: formIcon || null, windowState: windowState || null });
     }
     // Register prefix so hot-path can skip tables with no layouts at all
     _registeredPrefixes.add(makePrefix(appName, tableName));
