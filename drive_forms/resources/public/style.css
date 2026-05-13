@@ -334,9 +334,11 @@ html, body {
 
 .ui-label { display:inline-block; box-sizing:border-box; font-size:11px; font-family: MS Sans Serif, sans-serif; color:var(--color-text); }
 
-.ui-toolbar { display:flex; align-items:center; box-sizing:border-box; background-color: var(--color-mid); border-bottom:1px solid #808080; }
+.ui-toolbar { display:flex; align-items:center; box-sizing:border-box; background-color: var(--color-mid); }
 .ui-toolbar.compact { padding:0; gap:0; }
-.ui-toolbar:not(.compact) { padding:5px; gap:5px; }
+.ui-toolbar:not(.compact):not(.table-toolbar) { padding:5px; gap:5px; }
+.ui-toolbar.table-toolbar { padding: 0; gap: 0; }
+.ui-toolbar.table-toolbar .ui-button { width: 22px; height: 22px; min-width: 22px; padding: 0; }
 
 .ui-toolbar-button { display:flex; align-items:center; justify-content:center; box-sizing:border-box; cursor:default; border:1px solid transparent; padding:0 4px; user-select:none; min-width:24px; height:22px; }
 

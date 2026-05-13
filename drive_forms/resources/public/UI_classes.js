@@ -6402,6 +6402,7 @@ class Table extends UIObject {
         this._docKeyHandler = null;
 
         this.showToolbar = (properties.showToolbar !== false);
+        this.hiddenButtons = Array.isArray(properties.hiddenButtons) ? properties.hiddenButtons : [];
         this.tableName = properties.tableName || '';
         // Признак табличной части — выставляется автоматически в Draw() из _dataMap
         this.isTabularSection = false;
@@ -7552,19 +7553,25 @@ class Table extends UIObject {
             if (this.showToolbar) {
                 const toolbarContainer = document.createElement('div');
                 toolbarContainer.classList.add('ui-toolbar');
+                toolbarContainer.classList.add('table-toolbar');
                 wrapper.appendChild(toolbarContainer);
 
+                const isSelectMode = !!(this.appForm && this.appForm.selectMode);
+                const hiddenButtons = Array.isArray(this.hiddenButtons) ? this.hiddenButtons : [];
+
                 const toolbarButtons = [
-                    { action: 'select',       caption: __t('Select'),   icon: '/apps/general_icons/resources/public/16x16/select.png' },
-                    { action: 'cancel',       caption: __t('Cancel'),   icon: '/apps/general_icons/resources/public/16x16/cancel.png' },
-                    { action: 'recordOpen',   caption: __t('Open'),     icon: '/apps/general_icons/resources/public/16x16/open.png' },
+                    { action: 'select',       caption: __t('Select'),   icon: '/apps/general_icons/resources/public/16x16/select.png',   selectModeOnly: true },
+                    { action: 'cancel',       caption: __t('Cancel'),   icon: '/apps/general_icons/resources/public/16x16/cancel.png',   selectModeOnly: true },
                     { action: 'recordAdd',    caption: __t('Add'),      icon: '/apps/general_icons/resources/public/16x16/add.png' },
                     { action: 'recordDelete', caption: __t('Delete'),   icon: '/apps/general_icons/resources/public/16x16/delete.png' },
+                    { action: 'recordOpen',   caption: __t('Open'),     icon: '/apps/general_icons/resources/public/16x16/open.png' },
                     { action: 'listSettings', caption: __t('Settings'), icon: '/apps/general_icons/resources/public/16x16/settings.png' }
                 ];
 
                 for (const btnDef of toolbarButtons) {
-                    const btn = new Button(toolbarContainer, { caption: btnDef.caption, icon: btnDef.icon, showIcon: !!btnDef.icon });
+                    if (btnDef.selectModeOnly && !isSelectMode) continue;
+                    if (hiddenButtons.includes(btnDef.action)) continue;
+                    const btn = new Button(toolbarContainer, { caption: btnDef.caption, tooltip: btnDef.caption, icon: btnDef.icon, showIcon: !!btnDef.icon, showText: false });
                     btn.Draw(toolbarContainer);
                     const action = btnDef.action;
                     const self = this;
