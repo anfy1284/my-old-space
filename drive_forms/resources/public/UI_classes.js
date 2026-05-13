@@ -2048,10 +2048,11 @@ class DataForm extends Form {
                 }
                 try { if (item.properties && item.properties.__display !== undefined) display = item.properties.__display; } catch (e) {}
 
-                const propClone = Object.assign({}, properties || {}, { readOnly: false });
+                const propClone = Object.assign({}, properties || {});
                 const propClone2 = Object.assign({}, propClone);
                 if (properties && properties.selection) propClone2.selection = properties.selection;
-                propClone2.showSelectionButton = true;
+                propClone2.showSelectionButton = !properties.readOnly;
+                if (properties && properties.readOnly) propClone2.listMode = false;
                 
                 const ctrlSel = new TextBox(contentArea, propClone2);
                 try { 
@@ -6890,6 +6891,8 @@ class Table extends UIObject {
         cellItem.data = cellKey;
         cellItem.caption = '';
         cellItem.properties = Object.assign({}, col.properties || {}, { noCaption: true, showBorder: false });
+        // Propagate column-level readOnly into cellItem.properties and mark container
+        if (col.readOnly) { cellItem.properties.readOnly = true; cellContainer.dataset.colReadonly = '1'; }
         cellItem.value = this.data_getValue(cellKey, (row && row[col.data]));
         // Map inputType → type so renderItem picks up the right control
         if (!cellItem.type && cellItem.inputType) cellItem.type = cellItem.inputType;
@@ -7036,8 +7039,8 @@ class Table extends UIObject {
                             el.addEventListener('change', handler);
                         }
 
-                        // Set initial editable state based on active row and table-level readOnly
-                        const isActive = (this._activeRowIndex === rowIndexLocal) && !this.readOnly;
+                        // Set initial editable state based on active row, table-level readOnly and column-level readOnly
+                        const isActive = (this._activeRowIndex === rowIndexLocal) && !this.readOnly && !colDef.readOnly;
                         // Helper to apply readonly/disabled to typical controls inside cell
                         const applyReadonlyToElement = (node, makeReadOnly) => {
                             try {
@@ -7344,6 +7347,8 @@ class Table extends UIObject {
                 const interactives = tr.querySelectorAll('input,textarea,select,button');
                 for (let i = 0; i < interactives.length; i++) {
                     const el = interactives[i];
+                    // Skip elements inside column-readOnly cells — they must stay readonly regardless of row state
+                    if (el.closest && el.closest('[data-col-readonly]')) continue;
                     try {
                         // Selection buttons ("...") stay always clickable — skip disabling them.
                         const isSelectionBtn = !!(el.dataset && el.dataset.role === 'selection');
@@ -8286,6 +8291,8 @@ class DynamicTable extends Table {
             const interactives = tr.querySelectorAll('input,textarea,select,button');
             for (let j = 0; j < interactives.length; j++) {
                 const el = interactives[j];
+                // Skip elements inside column-readOnly cells
+                if (el.closest && el.closest('[data-col-readonly]')) continue;
                 try {
                     const tag = el.tagName ? el.tagName.toLowerCase() : '';
                     if (tag === 'input' || tag === 'textarea') el.readOnly = !isActive;
