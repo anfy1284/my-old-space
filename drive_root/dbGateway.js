@@ -203,6 +203,33 @@ function clearMiddleware(level) {
     }
 }
 
+// ── Entity Hooks root-level middleware ───────────────────────────────────────
+// Перехватывает create/update и запускает хуки из entityConfig модели.
+// Регистрируется на уровне 'root' чтобы срабатывать для всех источников данных.
+use('root', async function entityHooksMiddleware(request, next) {
+    const { operation, table } = request;
+
+    // Обрабатываем только create (beforeCreate) и update (beforeUpdate)
+    if (operation !== 'create' && operation !== 'update') {
+        return await next(request);
+    }
+
+    // Ленивый require чтобы избежать circular dependency при загрузке модуля
+    const globalCtx = require('./globalServerContext');
+    const entityHooks = require('./entityHooks');
+
+    const modelName = globalCtx.getModelNameForTable(table);
+    const Model = modelName ? globalCtx.modelsDB[modelName] : null;
+
+    if (Model && Model.entityConfig) {
+        const event = operation === 'create' ? 'beforeCreate' : 'beforeUpdate';
+        const context = { modelsDB: globalCtx.modelsDB, dbGateway: module.exports };
+        await entityHooks.runHooks(event, Model, request, context);
+    }
+
+    return await next(request);
+});
+
 module.exports = {
     use,
     execute,

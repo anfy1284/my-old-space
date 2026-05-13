@@ -53,7 +53,8 @@ function generateModelsFromDefs(modelDefs) {
                 name: def.name,
                 tableName: def.tableName,
                 fields: { ...def.fields },
-                options: { ...def.options }
+                options: { ...def.options },
+                entityConfig: def.entityConfig || null
             });
         } else {
             // Merge with existing definition
@@ -115,6 +116,8 @@ function generateModelsFromDefs(modelDefs) {
                 fields,
                 { ...def.options, tableName: def.tableName }
             );
+            // Attach entityConfig for use by entityHooks middleware
+            models[def.name].entityConfig = def.entityConfig || null;
         } catch (e) {
             console.error(`Error defining model ${def.name}:`, e.message);
             throw e;
