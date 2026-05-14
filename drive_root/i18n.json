@@ -149,6 +149,16 @@
         "ru": "Отмена",
         "de": "Abbrechen"
     },
+    "Discard unsaved changes?": {
+        "en": "Discard unsaved changes?",
+        "ru": "Отменить несохранённые изменения?",
+        "de": "Ungespeicherte Änderungen verwerfen?"
+    },
+    "Save": {
+        "en": "Save",
+        "ru": "Сохранить",
+        "de": "Speichern"
+    },
     "Open": {
         "en": "Open",
         "ru": "Открыть",

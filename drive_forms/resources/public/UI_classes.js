@@ -2160,6 +2160,70 @@ class DataForm extends Form {
                 try { if (item.name) this.controlsMap[item.name] = btn; } catch (e) {}
                 break;
             }
+            case 'commandBar': {
+                // Стандартная панель команд формы: OK / Save / Cancel + custom extra buttons.
+                // Конфигурация:
+                //   hiddenButtons: ['ok', 'save', 'cancel']  — скрыть стандартные кнопки
+                //   extraButtons: [{ name, caption, icon, events, ... }] — добавить свои
+                const cmdBarEl = document.createElement('div');
+                cmdBarEl.classList.add('ui-toolbar');
+                // Компенсируем padding contentArea (10px): тянем фон к краям формы,
+                // но внутренний отступ для кнопок = 10px, чтобы совпасть с контентом ниже
+                cmdBarEl.style.marginTop    = '-10px';
+                cmdBarEl.style.marginLeft   = '-10px';
+                cmdBarEl.style.marginRight  = '-10px';
+                cmdBarEl.style.marginBottom = '5px';
+                cmdBarEl.style.paddingLeft  = '10px';
+                cmdBarEl.style.paddingRight = '10px';
+                contentArea.appendChild(cmdBarEl);
+
+                const hiddenCmdBtns = Array.isArray(item.hiddenButtons) ? item.hiddenButtons : [];
+
+                const stdCmdButtons = [
+                    { id: 'ok',     caption: __t('OK'),     icon: '/apps/general_icons/resources/public/16x16/select.png',  action: 'ok' },
+                    { id: 'save',   caption: __t('Save'),   icon: '/apps/general_icons/resources/public/16x16/save.png',    action: 'save' },
+                    { id: 'cancel', caption: __t('Cancel'), icon: '/apps/general_icons/resources/public/16x16/cancel.png',  action: 'cancel' }
+                ];
+
+                const formSelfCmd = this;
+                for (const btnDef of stdCmdButtons) {
+                    if (hiddenCmdBtns.includes(btnDef.id)) continue;
+                    const btn = new Button(cmdBarEl, { caption: btnDef.caption, tooltip: btnDef.caption, icon: btnDef.icon, showIcon: true, showText: true });
+                    btn.Draw(cmdBarEl);
+                    const action = btnDef.action;
+                    btn.onClick = () => { try { formSelfCmd.doAction(action); } catch(e) {} };
+                }
+
+                // Дополнительные (приложение-специфичные) кнопки
+                const extraButtons = Array.isArray(item.extraButtons) ? item.extraButtons : [];
+                for (const exBtn of extraButtons) {
+                    const exCaption = (typeof exBtn.caption === 'string') ? exBtn.caption : (exBtn.caption || '');
+                    const btn = new Button(cmdBarEl, {
+                        caption: exCaption,
+                        tooltip: exBtn.tooltip || exCaption,
+                        icon: exBtn.icon || null,
+                        showIcon: !!(exBtn.icon),
+                        showText: true
+                    });
+                    btn.Draw(cmdBarEl);
+                    if (exBtn.name) this.controlsMap[exBtn.name] = btn;
+                    // Подключаем события (events.onClick, top-level onXxx) через стандартный механизм
+                    try {
+                        if (exBtn.name && this.controlsMap[exBtn.name]) {
+                            let mergedEvts = null;
+                            if (exBtn.events) mergedEvts = Object.assign({}, exBtn.events);
+                            for (const k of Object.keys(exBtn)) {
+                                if (k.length > 2 && k[0] === 'o' && k[1] === 'n' && k[2] === k[2].toUpperCase() && k !== 'options') {
+                                    if (!mergedEvts) mergedEvts = {};
+                                    if (!mergedEvts[k]) mergedEvts[k] = exBtn[k];
+                                }
+                            }
+                            if (mergedEvts) this._wireItemEvents(this.controlsMap[exBtn.name], mergedEvts);
+                        }
+                    } catch(e) {}
+                }
+                break;
+            }
             case 'table': {
                 try {
                     const tblProps = Object.assign({}, properties || {}, { columns: item.columns || [], dataKey: item.data, appForm: this });
@@ -2560,6 +2624,39 @@ class DataForm extends Form {
             }
             return;
         }
+        if (action === 'ok') {
+            if (!this._modified) {
+                // Изменений нет — просто закрываем
+                this._closing = true;
+                this.close();
+            } else {
+                // Есть изменения — спрашиваем "Сохранить?"
+                const self = this;
+                if (typeof showConfirm === 'function') {
+                    showConfirm(__t('Data has been modified. Save changes?'), async () => {
+                        // "Да" — сохранить, затем закрыть
+                        await self.doAction('save');
+                        if (!self._modified) {
+                            self._closing = true;
+                            self.close();
+                        }
+                    }, () => {
+                        // "Нет" — закрыть без сохранения
+                        self._closing = true;
+                        self._modified = false;
+                        if (self._originalTitle) super.setTitle(self._originalTitle);
+                        self.close();
+                    });
+                } else {
+                    await this.doAction('save');
+                    if (!this._modified) {
+                        this._closing = true;
+                        this.close();
+                    }
+                }
+            }
+            return;
+        }
         if (action === 'save') {
             const data = this.collectData();
             // Собираем данные табличных частей из _dataMap (записи с tabularSection: true)
@@ -2644,7 +2741,26 @@ class DataForm extends Form {
             return;
         }
         if (action === 'cancel') {
-            this.close();
+            // Если данные не изменены — закрываем сразу.
+            // Если изменены — спрашиваем "Отменить изменения?".
+            if (!this._modified) {
+                this._closing = true;
+                this.close();
+            } else {
+                const self = this;
+                if (typeof showConfirm === 'function') {
+                    showConfirm(__t('Discard unsaved changes?'), () => {
+                        self._closing = true;
+                        self._modified = false;
+                        if (self._originalTitle) super.setTitle(self._originalTitle);
+                        self.close();
+                    });
+                } else {
+                    this._closing = true;
+                    this._modified = false;
+                    this.close();
+                }
+            }
             return;
         }
         return super.doAction(action, params);

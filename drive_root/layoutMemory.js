@@ -104,9 +104,10 @@ function translateLayoutCaptions(nodes, tFn) {
         if (node.caption && typeof node.caption === 'object' && node.caption.i18n) {
             node.caption = tFn(node.caption.i18n);
         }
-        if (Array.isArray(node.layout))   translateLayoutCaptions(node.layout, tFn);
-        if (Array.isArray(node.columns))  translateLayoutCaptions(node.columns, tFn);
-        if (Array.isArray(node.options))  translateLayoutCaptions(node.options, tFn);
+        if (Array.isArray(node.layout))       translateLayoutCaptions(node.layout, tFn);
+        if (Array.isArray(node.columns))       translateLayoutCaptions(node.columns, tFn);
+        if (Array.isArray(node.options))       translateLayoutCaptions(node.options, tFn);
+        if (Array.isArray(node.extraButtons))  translateLayoutCaptions(node.extraButtons, tFn);
     }
 }
 
