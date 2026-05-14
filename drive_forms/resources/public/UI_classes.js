@@ -1797,6 +1797,8 @@ class DataForm extends Form {
 
     // Mark form as modified/unmodified and update title with "*"
     setModified(val) {
+        // Не выставляем modified=true пока идёт программное обновление полей (refresh после сохранения)
+        if (val && this._suppressModified) return;
         const wasModified = this._modified;
         this._modified = !!val;
         if (this._modified && !wasModified) {
@@ -2576,12 +2578,60 @@ class DataForm extends Form {
             try {
                 const res = await this.applyChanges(data);
                 if (res && res.ok) {
-                    this._modified = false;
                     if (res.warnings && res.warnings.length > 0) {
                         const msg = __t('Saved, but some rows were not written:\n') + res.warnings.join('\n');
                         if (typeof showAlert === 'function') showAlert(msg);
                         else alert(msg);
                     }
+                    // Обновить скалярные данные формы с сервера без перерисовки DOM.
+                    // Важно: controlsMap содержит не только поля формы, но и каждую ячейку
+                    // таблицы (ключи вида ts_booking_rooms__r0__roomId). Если обновить их
+                    // через setValue(UID, undefined), они потеряют отображаемые имена.
+                    // Поэтому обновляем ТОЛЬКО контролы, чьё поле реально пришло от сервера.
+                    try {
+                        const freshBoth = await callServerMethod(this.appName, 'getLayoutWithData', { datasetId: this._datasetId });
+                        if (freshBoth && Array.isArray(freshBoth.data)) {
+                            if (freshBoth.datasetId) this._datasetId = freshBoth.datasetId;
+                            // Собираем имена скалярных полей из свежего ответа
+                            const freshScalarNames = new Set();
+                            for (const rec of freshBoth.data) {
+                                if (!rec || !rec.name) continue;
+                                if (rec.tabularSection === true) continue;
+                                this._dataMap[rec.name] = rec;
+                                freshScalarNames.add(rec.name);
+                            }
+                            // Обновляем DOM только для тех контролов, которые есть в freshBoth.data
+                            this._suppressModified = true;
+                            for (const key in this.controlsMap) {
+                                const ctrl = this.controlsMap[key];
+                                if (!ctrl) continue;
+                                const fieldName = (ctrl.element && ctrl.element.dataset) ? ctrl.element.dataset.field : null;
+                                if (!fieldName || !freshScalarNames.has(fieldName)) continue;
+                                const rec = this._dataMap[fieldName];
+                                let val = '', display = undefined;
+                                if (rec && rec.selection && rec.selection.display !== undefined) {
+                                    val = (rec.selection.UID !== undefined) ? rec.selection.UID : (rec.value !== undefined ? rec.value : rec);
+                                    display = rec.selection.display;
+                                } else if (rec && rec.__display !== undefined) {
+                                    val = (rec.value !== undefined ? rec.value : rec);
+                                    display = rec.__display;
+                                } else if (rec && typeof rec.value === 'object' && rec.value !== null) {
+                                    display = rec.value.display || rec.value.name || rec.value.UID || '';
+                                    val = (rec.value.value !== undefined) ? rec.value.value : (rec.value.UID !== undefined ? rec.value.UID : rec.value);
+                                } else {
+                                    val = (rec && rec.value !== undefined) ? rec.value : '';
+                                }
+                                try {
+                                    if (typeof ctrl.setValue === 'function') ctrl.setValue(val, display);
+                                    else if (typeof ctrl.setText === 'function') ctrl.setText(display !== undefined ? String(display) : String(val));
+                                } catch(_) {}
+                            }
+                        }
+                    } catch(reloadErr) { console.error('[DataForm] data refresh after save error', reloadErr); }
+                    // Сбрасываем флаг изменённости и снимаем блокировку
+                    this._modified = false;
+                    this._suppressModified = false;
+                    if (this._originalTitle) super.setTitle(this._originalTitle);
                 } else {
                     const errMsg = (res && res.error ? res.error : __t('Unknown error'));
                     if (typeof showAlert === 'function') showAlert(__t('Save error: ') + errMsg);

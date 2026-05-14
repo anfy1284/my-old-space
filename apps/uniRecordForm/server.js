@@ -41,6 +41,27 @@ function getLayout(params) {
 async function getLayoutWithData(params, sessionID) {
     // Return layout and data together for atomic loading
     try {
+        // Если передан datasetId (обновление данных после сохранения) — резолвим tableName и recordID
+        // из ранее сохранённого датасета и вызываем generateFormSpec с актуальным ID записи.
+        if (params && params.datasetId && !params.tableName) {
+            try {
+                const dsObj = await dataApp.getDataset(params.datasetId);
+                if (dsObj && dsObj.table) {
+                    const resolvedParams = Object.assign({}, dsObj.params || {}, {
+                        tableName: dsObj.table,
+                        recordID:  dsObj.id || undefined
+                    });
+                    const spec = await generateFormSpec(resolvedParams.tableName, resolvedParams, sessionID);
+                    // Возвращаем новый datasetId (старый был isNew:true, новый — isNew:false).
+                    // Клиент обновит _datasetId, и следующие сохранения будут выполнять UPDATE.
+                    return { layout: spec.layout, data: spec.data, datasetId: spec.datasetId,
+                             clientScript: spec.clientScript || null, formIcon: spec.formIcon || null, windowState: spec.windowState || null };
+                }
+            } catch (e) {
+                console.error('[uniRecordForm/getLayoutWithData] datasetId refresh error:', e && e.message || e);
+            }
+        }
+
         // If caller requested a tableName, prefer the generated form spec (async)
         if (params && params.tableName) {
             try {
@@ -342,8 +363,8 @@ async function applyChanges(payload, sessionID) {
         }
 
         return saveWarnings.length > 0
-            ? { ok: true, warnings: saveWarnings }
-            : { ok: true };
+            ? { ok: true, recordId: parentUID, warnings: saveWarnings }
+            : { ok: true, recordId: parentUID };
     } catch (e) {
         console.error('[uniRecordForm] applyChanges error:', e);
         return { ok: false, error: String(e) };
