@@ -5,6 +5,7 @@
  */
 
 const globalServerContext = require('../drive_root/globalServerContext');
+const { tForSession } = require('./globalServerContext');
 
 // Глобальное хранилище SSE подключений (shared across apps)
 if (!global._dynamicTableSseClients) {
@@ -27,6 +28,16 @@ function normalizeColumnsFromFields(fields, rows) {
         const col = Object.assign({}, f, { data: name, caption: caption });
         return col;
     });
+}
+
+// Переводит caption: { i18n: key } → строку для каждой колонки (мутирует массив in-place)
+async function translateColumnsI18n(columns, sessionID) {
+    if (!sessionID || !columns) return;
+    for (const col of columns) {
+        if (col && col.caption && typeof col.caption === 'object' && col.caption.i18n) {
+            try { col.caption = await tForSession(col.caption.i18n, sessionID); } catch (e) {}
+        }
+    }
 }
 
 function registerDynamicTableMethods(appName, config = {}) {
@@ -158,6 +169,7 @@ function registerDynamicTableMethods(appName, config = {}) {
             const totalRows = raw && (raw.totalRows || raw.total || rows.length) || rows.length;
 
             const columns = normalizeColumnsFromFields(fields, rows);
+            await translateColumnsI18n(columns, sessionID);
             try { console.log(`[${appName}/getDynamicTableData] normalized columns=`, columns.map(c => ({ data: c.data, caption: c.caption }))); } catch(e) {}
 
             // Pass range and editSessionId from server so client can position

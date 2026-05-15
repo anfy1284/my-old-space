@@ -685,6 +685,10 @@ async function getTableMetadata(modelName) {
         if (modelDef && modelDef.fields && modelDef.fields[fieldName] && modelDef.fields[fieldName].caption) {
             caption = modelDef.fields[fieldName].caption;
         }
+        // If caption is an i18n object { i18n: key }, use the key string for width estimation
+        const captionStr = (caption && typeof caption === 'object' && caption.i18n)
+            ? caption.i18n
+            : String(caption || fieldName);
 
         // Determine type
         const typeKey = attr.type.key || attr.type.constructor.key;
@@ -693,7 +697,7 @@ async function getTableMetadata(modelName) {
         let width = 100;
         if (typeKey === 'INTEGER' && fieldName === 'UID') width = 80;
         else if (typeKey === 'INTEGER') width = 100;
-        else if (typeKey === 'STRING') width = Math.max(150, Math.min(300, caption.length * 10 + 100));
+        else if (typeKey === 'STRING') width = Math.max(150, Math.min(300, captionStr.length * 10 + 100));
         else if (typeKey === 'BOOLEAN') width = 80;
         else if (typeKey === 'DATE' || typeKey === 'DATEONLY') width = 120;
 
