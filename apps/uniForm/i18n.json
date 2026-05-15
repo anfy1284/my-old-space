@@ -1,0 +1,37 @@
+{
+    "save_button": {
+        "en": "Save",
+        "ru": "Сохранить",
+        "de": "Speichern"
+    },
+    "cancel_button": {
+        "en": "Cancel",
+        "ru": "Отмена",
+        "de": "Abbrechen"
+    },
+    "missing_datasetId": {
+        "en": "Missing dataset ID",
+        "ru": "Не указан идентификатор набора данных",
+        "de": "Datensatz-ID fehlt"
+    },
+    "no_table_context": {
+        "en": "No table context found in dataset",
+        "ru": "Контекст таблицы не найден в наборе данных",
+        "de": "Kein Tabellenkontext im Datensatz gefunden"
+    },
+    "row_field_required": {
+        "en": "Row {{row}} of section «{{section}}»: field «{{field}}» is not filled — row skipped",
+        "ru": "Строка {{row}} секции «{{section}}»: поле «{{field}}» не заполнено — строка пропущена",
+        "de": "Zeile {{row}} der Sektion «{{section}}»: Feld «{{field}}» ist nicht ausgefüllt — Zeile übersprungen"
+    },
+    "row_field_fk_mismatch": {
+        "en": "Row {{row}} of section «{{section}}»: field «{{field}}» references a record not belonging to the current object — row rejected",
+        "ru": "Строка {{row}} секции «{{section}}»: поле «{{field}}» ссылается на запись, не принадлежащую текущему объекту — строка отклонена",
+        "de": "Zeile {{row}} der Sektion «{{section}}»: Feld «{{field}}» referenziert einen Datensatz, der nicht zum aktuellen Objekt gehört — Zeile abgelehnt"
+    },
+    "row_save_error": {
+        "en": "Row {{row}} of section «{{section}}»: save error — {{error}}",
+        "ru": "Строка {{row}} секции «{{section}}»: ошибка сохранения — {{error}}",
+        "de": "Zeile {{row}} der Sektion «{{section}}»: Speicherfehler — {{error}}"
+    }
+}

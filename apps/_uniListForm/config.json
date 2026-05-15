@@ -1,0 +1,25 @@
+{
+    "name": "uniListForm",
+    "autoStart": true,
+    "system": ["mySpace"],
+    "access": ["admin", "user", "public"],
+    "dependencies": {},
+    "mainMenuCommands": 
+        [
+            {"id": "main", "items": 
+                [
+                    { "caption": "Neues", "items": 
+                        [
+                            {
+                                "caption": "Universal list form org", "action": "open", "icon": "/apps/general_icons/resources/public/16x16/folder.png", "params": {"dbTable": "organizations"}
+                            },
+                            {
+                                "caption": "Universal list form usr", "action": "open", "icon": "/apps/general_icons/resources/public/16x16/user.png", "params": {"dbTable": "users"}
+                            }
+
+                        ]
+                    }
+                ]
+            }
+        ]
+}

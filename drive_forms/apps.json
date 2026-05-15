@@ -38,12 +38,8 @@
             "path": "/UserSettings"
         },
         {
-            "name": "uniListForm",
-            "path": "/uniListForm"
-        },
-        {
-            "name": "uniRecordForm",
-            "path": "/uniRecordForm"
+            "name": "uniForm",
+            "path": "/uniForm"
         },
         {
             "name": "listSettings",

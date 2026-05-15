@@ -1,0 +1,8 @@
+{
+    "name": "uniForm",
+    "autoStart": true,
+    "system": ["mySpace"],
+    "access": ["admin", "user", "public"],
+    "dependencies": {},
+    "mainMenuCommands": []
+}

@@ -186,7 +186,8 @@ module.exports = async function (modelsDB) {
         ];
 
         await layoutMemory.saveLayout({
-            appName: 'uniRecordForm',
+            appName: 'uniForm',
+            mode:    'record',
             tableName: 'user_settings',
             roles: 'user',
             layout: settingsLayout,
@@ -197,7 +198,7 @@ module.exports = async function (modelsDB) {
             }
         });
 
-        console.log('[UserSettings/init] Layout registered for uniRecordForm');
+        console.log('[UserSettings/init] Layout registered for uniForm');
         console.log('[UserSettings/init] serverScriptName:', serverScriptName);
         console.log('[UserSettings/init] clientUID:', clientUID);
     } catch (e) {

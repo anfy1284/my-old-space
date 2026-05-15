@@ -1667,7 +1667,7 @@ Form.prototype.doAction = function(action, params) {
                         return;
                     }
                     if (window.MySpace && typeof window.MySpace.open === 'function') {
-                        return window.MySpace.open('uniRecordForm', { tableName: tableName });
+                        return window.MySpace.open('uniForm', { mode: 'record', tableName: tableName });
                     }
                 } catch (e) { console.error('[Form] recordAdd error:', e); }
                 return;
@@ -1682,7 +1682,7 @@ Form.prototype.doAction = function(action, params) {
                     }
                     const tableName = this.dbTable || (params && params.tableName) || '';
                     if (window.MySpace && typeof window.MySpace.open === 'function') {
-                        return window.MySpace.open('uniRecordForm', { tableName, recordID: row.UID });
+                        return window.MySpace.open('uniForm', { mode: 'record', tableName, recordID: row.UID });
                     }
                 } catch (e) { console.error('[Form] recordOpen error:', e); }
                 return;
@@ -1701,7 +1701,7 @@ Form.prototype.doAction = function(action, params) {
                         window.showConfirm(__t('Are you sure you want to delete this record?'), async (res) => {
                             if (res === 'yes') {
                                 try {
-                                    const result = await callServerMethod('uniRecordForm', 'applyChanges', { 
+                                    const result = await callServerMethod('uniForm', 'applyChanges', { 
                                         datasetId: { table: tableName, id: row.UID }, 
                                         changes: { _deleted: true } 
                                     });
@@ -4551,10 +4551,10 @@ class TextBox extends FormInput {
                         const cb = this.handleSelection.bind(this);
                         const textBoxId = this.element ? this.element.id : 'unknown';
                         console.log('[TextBox.onSelectionStart] Creating callback for TextBox:', textBoxId);
-                        const id = await window.MySpace.open('uniListForm', { dbTable: table, onSelectCallBack: cb, selectMode: true, readOnly: true });
-                        console.log('[TextBox.onSelectionStart] Opened uniListForm instance:', id, 'for TextBox:', textBoxId);
+                        const id = await window.MySpace.open('uniForm', { mode: 'list', dbTable: table, onSelectCallBack: cb, selectMode: true, readOnly: true });
+                        console.log('[TextBox.onSelectionStart] Opened uniForm instance:', id, 'for TextBox:', textBoxId);
                         const inst = (window.MySpace && typeof window.MySpace.getInstance === 'function') ? window.MySpace.getInstance(id) : null;
-                    } catch (e) { console.error('[TextBox.onSelectionStart] ERROR opening uniListForm for table:', table, e); }
+                    } catch (e) { console.error('[TextBox.onSelectionStart] ERROR opening uniForm for table:', table, e); }
                 })();
                 return;
             }
@@ -4576,7 +4576,7 @@ class TextBox extends FormInput {
     }
 
     // Selection handler ("Обработка выбора") — default implementation: apply selection to the field
-    handleSelection(selectedRecord, uniListFormInstance) {
+    handleSelection(selectedRecord, uniFormInstance) {
         try {
             const textBoxId = this.element ? this.element.id : 'unknown';
             console.log('[TextBox.handleSelection] Called for TextBox:', textBoxId, 'with record:', selectedRecord);
@@ -4599,8 +4599,8 @@ class TextBox extends FormInput {
 
             // Close/destroy chooser instance if provided
             try {
-                if (uniListFormInstance && typeof uniListFormInstance.destroy === 'function') uniListFormInstance.destroy();
-                else if (typeof window !== 'undefined' && window.MySpace && uniListFormInstance && uniListFormInstance.id && typeof window.MySpace.close === 'function') window.MySpace.close(uniListFormInstance.id);
+                if (uniFormInstance && typeof uniFormInstance.destroy === 'function') uniFormInstance.destroy();
+                else if (typeof window !== 'undefined' && window.MySpace && uniFormInstance && uniFormInstance.id && typeof window.MySpace.close === 'function') window.MySpace.close(uniFormInstance.id);
             } catch (_) {}
         } catch (e) {}
     }
@@ -7354,15 +7354,12 @@ class Table extends UIObject {
             } catch (e) {}
         });
 
-        // Double-click on a row should trigger select/open only for readOnly tables
+        // Double-click on a row should trigger select/open
         tr.addEventListener('dblclick', (ev) => {
             try {
-                if (this.readOnly) {
-                    // Make sure row is active first
-                    if (this._activeRowIndex !== rowIndex) this.activateRow(rowIndex);
-                    if (typeof this.onSelectOrOpen === 'function') {
-                        try { this.onSelectOrOpen(rowIndex); } catch (e) {}
-                    }
+                if (this._activeRowIndex !== rowIndex) this.activateRow(rowIndex);
+                if (typeof this.onSelectOrOpen === 'function') {
+                    try { this.onSelectOrOpen(rowIndex); } catch (e) {}
                 }
             } catch (e) {}
         });
@@ -7640,7 +7637,7 @@ class Table extends UIObject {
         try {
             const isSelect = !!(this.appForm && this.appForm.selectMode);
             if (!isSelect) {
-                // open mode: resolve the row object and open uniRecordForm
+                // open mode: resolve the row object and open uniForm record mode
                 try {
                     const rows = this.data_getRows ? this.data_getRows(this.dataKey) : [];
                     const row = Array.isArray(rows) ? rows[rowIndex] : null;
@@ -7650,7 +7647,7 @@ class Table extends UIObject {
                             const self = this;
                             (async () => {
                                 try {
-                                    const instId = await window.MySpace.open('uniRecordForm', { tableName, recordID: row.UID });
+                                    const instId = await window.MySpace.open('uniForm', { mode: 'record', tableName, recordID: row.UID });
                                     if (instId) {
                                         // Listen for the form being destroyed to refresh table data
                                         const onFormDestroyed = (ev) => {
@@ -8270,10 +8267,8 @@ class DynamicTable extends Table {
             });
             tr.addEventListener('dblclick', () => {
                 try {
-                    if (self.readOnly) {
-                        if (self._activeRowIndex !== gi) self.activateRow(gi);
-                        try { self.onSelectOrOpen(gi); } catch (e) {}
-                    }
+                    if (self._activeRowIndex !== gi) self.activateRow(gi);
+                    try { self.onSelectOrOpen(gi); } catch (e) {}
                 } catch (e) {}
             });
             tr.addEventListener('keydown', (ev) => {
@@ -8488,7 +8483,7 @@ class DynamicTable extends Table {
                     const self = this;
                     (async () => {
                         try {
-                            const instId = await window.MySpace.open('uniRecordForm', { tableName, recordID: row.UID });
+                            const instId = await window.MySpace.open('uniForm', { mode: 'record', tableName, recordID: row.UID });
                             if (instId) {
                                 const onFD = (ev) => {
                                     try {
