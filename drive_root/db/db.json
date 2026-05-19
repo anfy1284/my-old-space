@@ -378,6 +378,42 @@
             }
         },
         {
+            "name": "UserSettingsDefaults",
+            "tableName": "user_settings_defaults",
+            "fields": {
+                "userId": {
+                    "type": "STRING",
+                    "allowNull": false,
+                    "references": { "model": "users", "key": "UID" }
+                },
+                "tableName": {
+                    "type": "STRING",
+                    "allowNull": false
+                },
+                "tableLabel": {
+                    "type": "STRING",
+                    "allowNull": true
+                },
+                "recordId": {
+                    "type": "STRING",
+                    "allowNull": false
+                },
+                "recordLabel": {
+                    "type": "STRING",
+                    "allowNull": true
+                }
+            },
+            "options": {
+                "timestamps": true,
+                "indexes": [
+                    {
+                        "unique": true,
+                        "fields": ["userId", "tableName"]
+                    }
+                ]
+            }
+        },
+        {
             "name": "Translations",
             "tableName": "translations",
             "fields": {

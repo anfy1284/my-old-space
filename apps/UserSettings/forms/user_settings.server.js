@@ -126,6 +126,54 @@ async function saveSettings(params, sessionID) {
     }
 }
 
+// ── Автозаполнение: чтение ──────────────────────────────────────────────────────────────────
+
+async function loadAutofill(sessionID) {
+    try {
+        const { modelsDB } = globalRootCtx;
+        const user = await globalRootCtx.getUserBySessionID(sessionID);
+        if (!user) return [];
+        const rows = await modelsDB.UserSettingsDefaults.findAll({
+            where: { userId: user.UID },
+            order: [['tableLabel', 'ASC']],
+            raw: true
+        });
+        // Добавляем display-значения для колонок типа recordSelector
+        for (const r of rows) {
+            r.__tableName_display = r.tableLabel || r.tableName;
+            r.__recordId_display  = r.recordLabel || r.recordId;
+        }
+        return rows;
+    } catch (e) {
+        console.error('[UserSettings] loadAutofill error:', e && e.message);
+        return [];
+    }
+}
+
+// ── Автозаполнение: запись (полная замена) ────────────────────────────────────────────────
+
+async function saveAutofill(rows, sessionID) {
+    try {
+        const { modelsDB } = globalRootCtx;
+        const user = await globalRootCtx.getUserBySessionID(sessionID);
+        if (!user) return;
+        await modelsDB.UserSettingsDefaults.destroy({ where: { userId: user.UID } });
+        for (const row of (rows || [])) {
+            if (!row.tableName || !row.recordId) continue;
+            await modelsDB.UserSettingsDefaults.create({
+                UID:         row.UID,
+                userId:      user.UID,
+                tableName:   row.tableName,
+                tableLabel:  row.__tableName_display || row.tableLabel || row.tableName,
+                recordId:    row.recordId,
+                recordLabel: row.__recordId_display  || row.recordLabel || row.recordId
+            });
+        }
+    } catch (e) {
+        console.error('[UserSettings] saveAutofill error:', e && e.message);
+    }
+}
+
 // ── Динамическая генерация лейаута из таблицы UserSettingsFields ──────────────────────────
 //
 // Тип контрола по typeId:
@@ -201,6 +249,45 @@ async function buildLayout(modelsDB) {
             caption:     { i18n: 'User settings' },
             orientation: 'vertical',
             layout:      controls
+        },
+        {
+            type:        'group',
+            caption:     { i18n: 'Autofill' },
+            orientation: 'vertical',
+            layout: [
+                {
+                    type:    'table',
+                    name:    'autofill',
+                    data:    'autofill',
+                    properties: {
+                        editMode:      'cell-immediate',
+                        visibleRows:   8,
+                        hiddenButtons: ['listSettings', 'recordOpen']
+                    },
+                    columns: [
+                        {
+                            caption:   { i18n: 'Table' },
+                            data:      'tableName',
+                            width:     250,
+                            inputType: 'recordSelector',
+                            properties: {
+                                showSelectionButton: true,
+                                selection: { table: 'user_settings_table_list', idField: 'UID', displayField: 'tableLabel' }
+                            }
+                        },
+                        {
+                            caption:   { i18n: 'Record' },
+                            data:      'recordId',
+                            width:     300,
+                            inputType: 'recordSelector',
+                            properties: {
+                                showSelectionButton: true,
+                                selection: { table: '{tableName}', idField: 'UID', displayField: 'name' }
+                            }
+                        }
+                    ]
+                }
+            ]
         }
     ];
 }
@@ -225,6 +312,10 @@ module.exports = function factory(modelsDB, Utilities) {
             }
         }
 
+        // Загрузка данных автозаполнения (табличная часть)
+        const autofillRows = await loadAutofill(ctx.sessionID);
+        data.push({ name: 'autofill', tableName: 'autofill', value: autofillRows, tabularSection: true });
+
         return {
             data,
             caption: await tForSession('User settings', ctx.sessionID) + (result.userName ? ' — ' + result.userName : '')
@@ -233,8 +324,17 @@ module.exports = function factory(modelsDB, Utilities) {
 
     // Сохранение данных формы (вызывается из applyChanges через onSave)
     async function onSave({ changes, tableName }, ctx) {
-        const result = await saveSettings(changes, ctx.sessionID);
+        // Извлекаем данные автозаполнения из табличных частей
+        const autofillRows = changes && changes.__tabularSections && changes.__tabularSections.autofill;
+        const plainChanges = Object.assign({}, changes || {});
+        delete plainChanges.__tabularSections;
+
+        const result = await saveSettings(plainChanges, ctx.sessionID);
         if (result.error) return { ok: false, error: result.error };
+
+        if (Array.isArray(autofillRows)) {
+            await saveAutofill(autofillRows, ctx.sessionID);
+        }
         return { ok: true };
     }
 

@@ -51,11 +51,35 @@ async function getLayoutWithData(params, sessionID) {
         if (isListMode) {
             const customLayout = await findCustomLayout(LAYOUT_APP_NAMES_LIST, 'list', tableName, sessionID);
             if (customLayout) {
-                const clLayout = customLayout.layout || customLayout;
-                const payload = { layout: clLayout, data: [], params: params || {} };
+                const clLayout = JSON.parse(JSON.stringify(customLayout.layout || customLayout));
+
+                // Если лейаут имеет onLoadData — вызываем его (как в record-режиме),
+                // чтобы виртуальные/синтетические списки могли наполнить данные.
+                let listData = [];
+                if (customLayout.events && customLayout.events.onLoadData) {
+                    try {
+                        const serverScriptStore = require('../../drive_root/serverScriptStore');
+                        const layoutMemory2    = require('../../drive_root/layoutMemory');
+                        const userRole = await layoutMemory2.getUserRoleBySession(sessionID);
+                        const binding  = customLayout.events.onLoadData;
+                        const entry    = serverScriptStore.getServerScript(binding.serverScript, userRole || '*');
+                        const fn       = entry && entry.scriptObj && entry.scriptObj[binding.fn || 'onLoadData'];
+                        if (typeof fn === 'function') {
+                            const result = await fn({ tableName, params }, { sessionID });
+                            listData = (result && result.data) || [];
+                            if (result && result.caption && Array.isArray(clLayout) && clLayout[0]) {
+                                clLayout[0].caption = result.caption;
+                            }
+                        }
+                    } catch (e) {
+                        console.error('[uniForm/getLayoutWithData] list onLoadData error:', e && e.message || e);
+                    }
+                }
+
+                const payload = { layout: clLayout, data: listData, params: params || {} };
                 const datasetId = dataApp.storeDataset(payload);
                 return {
-                    layout: clLayout, data: [], datasetId,
+                    layout: clLayout, data: listData, datasetId,
                     clientScript: customLayout.clientScript || null,
                     formIcon: customLayout.formIcon || null,
                     windowState: customLayout.windowState || 'maximized'

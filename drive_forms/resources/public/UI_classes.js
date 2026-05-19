@@ -1891,7 +1891,11 @@ class DataForm extends Form {
         contentArea = contentArea || this.getContentArea();
         let element = null;
         const properties = item.properties || {};
-        const caption = (properties && properties.noCaption) ? '' : (item.caption || '');
+        // Резолвим caption: если пришёл объект { i18n: 'key' } — переводим через __t
+        const rawCaption = (properties && properties.noCaption) ? '' : (item.caption || '');
+        const caption = (rawCaption && typeof rawCaption === 'object' && rawCaption.i18n)
+            ? (typeof __t === 'function' ? __t(rawCaption.i18n) : (rawCaption.i18n || ''))
+            : rawCaption;
 
         // Helper to create textbox-like controls (single and multiline)
         const createTextControl = (ControlCtor) => {
@@ -6726,7 +6730,10 @@ class Table extends UIObject {
             titleSpan.className = 'th-title';
             const fld = col.data || i;
             const curSort = (this.currentSort || []).find(s => s.field === fld);
-            titleSpan.textContent = (col.caption || '') + (curSort ? (curSort.order === 'asc' ? ' ▲' : ' ▼') : '');
+            const _colCap0 = (col.caption && typeof col.caption === 'object' && col.caption.i18n)
+                ? (typeof __t === 'function' ? __t(col.caption.i18n) : col.caption.i18n)
+                : (col.caption || '');
+            titleSpan.textContent = _colCap0 + (curSort ? (curSort.order === 'asc' ? ' ▲' : ' ▼') : '');
             th.appendChild(titleSpan);
 
             th.addEventListener('mousedown', () => {
@@ -6756,7 +6763,10 @@ class Table extends UIObject {
                     
                     const span = thk.querySelector('.th-title');
                     if (span) {
-                        span.textContent = colk.caption || '';
+                        const _colCapK = (colk.caption && typeof colk.caption === 'object' && colk.caption.i18n)
+                            ? (typeof __t === 'function' ? __t(colk.caption.i18n) : colk.caption.i18n)
+                            : (colk.caption || '');
+                        span.textContent = _colCapK;
                         if (si) span.textContent += si.order === 'asc' ? ' ▲' : ' ▼';
                     }
                 }
@@ -7075,6 +7085,27 @@ class Table extends UIObject {
                 }
             }
         } catch (e) {}
+
+        // Поддержка шаблона {field} в selection.table — позволяет указывать таблицу-источник
+        // динамически по значению другого поля строки, например: selection: { table: '{tableName}' }
+        // Геттер читает актуальное значение из объекта строки в момент нажатия кнопки "..."
+        try {
+            if (cellItem.properties && cellItem.properties.selection &&
+                    typeof cellItem.properties.selection.table === 'string' &&
+                    cellItem.properties.selection.table.includes('{')) {
+                const tmpl = cellItem.properties.selection.table;
+                const rowRef = row;
+                const dynSel = Object.assign({}, cellItem.properties.selection);
+                Object.defineProperty(dynSel, 'table', {
+                    get() {
+                        return tmpl.replace(/\{([^}]+)\}/g, (_, k) => (rowRef && rowRef[k] != null ? rowRef[k] : ''));
+                    },
+                    configurable: true,
+                    enumerable:   true
+                });
+                cellItem.properties = Object.assign({}, cellItem.properties, { selection: dynSel });
+            }
+        } catch (_) {}
 
         // Normalize object values: preserve primitive ID/value for editing, but keep display text
         try {
@@ -7644,7 +7675,23 @@ class Table extends UIObject {
                     const rows = this.data_getRows ? this.data_getRows(this.dataKey) : [];
                     const row = Array.isArray(rows) ? rows[rowIndex] : null;
                     if (row && (row.UID !== undefined && row.UID !== null)) {
-                        const tableName = this.tableName || (this.appForm && (this.appForm.dbTable || this.dataKey)) || '';
+                        // Не наследуем tableName родительской формы если эта таблица является
+                        // табличной секцией (_dataMap[dataKey].tabularSection === true) —
+                        // в этом случае у таблицы нет своего независимого типа записи.
+                        let tableName = this.tableName || '';
+                        if (!tableName) {
+                            const isTabularSection = !!(
+                                this.dataKey &&
+                                this.appForm &&
+                                this.appForm._dataMap &&
+                                this.appForm._dataMap[this.dataKey] &&
+                                this.appForm._dataMap[this.dataKey].tabularSection === true
+                            );
+                            if (!isTabularSection) {
+                                tableName = (this.appForm && (this.appForm.dbTable || this.dataKey)) || '';
+                            }
+                        }
+                        if (!tableName) return;
                         if (typeof window !== 'undefined' && window.MySpace && typeof window.MySpace.open === 'function') {
                             const self = this;
                             (async () => {
@@ -7727,14 +7774,15 @@ class Table extends UIObject {
                 const toolbarButtons = [
                     { action: 'select',       caption: __t('Select'),   icon: '/apps/general_icons/resources/public/16x16/select.png',   selectModeOnly: true },
                     { action: 'cancel',       caption: __t('Cancel'),   icon: '/apps/general_icons/resources/public/16x16/cancel.png',   selectModeOnly: true },
-                    { action: 'recordAdd',    caption: __t('Add'),      icon: '/apps/general_icons/resources/public/16x16/add.png' },
-                    { action: 'recordDelete', caption: __t('Delete'),   icon: '/apps/general_icons/resources/public/16x16/delete.png' },
+                    { action: 'recordAdd',    caption: __t('Add'),      icon: '/apps/general_icons/resources/public/16x16/add.png',      hideInSelectMode: true },
+                    { action: 'recordDelete', caption: __t('Delete'),   icon: '/apps/general_icons/resources/public/16x16/delete.png',   hideInSelectMode: true },
                     { action: 'recordOpen',   caption: __t('Open'),     icon: '/apps/general_icons/resources/public/16x16/open.png' },
                     { action: 'listSettings', caption: __t('Settings'), icon: '/apps/general_icons/resources/public/16x16/settings.png' }
                 ];
 
                 for (const btnDef of toolbarButtons) {
                     if (btnDef.selectModeOnly && !isSelectMode) continue;
+                    if (btnDef.hideInSelectMode && isSelectMode) continue;
                     if (hiddenButtons.includes(btnDef.action)) continue;
                     const btn = new Button(toolbarContainer, { caption: btnDef.caption, tooltip: btnDef.caption, icon: btnDef.icon, showIcon: !!btnDef.icon, showText: false });
                     btn.Draw(toolbarContainer);
