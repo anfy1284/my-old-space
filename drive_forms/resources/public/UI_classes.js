@@ -7637,6 +7637,8 @@ class Table extends UIObject {
         try {
             const isSelect = !!(this.appForm && this.appForm.selectMode);
             if (!isSelect) {
+                // If recordOpen is disabled for this table — do not open on double-click
+                if (Array.isArray(this.hiddenButtons) && this.hiddenButtons.includes('recordOpen')) return;
                 // open mode: resolve the row object and open uniForm record mode
                 try {
                     const rows = this.data_getRows ? this.data_getRows(this.dataKey) : [];
@@ -8478,6 +8480,8 @@ class DynamicTable extends Table {
             if (!row || !row.loaded) return;
             const isSelect = !!(this.appForm && this.appForm.selectMode);
             if (!isSelect) {
+                // If recordOpen is disabled for this table — do not open on double-click
+                if (Array.isArray(this.hiddenButtons) && this.hiddenButtons.includes('recordOpen')) return;
                 const tableName = this.tableName || (this.appForm && (this.appForm.dbTable || this.dataKey)) || '';
                 if (typeof window !== 'undefined' && window.MySpace && typeof window.MySpace.open === 'function') {
                     const self = this;

@@ -1,0 +1,29 @@
+{
+    "level": "app",
+    "autoStart": false,
+    "system": [
+        "user_settings"
+    ],
+    "access": [
+        "admin",
+        "user"
+    ],
+    "dependencies": {},
+    "mainMenuCommands": [
+        {
+            "id": "main",
+            "items": [
+                {
+                    "caption": "apps",
+                    "items": [
+                        {
+                            "caption": "User Settings",
+                            "action": "open",
+                            "icon": "/apps/general_icons/resources/public/16x16/settings.png"
+                        }
+                    ]
+                }
+            ]
+        }
+    ]
+}
