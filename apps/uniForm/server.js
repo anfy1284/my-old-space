@@ -397,6 +397,7 @@ async function buildTableFieldsFromModel(tableName) {
             const typeKey = f.type || '';
             let inputType = 'textbox';
             if (f.foreignKey) inputType = 'recordSelector';
+            else if (f.isAddress) inputType = 'address';
             else if (typeKey === 'INTEGER') inputType = 'number';
             else if (typeKey === 'BOOLEAN') inputType = 'checkbox';
             else if (typeKey === 'DATE' || typeKey === 'DATEONLY') inputType = 'date';
@@ -438,7 +439,8 @@ function mapInputTypeToControl(inputType) {
     if (t === 'number' || t === 'integer') return 'number';
     if (t === 'checkbox' || t === 'boolean') return 'checkbox';
     if (t === 'date' || t === 'dateonly') return 'date';
-    if (t === 'recordselector' || t === 'recordselector') return 'recordSelector';
+    if (t === 'recordselector') return 'recordSelector';
+    if (t === 'address') return 'address';
     if (t === 'textarea' || t === 'text') return 'textarea';
     if (t === 'enum' || t === 'emunlist' || t === 'emunlist') return 'emunList';
     return 'textbox';
@@ -953,6 +955,13 @@ async function generateFormSpec(tableName, params, sessionID) {
     }
 }
 
+// ── Google Places config — exposes API key to authorised browser clients ─────────────────────
+async function getPlacesConfig(params, sessionID) {
+    const user = await globalServerContext.getUserBySessionID(sessionID);
+    if (!user) throw new Error('User not authorized');
+    return { apiKey: process.env.GOOGLE_PLACES_API_KEY || '' };
+}
+
 // ── Quick search for recordSelector typeahead ─────────────────────────────────────────────────
 async function quickSearch({ tableName, searchText, limit }, sessionID) {
     const user = await globalServerContext.getUserBySessionID(sessionID);
@@ -1009,6 +1018,7 @@ module.exports = {
     generateFormSpec,
     registerBeforeSaveTSRow,
     quickSearch,
+    getPlacesConfig,
 
     // Dynamic table helpers
     getDynamicTableData: dynamicTableMethods.getDynamicTableData,

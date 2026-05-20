@@ -444,7 +444,7 @@ async function handleRequest(req, res) {
             }
             res.writeHead(200, {
                 'Content-Type': 'text/html; charset=utf-8',
-                'Content-Security-Policy': "default-src 'self' 'unsafe-eval' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval'"
+                'Content-Security-Policy': "default-src 'self' 'unsafe-eval' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://maps.googleapis.com; connect-src 'self' https://maps.googleapis.com https://places.googleapis.com; img-src 'self' data: https://maps.gstatic.com https://*.googleapis.com; font-src 'self' https://fonts.gstatic.com"
             });
             res.end(data);
         });

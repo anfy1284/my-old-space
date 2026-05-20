@@ -411,6 +411,10 @@ class FormInput extends UIObject {
         try { if (this._qsKeyCapture) { document.removeEventListener('keydown', this._qsKeyCapture, true); this._qsKeyCapture = null; } } catch(e) {}
         try { if (typeof this._closeQsPopup === 'function') this._closeQsPopup(); } catch(e) {}
         try { this._qsPopup = null; this._qsOpen = false; this._quickSearchEnabled = false; } catch(e) {}
+        try { if (this._addrDebounce) { clearTimeout(this._addrDebounce); this._addrDebounce = null; } } catch(e) {}
+        try { if (this._addrKeyCapture) { document.removeEventListener('keydown', this._addrKeyCapture, true); this._addrKeyCapture = null; } } catch(e) {}
+        try { if (typeof this._closeAddrPopup === 'function') this._closeAddrPopup(); } catch(e) {}
+        try { this._addrPopup = null; this._addrOpen = false; this._addressEnabled = false; } catch(e) {}
     }
 }
 
@@ -1964,6 +1968,11 @@ class DataForm extends Form {
                 createTextControl(TextBox);
                 break;
             }
+            case 'address': {
+                properties.addressMode = true;
+                createTextControl(TextBox);
+                break;
+            }
             case 'date': {
                 // Date input: TextBox with isDate=true
                 properties.isDate = true;
@@ -3079,6 +3088,73 @@ class Button extends UIObject {
     }
 }
 
+// ── Google Places Autocomplete helpers ────────────────────────────────────────────────────────
+// Module-level state for lazy one-time initialisation of Google Maps JS API
+let _placesApiKey = null;
+let _placesReady = false;
+let _placesLoading = false;
+let _placesCallbacks = [];
+async function _ensureGooglePlaces() {
+    if (_placesReady) return;
+    if (!_placesApiKey) {
+        try {
+            const cfg = await callServerMethod('uniForm', 'getPlacesConfig', {});
+            _placesApiKey = (cfg && cfg.apiKey) || null;
+        } catch (e) { throw new Error('[AddressBox] Cannot fetch Places API key'); }
+    }
+    if (!_placesApiKey) throw new Error('[AddressBox] No Places API key configured');
+    if (_placesReady) return;
+    return new Promise((resolve, reject) => {
+        if (_placesReady) { resolve(); return; }
+        _placesCallbacks.push({ resolve, reject });
+        if (!_placesLoading) {
+            _placesLoading = true;
+            window['_gmapsPlacesReady'] = () => {
+                _placesReady = true;
+                _placesLoading = false;
+                const cbs = _placesCallbacks.splice(0);
+                cbs.forEach(cb => { try { cb.resolve(); } catch (_) {} });
+            };
+            const s = document.createElement('script');
+            s.src = 'https://maps.googleapis.com/maps/api/js?key=' + encodeURIComponent(_placesApiKey) + '&libraries=places&callback=_gmapsPlacesReady';
+            s.async = true;
+            s.onerror = () => {
+                _placesLoading = false;
+                const cbs = _placesCallbacks.splice(0);
+                cbs.forEach(cb => { try { cb.reject(new Error('[AddressBox] Failed to load Google Maps JS')); } catch (_) {} });
+            };
+            document.head.appendChild(s);
+        }
+    });
+}
+async function _getPlaceDetails(placeId) {
+    await _ensureGooglePlaces();
+    return new Promise((resolve) => {
+        try {
+            const div = document.createElement('div');
+            const svc = new window.google.maps.places.PlacesService(div);
+            svc.getDetails({ placeId, fields: ['formatted_address'] }, (place, status) => {
+                if (status === 'OK' && place && place.formatted_address) resolve(place.formatted_address);
+                else resolve(null);
+            });
+        } catch (e) { resolve(null); }
+    });
+}
+async function _getAddressPredictions(text) {
+    await _ensureGooglePlaces();
+    return new Promise((resolve) => {
+        try {
+            const svc = new window.google.maps.places.AutocompleteService();
+            svc.getPlacePredictions({ input: text }, (predictions, status) => {
+                if (status === 'OK' && Array.isArray(predictions)) {
+                    resolve(predictions.map(p => ({ description: p.description, placeId: p.place_id })));
+                } else { resolve([]); }
+            });
+        } catch (e) { resolve([]); }
+    });
+}
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+
 class TextBox extends FormInput {
 
     constructor(parentElement = null, properties = {}) {
@@ -3131,6 +3207,8 @@ class TextBox extends FormInput {
         this._dateSection = 0; // 0=day, 1=month, 2=year
         this._calYear = null;
         this._calMonth = null;
+        // Address autocomplete mode
+        this.addressMode = !!this.addressMode;
     }
 
     setValue(val, display) {
@@ -4003,6 +4081,150 @@ class TextBox extends FormInput {
                     }
                 }
             } catch(e) {}
+
+            // ── Address autocomplete ─────────────────────────────────────────────────────
+            try {
+                if (this.addressMode) {
+                    this._addressEnabled = true;
+                    this._addrNavActive = false;
+                    this._addrTypedText = '';
+
+                    this._closeAddrPopup = () => {
+                        try {
+                            if (this._addrKeyCapture) { try { document.removeEventListener('keydown', this._addrKeyCapture, true); } catch (_) {} this._addrKeyCapture = null; }
+                            if (this._addrPopup) { try { this._addrPopup.remove(); } catch (_) {} this._addrPopup = null; }
+                            this._addrOpen = false;
+                            this._addrNavActive = false;
+                            if (this._addrDocHandler) { try { document.removeEventListener('click', this._addrDocHandler); } catch (_) {} this._addrDocHandler = null; }
+                            if (this._addrScrollHandler) { try { window.removeEventListener('scroll', this._addrScrollHandler, true); } catch (_) {} try { window.removeEventListener('resize', this._addrScrollHandler); } catch (_) {} this._addrScrollHandler = null; }
+                        } catch (_) {}
+                    };
+
+                    this._openAddrPopup = (predictions) => {
+                        try {
+                            if (this._addrOpen) this._closeAddrPopup();
+                            if (!predictions || !predictions.length) return;
+                            const popup = document.createElement('div');
+                            popup.className = 'textbox-list-popup';
+                            popup.style.position = 'absolute';
+                            popup.style.backgroundColor = '#ffffff';
+                            popup.style.border = 'none';
+                            popup.style.fontFamily = 'MS Sans Serif, sans-serif';
+                            popup.style.fontSize = '11px';
+                            popup.style.zIndex = '99999';
+                            popup.style.boxSizing = 'border-box';
+                            popup.style.padding = '2px';
+                            popup.style.boxShadow = '0 4px 10px rgba(0,0,0,0.25)';
+                            popup.addEventListener('mousedown', (e) => { e.preventDefault(); });
+                            const containerRef = this.inputContainer;
+                            popup.style.width = (containerRef ? containerRef.clientWidth : 200) + 'px';
+                            for (const pred of predictions) {
+                                const row = document.createElement('div');
+                                row.style.cssText = 'padding:3px 6px;cursor:pointer;user-select:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
+                                row.textContent = pred.description;
+                                row._addrPred = pred;
+                                row.setAttribute('data-addr-item', '1');
+                                row.addEventListener('mouseenter', () => {
+                                    Array.from(popup.querySelectorAll('[data-addr-item]')).forEach(r => { r.style.backgroundColor = ''; r.style.color = ''; r.removeAttribute('data-selected'); });
+                                    row.style.backgroundColor = '#0000aa'; row.style.color = '#ffffff'; row.setAttribute('data-selected', '1');
+                                });
+                                row.addEventListener('mouseleave', () => {
+                                    if (row.getAttribute('data-selected') === '1') { row.style.backgroundColor = ''; row.style.color = ''; row.removeAttribute('data-selected'); }
+                                });
+                                row.addEventListener('click', () => {
+                                    try {
+                                        const desc = pred.description;
+                                        const placeId = pred.placeId;
+                                        this.setText(desc); this.text = desc;
+                                        this._closeAddrPopup();
+                                        try { if (this.element) this.element.dispatchEvent(new Event('input', { bubbles: true })); } catch (_) {}
+                                        if (this._addrDebounce) { clearTimeout(this._addrDebounce); this._addrDebounce = null; }
+                                        try { if (this.element) this.element.focus(); } catch (_) {}
+                                        if (placeId) {
+                                            _getPlaceDetails(placeId).then(fullAddr => {
+                                                try {
+                                                    if (!fullAddr || !this.element) return;
+                                                    this.setText(fullAddr); this.text = fullAddr;
+                                                    try { if (this.element) this.element.dispatchEvent(new Event('input', { bubbles: true })); } catch (_) {}
+                                                    if (this._addrDebounce) { clearTimeout(this._addrDebounce); this._addrDebounce = null; }
+                                                } catch (_) {}
+                                            }).catch(() => {});
+                                        }
+                                    } catch (_) {}
+                                });
+                                popup.appendChild(row);
+                            }
+                            const rect = (containerRef || this.element || document.body).getBoundingClientRect();
+                            popup.style.left = (rect.left + (window.pageXOffset || document.documentElement.scrollLeft)) + 'px';
+                            popup.style.top = (rect.bottom + (window.pageYOffset || document.documentElement.scrollTop)) + 'px';
+                            document.body.appendChild(popup);
+                            this._addrPopup = popup; this._addrOpen = true;
+
+                            this._addrKeyCapture = (ev) => {
+                                try {
+                                    if (!this._addrOpen) return;
+                                    const k = ev.key;
+                                    if (k !== 'ArrowDown' && k !== 'ArrowUp' && k !== 'Enter' && k !== 'Escape') return;
+                                    ev.preventDefault(); ev.stopPropagation();
+                                    const rows = Array.from(popup.querySelectorAll('[data-addr-item]'));
+                                    if (!rows.length) return;
+                                    let idx = rows.findIndex(r => r.getAttribute('data-selected') === '1');
+                                    if (k === 'ArrowDown') {
+                                        if (!this._addrNavActive) { this._addrTypedText = this.element ? this.element.value : ''; this._addrNavActive = true; }
+                                        idx = (idx < rows.length - 1) ? idx + 1 : 0;
+                                        rows.forEach(r => { r.style.backgroundColor = ''; r.style.color = ''; r.removeAttribute('data-selected'); });
+                                        rows[idx].style.backgroundColor = '#0000aa'; rows[idx].style.color = '#ffffff'; rows[idx].setAttribute('data-selected', '1');
+                                        try { if (this.element) this.element.value = rows[idx]._addrPred.description; } catch (_) {}
+                                    } else if (k === 'ArrowUp') {
+                                        if (!this._addrNavActive) { this._addrTypedText = this.element ? this.element.value : ''; this._addrNavActive = true; }
+                                        idx = (idx > 0) ? idx - 1 : rows.length - 1;
+                                        rows.forEach(r => { r.style.backgroundColor = ''; r.style.color = ''; r.removeAttribute('data-selected'); });
+                                        rows[idx].style.backgroundColor = '#0000aa'; rows[idx].style.color = '#ffffff'; rows[idx].setAttribute('data-selected', '1');
+                                        try { if (this.element) this.element.value = rows[idx]._addrPred.description; } catch (_) {}
+                                    } else if (k === 'Enter') {
+                                        const target = (idx >= 0 && rows[idx]) ? rows[idx] : (rows.length === 1 ? rows[0] : null);
+                                        if (target) { this._addrNavActive = false; target.click(); }
+                                    } else if (k === 'Escape') {
+                                        if (this._addrNavActive && this.element) { this.element.value = this._addrTypedText || ''; }
+                                        this._closeAddrPopup();
+                                        try { if (this.element) this.element.focus(); } catch (_) {}
+                                    }
+                                } catch (_) {}
+                            };
+                            document.addEventListener('keydown', this._addrKeyCapture, true);
+
+                            this._addrDocHandler = (ev) => {
+                                try { if (!popup.contains(ev.target) && !(this.inputContainer && this.inputContainer.contains(ev.target))) this._closeAddrPopup(); } catch (_) {}
+                            };
+                            document.addEventListener('click', this._addrDocHandler);
+
+                            this._addrScrollHandler = () => { try { this._closeAddrPopup(); } catch (_) {} };
+                            window.addEventListener('scroll', this._addrScrollHandler, true);
+                            window.addEventListener('resize', this._addrScrollHandler);
+                        } catch (_) {}
+                    };
+
+                    this._addrInputHandler = () => {
+                        try {
+                            if (!this._addressEnabled) return;
+                            if (this._addrNavActive) {
+                                this._addrNavActive = false;
+                                try { if (this._addrPopup) Array.from(this._addrPopup.querySelectorAll('[data-addr-item]')).forEach(r => { r.style.backgroundColor = ''; r.style.color = ''; r.removeAttribute('data-selected'); }); } catch (_) {}
+                            }
+                            const text = this.element ? this.element.value : '';
+                            if (this._addrDebounce) { clearTimeout(this._addrDebounce); this._addrDebounce = null; }
+                            if (!text || text.length < 3) { this._closeAddrPopup(); return; }
+                            this._addrDebounce = setTimeout(async () => {
+                                try {
+                                    const preds = await _getAddressPredictions(text);
+                                    if (this.element && this.element.value === text) this._openAddrPopup(preds);
+                                } catch (e) { try { this._closeAddrPopup(); } catch (_) {} }
+                            }, 300);
+                        } catch (_) {}
+                    };
+                    this.element.addEventListener('input', this._addrInputHandler);
+                }
+            } catch (e) {}
 
             // Events
             this.element.addEventListener('input', (e) => {

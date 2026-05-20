@@ -733,7 +733,8 @@ async function getTableMetadata(modelName) {
             foreignKey: foreignKey,
             isPrimary: !!attr.primaryKey,
             isUID: fieldName === 'UID',
-            editable: false  // All fields readonly for now
+            editable: false,  // All fields readonly for now
+            isAddress: !!(modelDef && modelDef.fields && modelDef.fields[fieldName] && modelDef.fields[fieldName].isAddress)
         });
     }
 
