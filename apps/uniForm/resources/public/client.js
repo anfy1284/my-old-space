@@ -16,6 +16,7 @@ try {
             const instanceId = this.generateInstanceId();
             const container = null;
             const initialOnSelectCallBack = (params && typeof params.onSelectCallBack === 'function') ? params.onSelectCallBack : null;
+            const initialOnAfterSave = (params && typeof params.onAfterSave === 'function') ? params.onAfterSave : null;
 
             const appForm = new DataForm(APP_NAME);
             appForm.setTitle(APP_NAME);
@@ -148,6 +149,7 @@ try {
                 container,
                 form: appForm,
                 initialOnSelectCallBack,
+                initialOnAfterSave,
 
                 // ── onSelect: вызывается фреймворком при action='select' (режим FK-пикера) ──
                 async onSelect(callParams) {
@@ -196,6 +198,36 @@ try {
                         };
                     } catch(e) {
                         console.error('[uniForm] failed to override DataForm loaders', e);
+                    }
+
+                    // ── onAfterSave: intercept applyChanges when onAfterSave callback is provided ──
+                    if (typeof instance.initialOnAfterSave === 'function') {
+                        const origApplyChanges = appForm.applyChanges ? appForm.applyChanges.bind(appForm) : null;
+                        appForm.applyChanges = async function(changes) {
+                            let res = null;
+                            try {
+                                if (origApplyChanges) {
+                                    res = await origApplyChanges(changes);
+                                } else {
+                                    res = await callServerMethod(APP_NAME, 'applyChanges', changes);
+                                }
+                            } catch(e) {
+                                throw e;
+                            }
+                            if (res && res.ok && typeof instance.initialOnAfterSave === 'function') {
+                                try {
+                                    let nameVal = '';
+                                    try {
+                                        const nameCtrl = appForm.controlsMap && appForm.controlsMap['name'];
+                                        if (nameCtrl && nameCtrl.element) nameVal = nameCtrl.element.value || '';
+                                        else if (appForm._dataMap && appForm._dataMap['name']) nameVal = String(appForm._dataMap['name'].value || '');
+                                    } catch(_) {}
+                                    instance.initialOnAfterSave({ UID: res.recordId, name: nameVal });
+                                } catch(e) { console.error('[uniForm] onAfterSave callback error', e); }
+                                try { setTimeout(() => { try { instance.destroy(); } catch(_){} }, 0); } catch(_){}
+                            }
+                            return res;
+                        };
                     }
 
                     try { appForm.Draw(); } catch(e) { console.error(e); }

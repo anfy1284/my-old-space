@@ -1,4 +1,9 @@
 {
+    "Create": {
+        "en": "Create",
+        "ru": "Создать",
+        "de": "Erstellen"
+    },
     "App not found": {
         "en": "App not found",
         "ru": "Приложение не найдено",

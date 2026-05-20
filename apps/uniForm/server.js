@@ -730,8 +730,8 @@ async function generateFormSpec(tableName, params, sessionID) {
 
         if (!layout) {
             layout = [
-                { type: 'group', caption: tableName, orientation: 'vertical', layout: controls },
-                { type: 'group', caption: 'Действия', orientation: 'horizontal', layout: [ { type: 'button', action: 'save', caption: 'Сохранить' }, { type: 'button', action: 'cancel', caption: 'Отмена' } ] }
+                { type: 'commandBar' },
+                { type: 'group', caption: tableName, orientation: 'vertical', layout: controls }
             ];
 
             // Автоматические табличные части
@@ -953,12 +953,62 @@ async function generateFormSpec(tableName, params, sessionID) {
     }
 }
 
+// ── Quick search for recordSelector typeahead ─────────────────────────────────────────────────
+async function quickSearch({ tableName, searchText, limit }, sessionID) {
+    const user = await globalServerContext.getUserBySessionID(sessionID);
+    if (!user) throw new Error('User not authorized');
+
+    const modelName = globalServerContext.getModelNameForTable(tableName);
+    if (!modelName) throw new Error('Unknown table: ' + tableName);
+
+    const dbGW = require('../../drive_root/dbGateway');
+    const { Op } = require('sequelize');
+
+    const safeText = String(searchText || '').replace(/[%_\\]/g, c => '\\' + c);
+    const lim = Math.max(1, Math.min(limit || 10, 20));
+
+    // Determine display field (prefer 'name', fallback to first string attribute, then 'UID')
+    let displayField = 'name';
+    try {
+        const gsCtx = globalServerContext;
+        const models = gsCtx.getModels ? gsCtx.getModels() : null;
+        if (models && models[modelName]) {
+            const attrs = models[modelName].rawAttributes || {};
+            if (!attrs['name']) {
+                displayField = Object.keys(attrs).find(k => {
+                    try {
+                        const t = attrs[k].type ? (attrs[k].type.key || attrs[k].type.constructor.key) : '';
+                        return t === 'STRING';
+                    } catch (e) { return false; }
+                }) || 'UID';
+            }
+        }
+    } catch (e) { /* use 'name' as default */ }
+
+    const rows = await dbGW.execute({
+        operation: 'read',
+        table: tableName,
+        where: { [displayField]: { [Op.iLike]: `%${safeText}%` } },
+        options: {
+            attributes: ['UID', displayField],
+            limit: lim,
+            order: [[displayField, 'ASC']],
+            raw: true
+        },
+        context: { sessionID }
+    });
+
+    const items = (Array.isArray(rows) ? rows : []).map(r => ({ UID: r.UID, name: r[displayField] || '' }));
+    return { items };
+}
+
 module.exports = {
     getData,
     getLayoutWithData,
     applyChanges,
     generateFormSpec,
     registerBeforeSaveTSRow,
+    quickSearch,
 
     // Dynamic table helpers
     getDynamicTableData: dynamicTableMethods.getDynamicTableData,

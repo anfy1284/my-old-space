@@ -407,6 +407,10 @@ class FormInput extends UIObject {
         try { this._selectBtn = null; } catch (e) {}
         try { this._dateBtn = null; } catch (e) {}
         try { this._calPopup = null; } catch (e) {}
+        try { if (this._qsDebounce) { clearTimeout(this._qsDebounce); this._qsDebounce = null; } } catch(e) {}
+        try { if (this._qsKeyCapture) { document.removeEventListener('keydown', this._qsKeyCapture, true); this._qsKeyCapture = null; } } catch(e) {}
+        try { if (typeof this._closeQsPopup === 'function') this._closeQsPopup(); } catch(e) {}
+        try { this._qsPopup = null; this._qsOpen = false; this._quickSearchEnabled = false; } catch(e) {}
     }
 }
 
@@ -2059,6 +2063,7 @@ class DataForm extends Form {
                 if (properties && properties.selection) propClone2.selection = properties.selection;
                 propClone2.showSelectionButton = !properties.readOnly;
                 if (properties && properties.readOnly) propClone2.listMode = false;
+                if (properties && properties.noQuickSearch) propClone2.quickSearch = false;
                 
                 const ctrlSel = new TextBox(contentArea, propClone2);
                 try { 
@@ -3778,6 +3783,226 @@ class TextBox extends FormInput {
                     }
                 }
             } catch (e) {}
+
+            // ── Quick search for recordSelector fields ──────────────────────────────────────
+            try {
+                if (this.showSelectionButton && this.quickSearch !== false) {
+                    const selMeta = this.selection || {};
+                    const table = selMeta.table || selMeta.tableName || null;
+                    if (table) {
+                        this._quickSearchEnabled = true;
+
+                        this._closeQsPopup = () => {
+                            try {
+                                if (this._qsKeyCapture) { try { document.removeEventListener('keydown', this._qsKeyCapture, true); } catch(_){} this._qsKeyCapture = null; }
+                                if (this._qsPopup) { try { this._qsPopup.remove(); } catch(_){} this._qsPopup = null; }
+                                this._qsOpen = false;
+                                if (this._qsDocHandler) { try { document.removeEventListener('click', this._qsDocHandler); } catch(_){} this._qsDocHandler = null; }
+                                if (this._qsScrollHandler) { try { window.removeEventListener('scroll', this._qsScrollHandler, true); } catch(_){} try { window.removeEventListener('resize', this._qsScrollHandler); } catch(_){} this._qsScrollHandler = null; }
+                            } catch(_) {}
+                        };
+
+                        this._openQsPopup = (items, searchText) => {
+                            try {
+                                if (this._qsOpen) { try { this._closeQsPopup(); } catch(_){} }
+                                const popup = document.createElement('div');
+                                popup.className = 'textbox-list-popup';
+                                popup.style.position = 'absolute';
+                                popup.style.backgroundColor = '#ffffff';
+                                popup.style.border = 'none';
+                                popup.style.fontFamily = 'MS Sans Serif, sans-serif';
+                                popup.style.fontSize = '11px';
+                                popup.style.zIndex = '99999';
+                                popup.style.boxSizing = 'border-box';
+                                popup.style.padding = '2px';
+                                popup.style.boxShadow = '0 4px 10px rgba(0,0,0,0.25)';
+                                const containerRef = this.inputContainer;
+                                popup.style.minWidth = (containerRef ? containerRef.clientWidth : 120) + 'px';
+
+                                // Prevent blur on input when clicking popup
+                                popup.addEventListener('mousedown', (e) => { e.preventDefault(); });
+
+                                if (items.length === 0) {
+                                    // "Create new" row
+                                    const createRow = document.createElement('div');
+                                    createRow.style.cssText = 'padding:3px 6px;cursor:pointer;user-select:none;color:#000080;display:flex;align-items:center;gap:4px;';
+                                    createRow.setAttribute('data-qs-item', '1');
+                                    const icon = document.createElement('img');
+                                    icon.src = '/apps/general_icons/resources/public/16x16/add.png';
+                                    icon.style.cssText = 'width:16px;height:16px;flex-shrink:0;';
+                                    createRow.appendChild(icon);
+                                    const createSpan = document.createElement('span');
+                                    createSpan.textContent = __t('Create');
+                                    createRow.appendChild(createSpan);
+                                    createRow.addEventListener('mouseenter', () => { createRow.style.backgroundColor = '#0000aa'; createRow.style.color = '#ffffff'; createRow.setAttribute('data-selected','1'); });
+                                    createRow.addEventListener('mouseleave', () => { if(createRow.getAttribute('data-selected')==='1'){ createRow.style.backgroundColor=''; createRow.style.color='#000080'; createRow.removeAttribute('data-selected'); } });
+                                    createRow.addEventListener('click', () => {
+                                        try {
+                                            const capturedText = searchText;
+                                            this._closeQsPopup();
+                                            if (window.MySpace && typeof window.MySpace.open === 'function') {
+                                                const onAfterSave = (savedData) => {
+                                                    try {
+                                                        if (savedData && savedData.UID) {
+                                                            const display = savedData.name || String(capturedText || '');
+                                                            this.setValue(savedData.UID, display);
+                                                            this.text = String(display);
+                                                            try { if (this.element) this.element.dispatchEvent(new Event('input', { bubbles: true })); } catch(_){}
+                                                        }
+                                                    } catch(_) {}
+                                                };
+                                                (async () => {
+                                                    try {
+                                                        const id = await window.MySpace.open('uniForm', { mode: 'record', tableName: table, onAfterSave });
+                                                        const inst = window.MySpace.getInstance && window.MySpace.getInstance(id);
+                                                        if (inst && inst.form) {
+                                                            setTimeout(() => {
+                                                                try {
+                                                                    const nameCtrl = inst.form.controlsMap && inst.form.controlsMap['name'];
+                                                                    if (nameCtrl && typeof nameCtrl.setValue === 'function') {
+                                                                        nameCtrl.setValue(capturedText || '');
+                                                                        inst.form.setModified(true);
+                                                                    }
+                                                                } catch(_){}
+                                                            }, 300);
+                                                        }
+                                                    } catch(e) { try { console.error('[TextBox.quickSearch] create error', e); } catch(_){} }
+                                                })();
+                                            }
+                                        } catch(_) {}
+                                    });
+                                    popup.appendChild(createRow);
+                                    if (searchText) {
+                                        const textRow = document.createElement('div');
+                                        textRow.style.cssText = 'padding:2px 6px 2px 26px;font-size:11px;color:#808080;user-select:none;';
+                                        textRow.textContent = String(searchText);
+                                        popup.appendChild(textRow);
+                                    }
+                                } else {
+                                    for (const it of items) {
+                                        const row = document.createElement('div');
+                                        row.style.cssText = 'padding:3px 6px;cursor:pointer;user-select:none;';
+                                        row.textContent = String(it.name || '');
+                                        row._qsRecord = it;
+                                        row.setAttribute('data-qs-item', '1');
+                                        row.addEventListener('mouseenter', () => { Array.from(popup.querySelectorAll('[data-qs-item]')).forEach(r => { r.style.backgroundColor=''; r.style.color=''; r.removeAttribute('data-selected'); }); row.style.backgroundColor='#0000aa'; row.style.color='#ffffff'; row.setAttribute('data-selected','1'); });
+                                        row.addEventListener('mouseleave', () => { if(row.getAttribute('data-selected')==='1'){ row.style.backgroundColor=''; row.style.color=''; row.removeAttribute('data-selected'); } });
+                                        row.addEventListener('click', () => {
+                                            try {
+                                                const rec = row._qsRecord;
+                                                if (rec) {
+                                                    const display = String(rec.name || '');
+                                                    this.setValue(rec.UID, display);
+                                                    this.text = display;
+                                                    try { if (this.element) this.element.dispatchEvent(new Event('input', { bubbles: true })); } catch(_){}
+                                                }
+                                                this._closeQsPopup();
+                                                try { if (this.element) this.element.focus(); } catch(_){}
+                                            } catch(_){}
+                                        });
+                                        popup.appendChild(row);
+                                    }
+                                }
+
+                                const rect = (containerRef || this.element || document.body).getBoundingClientRect();
+                                popup.style.left = (rect.left + (window.pageXOffset || document.documentElement.scrollLeft)) + 'px';
+                                popup.style.top = (rect.bottom + (window.pageYOffset || document.documentElement.scrollTop)) + 'px';
+                                document.body.appendChild(popup);
+                                this._qsPopup = popup;
+                                this._qsOpen = true;
+
+                                this._qsKeyCapture = (ev) => {
+                                    try {
+                                        if (!this._qsOpen) return;
+                                        const k = ev.key;
+                                        if (k !== 'ArrowDown' && k !== 'ArrowUp' && k !== 'Enter' && k !== 'Escape') return;
+                                        ev.preventDefault(); ev.stopPropagation();
+                                        const rows = Array.from(popup.querySelectorAll('[data-qs-item]'));
+                                        if (!rows.length) return;
+                                        let idx = rows.findIndex(r => r.getAttribute('data-selected') === '1');
+                                        if (k === 'ArrowDown') {
+                                            idx = (idx < rows.length - 1) ? idx + 1 : 0;
+                                            rows.forEach(r => { r.style.backgroundColor=''; r.style.color=''; r.removeAttribute('data-selected'); });
+                                            rows[idx].style.backgroundColor='#0000aa'; rows[idx].style.color='#ffffff'; rows[idx].setAttribute('data-selected','1');
+                                        } else if (k === 'ArrowUp') {
+                                            idx = (idx > 0) ? idx - 1 : rows.length - 1;
+                                            rows.forEach(r => { r.style.backgroundColor=''; r.style.color=''; r.removeAttribute('data-selected'); });
+                                            rows[idx].style.backgroundColor='#0000aa'; rows[idx].style.color='#ffffff'; rows[idx].setAttribute('data-selected','1');
+                                        } else if (k === 'Enter') {
+                                            const target = (idx >= 0 && rows[idx]) ? rows[idx] : (rows.length === 1 ? rows[0] : null);
+                                            if (target) target.click();
+                                        } else if (k === 'Escape') {
+                                            try { if (this.element) this.element.value = this.text || ''; } catch(_){}
+                                            this._closeQsPopup();
+                                            try { if (this.element) this.element.focus(); } catch(_){}
+                                        }
+                                    } catch(_){}
+                                };
+                                document.addEventListener('keydown', this._qsKeyCapture, true);
+
+                                this._qsDocHandler = (ev) => {
+                                    try { if (!popup.contains(ev.target) && !(this.inputContainer && this.inputContainer.contains(ev.target))) { this._closeQsPopup(); } } catch(_){}
+                                };
+                                document.addEventListener('click', this._qsDocHandler);
+
+                                this._qsScrollHandler = () => { try { this._closeQsPopup(); } catch(_){} };
+                                try { window.addEventListener('scroll', this._qsScrollHandler, true); } catch(_){}
+                                try { window.addEventListener('resize', this._qsScrollHandler); } catch(_){}
+                            } catch(_) {}
+                        };
+
+                        // Input event: debounced quick search
+                        this._qsInputHandler = (ev) => {
+                            try {
+                                if (!this._quickSearchEnabled) return;
+                                const text = this.element ? this.element.value : '';
+                                if (this._qsDebounce) { clearTimeout(this._qsDebounce); this._qsDebounce = null; }
+                                if (!text) {
+                                    this._closeQsPopup();
+                                    return;
+                                }
+                                // Skip search if text matches the last confirmed selection (e.g. after programmatic setValue)
+                                if (text === (this.text || '')) {
+                                    this._closeQsPopup();
+                                    return;
+                                }
+                                this._qsDebounce = setTimeout(async () => {
+                                    try {
+                                        const resp = await callServerMethod('uniForm', 'quickSearch', { tableName: table, searchText: text, limit: 10 });
+                                        const foundItems = (resp && Array.isArray(resp.items)) ? resp.items : [];
+                                        if (this.element && this.element.value === text) {
+                                            this._openQsPopup(foundItems, text);
+                                        }
+                                    } catch(e) {
+                                        try { this._closeQsPopup(); } catch(_){}
+                                    }
+                                }, 250);
+                            } catch(_){}
+                        };
+                        this.element.addEventListener('input', this._qsInputHandler);
+
+                        // Blur: revert text if user typed but didn't select
+                        this.element.addEventListener('blur', () => {
+                            try {
+                                if (!this._quickSearchEnabled) return;
+                                if (this._qsDebounce) { clearTimeout(this._qsDebounce); this._qsDebounce = null; }
+                                setTimeout(() => {
+                                    try {
+                                        if (this._qsOpen) return; // popup is open (e.g. focus moved to popup item), don't revert yet
+                                        const currentText = this.element ? this.element.value : '';
+                                        if (!currentText) {
+                                            this.rawValue = null; this.text = '';
+                                            try { if (this.element) this.element.dispatchEvent(new Event('input', { bubbles: true })); } catch(_){}
+                                        } else if (currentText !== (this.text || '')) {
+                                            try { if (this.element) this.element.value = this.text || ''; } catch(_){}
+                                        }
+                                    } catch(_){}
+                                }, 200);
+                            } catch(_){}
+                        });
+                    }
+                }
+            } catch(e) {}
 
             // Events
             this.element.addEventListener('input', (e) => {
