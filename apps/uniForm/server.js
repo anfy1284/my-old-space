@@ -513,6 +513,66 @@ async function dispatchServerEvent(eventName, payload, { tableName, sessionID })
     }
 }
 
+// ── Автозаполнение: загрузка и применение дефолтов пользователя ──────────────────────────────
+
+async function loadUserDefaultValues(sessionID) {
+    try {
+        const globalCtx = require('../../drive_root/globalServerContext');
+        const user = await globalCtx.getUserBySessionID(sessionID);
+        if (!user) return {};
+        const Model = globalCtx.modelsDB && globalCtx.modelsDB.UserSettingsDefaults;
+        if (!Model) return {};
+        const rows = await Model.findAll({ where: { userId: user.UID }, raw: true });
+        const map = {};
+        for (const r of rows) {
+            if (r.tableName && r.recordId) map[r.tableName] = { recordId: r.recordId, recordLabel: r.recordLabel || r.recordId };
+        }
+        return map;
+    } catch (e) {
+        console.error('[uniForm/loadUserDefaultValues] error:', e && e.message);
+        return {};
+    }
+}
+
+function applyAutofillFromFields(data, fields, defaultsMap) {
+    for (const f of fields) {
+        if (f.inputType !== 'recordSelector') continue;
+        const targetTable = (f.foreignKey && f.foreignKey.table) ||
+            (f.properties && f.properties.selection && f.properties.selection.table);
+        if (!targetTable) continue;
+        const def = defaultsMap[targetTable];
+        if (!def) continue;
+        const item = data.find(d => d.name === f.name);
+        if (!item || item.value) continue;
+        item.value = def.recordId;
+        item.selection = { id: def.recordId, display: def.recordLabel };
+    }
+}
+
+function applyAutofillFromLayout(data, layout, defaultsMap) {
+    function walk(items) {
+        if (!Array.isArray(items)) return;
+        for (const item of items) {
+            if (item.type === 'recordSelector' && item.data) {
+                const sel = item.properties && item.properties.selection;
+                const targetTable = sel && sel.table && !sel.table.includes('{') ? sel.table : null;
+                if (targetTable) {
+                    const def = defaultsMap[targetTable];
+                    if (def) {
+                        const dataItem = data.find(d => d.name === item.data);
+                        if (dataItem && !dataItem.value) {
+                            dataItem.value = def.recordId;
+                            dataItem.selection = { id: def.recordId, display: def.recordLabel };
+                        }
+                    }
+                }
+            }
+            if (item.layout) walk(item.layout);
+        }
+    }
+    walk(Array.isArray(layout) ? layout : [layout]);
+}
+
 // ── generateFormSpec ──────────────────────────────────────────────────────────────────────────
 async function generateFormSpec(tableName, params, sessionID) {
     try {
@@ -554,6 +614,11 @@ async function generateFormSpec(tableName, params, sessionID) {
                     const layout = JSON.parse(JSON.stringify(customLayoutObj.layout || []));
                     const data = (result && result.data) || [];
                     if (result && result.caption && layout[0]) layout[0].caption = result.caption;
+                    // Автозаполнение для новых записей
+                    if (!params || (!params.recordID && !params.recordId && !params.id)) {
+                        const dfltMap = await loadUserDefaultValues(sessionID);
+                        if (Object.keys(dfltMap).length > 0) applyAutofillFromLayout(data, layout, dfltMap);
+                    }
                     const datasetId = dataApp.storeDataset({
                         layout, data, params: params || {},
                         table: tableName,
@@ -655,6 +720,12 @@ async function generateFormSpec(tableName, params, sessionID) {
             } catch(e) {
                 console.error('[uniForm/generateFormSpec] UID pre-generation failed:', e && e.message);
             }
+        }
+
+        // Автозаполнение для новых записей
+        if (isNew) {
+            const dfltMap = await loadUserDefaultValues(sessionID);
+            if (Object.keys(dfltMap).length > 0) applyAutofillFromFields(data, fields, dfltMap);
         }
 
         if (!layout) {
