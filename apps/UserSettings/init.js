@@ -88,6 +88,19 @@ module.exports = async function (modelsDB) {
             }
         });
 
+        const mainMenu = require('../../apps/main_menu/server.js');
+        mainMenu.addMenuItems([{
+            id: 'main',
+            items: [{
+                caption: { i18n: 'user_settings_app_caption' },
+                action: 'open',
+                singleton: true,
+                appName: 'uniForm',
+                params: { mode: 'record', dbTable: 'user_settings' }
+                // icon берётся автоматически из layoutMemory (formIcon у user_settings)
+            }]
+        }]);
+
         console.log('[UserSettings/init] All layouts registered');
     } catch (e) {
         console.error('[UserSettings/init] Failed:', e && e.message || e);

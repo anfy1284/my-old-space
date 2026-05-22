@@ -38,7 +38,6 @@ function addMenuItems(items, position = 'end') {
     assignDynamicIds(copies);
     if (position === 'start') dynamicMenuItems.unshift(...copies);
     else dynamicMenuItems.push(...copies);
-    try { console.log('[main_menu] addMenuItems -> added items=' + JSON.stringify(copies, null, 2)); } catch(e){}
     return copies.map(i => i._dynamicId);
 }
 function removeMenuItemById(id) {
@@ -135,15 +134,60 @@ function resolveMenuIcons(items) {
     recurse(items);
 }
 
-async function getMainMenuCommands(appsJsonUrl = '/drive_forms/apps.json') {
+/**
+ * Рекурсивно переводит caption: { i18n: 'key' } → строку для текущей сессии пользователя.
+ * Мутирует items in-place. Вызывается после filterItemsByRole, до resolveMenuIcons.
+ */
+async function translateCaptions(items, sessionID) {
+    if (!Array.isArray(items)) return;
+    let tFn = null;
+    try {
+        const formsCtx = require('../../drive_forms/globalServerContext');
+        tFn = formsCtx.tForSession;
+    } catch (e) { return; }
+    const recurse = async (arr) => {
+        for (const item of arr) {
+            if (item.caption && typeof item.caption === 'object' && item.caption.i18n) {
+                try {
+                    item.caption = await tFn(item.caption.i18n, sessionID);
+                } catch (e) {
+                    item.caption = item.caption.i18n;
+                }
+            }
+            if (Array.isArray(item.items)) await recurse(item.items);
+        }
+    };
+    await recurse(items);
+}
+
+/**
+ * Рекурсивно фильтрует пункты меню по роли пользователя.
+ * Пункты с полем `roles` показываются только если userRole входит в список.
+ * Пункты без `roles` — всегда видны.
+ */
+function filterItemsByRole(items, userRole) {
+    if (!Array.isArray(items)) return items;
+    const result = [];
+    for (const item of items) {
+        if (item.roles) {
+            const allowed = Array.isArray(item.roles) ? item.roles : [item.roles];
+            if (!allowed.includes(userRole)) continue;
+        }
+        if (Array.isArray(item.items)) {
+            result.push(Object.assign({}, item, { items: filterItemsByRole(item.items, userRole) }));
+        } else {
+            result.push(item);
+        }
+    }
+    return result;
+}
+
+async function getMainMenuCommands(params = {}, sessionID = null) {
     const fs = require('fs').promises;
     const path = require('path');
     const result = [];
     if (Array.isArray(dynamicMenuItems) && dynamicMenuItems.length) {
-        try { console.log('[main_menu] getMainMenuCommands -> dynamicMenuItems:', JSON.stringify(dynamicMenuItems, null, 2)); } catch(e){}
         result.push(...cloneMenuItems(dynamicMenuItems));
-    } else {
-        try { console.log('[main_menu] getMainMenuCommands -> no dynamicMenuItems'); } catch(e){}
     }
     try {
         // consider apps.json from drive_forms, package root and project root
@@ -209,8 +253,22 @@ async function getMainMenuCommands(appsJsonUrl = '/drive_forms/apps.json') {
             } catch (e) { }
         }
     } catch (e) { }
-    resolveMenuIcons(result);
-    return result;
+    // Определяем роль пользователя для фильтрации пунктов меню
+    let userRole = null;
+    if (sessionID) {
+        try {
+            const formsCtx = require('../../drive_forms/globalServerContext');
+            const ctx = await formsCtx.getSessionContext(sessionID);
+            userRole = ctx && ctx.role;
+        } catch (e) {
+            console.error('[main_menu] Failed to resolve user role:', e.message);
+        }
+    }
+
+    const filtered = filterItemsByRole(result, userRole);
+    await translateCaptions(filtered, sessionID);
+    resolveMenuIcons(filtered);
+    return filtered;
 }
 
 module.exports = {

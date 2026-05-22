@@ -5,7 +5,7 @@
     "dependencies": {},
     "mainMenuCommands": [
         {"id": "main", "items": [
-            { "caption": "apps", "items": [
+            { "caption": "apps", "roles": ["admin"], "items": [
                 { "caption": "Tetris", "action": "open"}
             ]}
         ]}

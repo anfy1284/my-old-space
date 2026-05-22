@@ -9,7 +9,7 @@
         [
             {"id": "main", "items": 
                 [
-                    { "caption": "apps", "items": 
+                    { "caption": "apps", "roles": ["admin"], "items": 
                         [
                             { "caption": "Calculator", "action": "open"}
                         ]

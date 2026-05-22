@@ -19,7 +19,7 @@ module.exports = async function(modelsDB) {
                 {
                     id: 'main',
                     items: [
-                        { caption: 'Администрирование', items: adminItems }
+                        { caption: 'Администрирование', roles: ['admin'], items: adminItems }
                     ]
                 }
             ], 'start');

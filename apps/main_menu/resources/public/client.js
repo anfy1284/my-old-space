@@ -149,6 +149,7 @@
         return items.map(item => {
             const newItem = { caption: item.caption };
             if (item.icon) newItem.icon = item.icon;
+            if (item.singleton) newItem.singleton = item.singleton;
             if (item.items) {
                 newItem.items = transformItems(item.items);
             }
@@ -161,11 +162,12 @@
                     script.src = scriptUrl + '?t=' + new Date().getTime(); // Cache busting
 
                     const params = item.params;
+                    const openOptions = item.singleton ? { singleton: true } : undefined;
 
                     const tryOpen = () => {
                         try {
                             if (window.MySpace && typeof window.MySpace.open === 'function') {
-                                window.MySpace.open(item.appName, params).catch(e => console.error(e));
+                                window.MySpace.open(item.appName, params, openOptions).catch(e => console.error(e));
                                 return true;
                             }
                         } catch (e) { /* ignore */ }
@@ -221,8 +223,13 @@
                 const buttons = Object.values(mergedCommands).map(cmd => {
                     const btn = {
                         id: cmd.id,
-                        caption: cmd.caption || '', // id used as caption if missing, but for 'main' it's empty
-                        items: transformItems(cmd.items || [])
+                        caption: cmd.caption || '',
+                        items: transformItems(cmd.items || []),
+                        action: cmd.action || null,
+                        appName: cmd.appName || null,
+                        params: cmd.params || null,
+                        icon: cmd.icon || null,
+                        singleton: cmd.singleton || false
                     };
                     // Special case for 'main' button caption
                     if (cmd.id === 'main') {
@@ -297,11 +304,18 @@
                 const btn = new Button(this.container);
                 btn.setCaption(btnData.caption);
 
-                if (btnData.items) {
+                if (btnData.items && btnData.items.length > 0) {
                     btn.onClick = (e) => {
                         e.stopPropagation();
                         const rect = btn.getElement().getBoundingClientRect();
                         MenuRenderer.show(rect.left, rect.bottom, btnData.items);
+                    };
+                } else if (btnData.action === 'open' && btnData.appName) {
+                    btn.onClick = () => {
+                        if (window.MySpace && typeof window.MySpace.open === 'function') {
+                            const openOptions = btnData.singleton ? { singleton: true } : undefined;
+                            window.MySpace.open(btnData.appName, btnData.params || {}, openOptions).catch(e => console.error(e));
+                        }
                     };
                 } else {
                     btn.onClick = btnData.onClick;
@@ -331,6 +345,11 @@
                         btnElement.innerHTML = iconSvg;
                         btnElement.style.width = btnHeight + 'px';
                         btnElement.style.padding = '0';
+                    } else if (btnData.icon) {
+                        const iconImg = document.createElement('img');
+                        iconImg.src = btnData.icon;
+                        iconImg.style.cssText = 'width:16px;height:16px;flex-shrink:0;pointer-events:none;margin-right:4px;';
+                        btnElement.prepend(iconImg);
                     }
 
                     // Place button close to previous one and to left edge

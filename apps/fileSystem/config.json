@@ -25,6 +25,7 @@
             "items": [
                 {
                     "caption": "apps",
+                    "roles": ["admin"],
                     "items": [
                         {
                             "caption": "File System",

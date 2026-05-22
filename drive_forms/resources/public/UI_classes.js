@@ -434,9 +434,33 @@ if (typeof window !== 'undefined') {
                 try { if (descriptor && typeof descriptor.init === 'function') descriptor.init(); } catch (e) { console.error('MySpace.register.init error', e); }
             },
 
-            async open(name, params) {
+            async open(name, params, options) {
                 const desc = apps[name];
                 if (!desc) throw new Error('MySpace: app not registered: ' + name);
+
+                // Singleton-by-key: find existing instance by appName+mode+dbTable
+                if (options && options.singleton) {
+                    const p = params || {};
+                    const singletonKey = name + ':' + (p.mode || '') + ':' + (p.dbTable || p.tableName || '');
+                    for (const k in instances) {
+                        const inst = instances[k];
+                        if (inst && inst._singletonKey === singletonKey) {
+                            // Check that the form is still alive in the DOM
+                            const form = inst.form || inst;
+                            const isAlive = form && form.element && document.contains(form.element);
+                            if (!isAlive) {
+                                // Stale instance — remove and fall through to create a new one
+                                delete instances[k];
+                                break;
+                            }
+                            try {
+                                if (typeof form.restore === 'function') form.restore();
+                                else if (typeof form.activate === 'function') form.activate();
+                            } catch (e) { console.error(e); }
+                            return inst.id;
+                        }
+                    }
+                }
 
                 const allowMulti = !!(desc.config && desc.config.allowMultipleInstances);
                 if (!allowMulti) {
@@ -454,6 +478,11 @@ if (typeof window !== 'undefined') {
                 const id = genId(name);
                 inst.id = id;
                 inst.appName = name;
+                // Store singleton key so future calls can find this instance
+                if (options && options.singleton) {
+                    const p = params || {};
+                    inst._singletonKey = name + ':' + (p.mode || '') + ':' + (p.dbTable || p.tableName || '');
+                }
                 instances[id] = inst;
                 // Apply app icon from menu registry (covers standalone apps that don't use loadLayout)
                 try {
@@ -953,7 +982,7 @@ class Form extends UIObject {
             };
             btnClose.onclick = (e) => {
                 e.stopPropagation();
-                this.close();
+                try { this.doAction('cancel', { isStandard: true }); } catch (err) { this.close(); }
             };
 
             // Create content area
@@ -1421,7 +1450,7 @@ class Form extends UIObject {
                     } catch (e) {}
 
                     if (!isEditable) {
-                        try { this.close(); } catch (e) {}
+                        try { this.doAction('cancel', { isStandard: true }); } catch (err) { try { this.close(); } catch (e) {} }
                         try { event.preventDefault && event.preventDefault(); } catch (e) {}
                     }
                 } catch (e) {}

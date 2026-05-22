@@ -15,6 +15,7 @@
             "items": [
                 {
                     "caption": "apps",
+                    "roles": ["admin"],
                     "items": [
                         {
                             "caption": "User Settings",

@@ -1,4 +1,4 @@
-# ИНСТРУКЦИИ ДЛЯ AI АССИСТЕНТА (v3.5)
+# ИНСТРУКЦИИ ДЛЯ AI АССИСТЕНТА (v3.6)
 
 Этот документ — **правила работы**. Техническую структуру классов, методов и протоколов см. в [АРХИТЕКТУРА_ПРОЕКТА.md](АРХИТЕКТУРА_ПРОЕКТА.md).
 
@@ -176,6 +176,10 @@
 - ❌ **Скрытие стандартных кнопок тулбара таблицы через прикладной код**. Используй `"hiddenButtons": ["action1", "action2"]` в `properties` таблицы в лейауте (`.layout.json`). Доступные action: `select`, `cancel`, `recordAdd`, `recordDelete`, `recordOpen`, `listSettings`.
 - ❌ **Ручное описание кнопок OK/Сохранить/Отмена в лейауте формы через `"type": "button"`**. Используй `"type": "commandBar"` — стандартные кнопки встроены, диалоги подтверждения реализованы в `DataForm.doAction`. Прикладные кнопки добавляй через `extraButtons`. Подробности — раздел `commandBar` в `АРХИТЕКТУРА_ПРОЕКТА.md`.
 - ❌ **Кнопки "Выбрать" и "Отменить" видны вне режима выбора**. Они автоматически скрываются когда `appForm.selectMode !== true` — не нужно их прятать вручную.
+- ❌ **`singleton: true` только в пункте меню** без передачи `options` в `MySpace.open()`. Главное меню читает `item.singleton` и передаёт как третий аргумент `MySpace.open(name, params, { singleton: true })`. Если открываешь форму программно — также передавай третий аргумент явно.
+- ❌ **`roles: ['admin']` только в одном `config.json`** при ограничении раздела "apps". Раздел "apps" дублируется в каждом фреймворковом приложении (calculator, messenger, tetris, fileSystem, UserSettings, cpp_app и проектном ai_chat). Нужно добавлять `"roles": ["admin"]` во все сразу.
+- ❌ **`close()` напрямую в обработчике X-кнопки или Escape**. Вызов `close()` напрямую обходит `DataForm.doAction('cancel')` → диалог "Discard unsaved changes?" не показывается. Правильно: `doAction('cancel', { isStandard: true })`, с `try/catch → close()` как fallback для случаев когда `doAction` недоступен.
+- ❌ **`caption: 'Настройки'` для настроек пользователя**. Правильный перевод — "Настройки пользователя" (ru) / "User Settings" (en) / "Benutzereinstellungen" (de). Ключ `user_settings_app_caption` в `apps/UserSettings/i18n.json`.
 - ❌ **`this._dataMap = {}`** при post-save refresh или любом обновлении данных формы. Замена всего объекта `_dataMap` ломает замыкание `renderBodyRows` внутри `buildBody()` — оно захватывает ссылку на конкретный массив `rows` по ссылке. После замены объекта `data_updateValue` пишет в новый массив, а `renderBodyRows` рендерит старый → добавленные строки ТЧ не появляются. **Правило:** обновляй только нужные записи точечно (`this._dataMap[rec.name] = rec`), никогда не заменяй весь объект целиком.
 - ❌ **Обновление всех записей `controlsMap` при post-save refresh**. `controlsMap` — плоский map, содержащий не только поля формы верхнего уровня, но и каждую ячейку каждой строки таблицы (составные ключи вида `ts_booking_rooms__r0__roomId`). Если при обновлении вызвать `setValue(UID, undefined)` на ячейке таблицы — FK display-значение будет уничтожено (ячейка покажет UID вместо имени). **Правило:** строй `Set` из имён полей, вернувшихся от сервера (`freshBoth.data`), и обновляй через `controlsMap` только те контролы, чьё `fieldName` (из `element.dataset.field`) есть в этом `Set`.
 - ❌ **`_suppressModified = false` до `setModified(false)` в `finally`-блоке**. Гонка: DOM `input`-события от программного обновления полей могут успеть вызвать `setModified(true)` между снятием флага и сбросом `_modified`. **Правило:** сбрасывай атомарно без `finally`: `this._modified = false; this._suppressModified = false; super.setTitle(this._originalTitle)`.
@@ -248,6 +252,9 @@
 59. При нахождении бага типа «неправильный тип данных» — ищу корень в `getValue()` / `setValue()` базового класса, а не пишу `parseInt` в прикладном коде?
 60. Если в форме нужна панель управления (OK/Сохранить/Отмена) — используется `"type": "commandBar"` в лейауте, а не ручные кнопки? Приложение-специфичные кнопки добавлены в `extraButtons`, а не в отдельную группу рядом?
 61. При создании нового uniForm-приложения — задан ли `formIcon` в `saveLayout()`? Если задан `appCaption: { i18n: 'key' }` — добавлен ли ключ в `i18n.json` (минимум `en` + `ru`)?
+62. Если пункт меню должен открывать только одно окно — добавлен ли `singleton: true` и передан ли `options.singleton` в `MySpace.open()`?
+63. При добавлении приложения в раздел "apps" `config.json` — добавлен ли `"roles": ["admin"]` во **все** 7 файлов config.json (calculator, messenger, tetris, fileSystem, UserSettings, cpp_app, ai_chat)? Пропуск одного файла сделает пункт видимым для не-admin.
+64. При закрытии формы через X-кнопку или Escape — маршрутизируется ли вызов через `doAction('cancel', { isStandard: true })` а не напрямую `close()`? Прямой `close()` обходит диалог "Discard unsaved changes?".
 
 ---
 
