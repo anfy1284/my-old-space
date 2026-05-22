@@ -455,6 +455,20 @@ if (typeof window !== 'undefined') {
                 inst.id = id;
                 inst.appName = name;
                 instances[id] = inst;
+                // Apply app icon from menu registry (covers standalone apps that don't use loadLayout)
+                try {
+                    const registry = window.MySpaceAppIcons;
+                    if (registry) {
+                        const key = (params && params.dbTable) ? `${name}:${params.dbTable}` : name;
+                        const icon = registry[key] || null;
+                        if (icon) {
+                            const frm = (typeof inst.setFormIcon === 'function') ? inst
+                                      : (inst.form && typeof inst.form.setFormIcon === 'function') ? inst.form
+                                      : null;
+                            if (frm) frm.setFormIcon(icon);
+                        }
+                    }
+                } catch (e) {}
                 return id;
             },
 
@@ -472,6 +486,8 @@ class Form extends UIObject {
         this.title = '';
         this.titleBar = null;
         this.titleTextElement = null;
+        this.titleIconElement = null;
+        this.formIcon = null;
         this.contentArea = null;
         this.movable = true;
         this.resizable = true;
@@ -536,6 +552,30 @@ class Form extends UIObject {
             this.titleTextElement.textContent = title;
         } else if (this.titleBar) {
             this.titleBar.textContent = title;
+        }
+        if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('form-title-changed', { detail: { form: this } }));
+        }
+    }
+
+    setFormIcon(url) {
+        this.formIcon = url || null;
+        if (this.titleIconElement) {
+            if (url) {
+                this.titleIconElement.src = url;
+                this.titleIconElement.style.display = 'inline';
+            } else {
+                this.titleIconElement.style.display = 'none';
+            }
+        }
+        // Update taskbar button icon if it exists
+        if (this._taskbarIcon) {
+            if (url) {
+                this._taskbarIcon.src = url;
+                this._taskbarIcon.style.display = 'inline';
+            } else {
+                this._taskbarIcon.style.display = 'none';
+            }
         }
     }
 
@@ -767,6 +807,16 @@ class Form extends UIObject {
             this.titleBar.style.display = 'flex';
             this.titleBar.style.justifyContent = 'space-between';
             this.titleBar.style.alignItems = 'center';
+
+            // Title icon (shown before text when formIcon is set)
+            this.titleIconElement = document.createElement('img');
+            this.titleIconElement.classList.add('ui-title-icon');
+            this.titleIconElement.style.width = '16px';
+            this.titleIconElement.style.height = '16px';
+            this.titleIconElement.style.marginRight = '4px';
+            this.titleIconElement.style.flexShrink = '0';
+            this.titleIconElement.style.display = 'none';
+            this.titleBar.appendChild(this.titleIconElement);
 
             // Title text
             this.titleTextElement = document.createElement('span');
@@ -2542,6 +2592,11 @@ class DataForm extends Form {
                 try { this._datasetId = both.datasetId || null; } catch (e) { this._datasetId = null; }
                 try { this._clientScript = both.clientScript || null; } catch (e) {}
                 try { this._windowState = both.windowState || null; } catch (e) {}
+                // Apply app caption (human-readable translated name) and icon
+                try {
+                    if (both.appCaption) this.setTitle(both.appCaption);
+                    if (both.formIcon) this.setFormIcon(both.formIcon);
+                } catch (e) {}
                 this._dataMap = {};
                 if (both.data && Array.isArray(both.data)) {
                     for (const rec of both.data) {

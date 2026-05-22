@@ -11,7 +11,7 @@ module.exports = async function(modelsDB) {
 
         const adminItems = defs.map(d => {
             const tableName = d.tableName || d.name;
-            return { caption: tableName, action: 'open', appName: 'uniForm', params: { mode: 'list', dbTable: tableName }, icon: '/apps/general_icons/resources/public/16x16/catalog.png' };
+            return { caption: tableName, action: 'open', appName: 'uniForm', params: { mode: 'list', dbTable: tableName } };
         });
 
         if (adminItems.length) {

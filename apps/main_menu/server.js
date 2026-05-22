@@ -95,11 +95,50 @@ function clearDynamicMenu() {
 function getDynamicMenu() {
     return cloneMenuItems(dynamicMenuItems);
 }
+const ICON_DOCUMENT = '/apps/general_icons/resources/public/16x16/document.png';
+const ICON_CATALOG  = '/apps/general_icons/resources/public/16x16/catalog.png';
+
+/**
+ * Пробегает по дереву пунктов меню и для пунктов appName==='uniForm' + params.dbTable
+ * подставляет иконку из layoutMemory (или по типу сущности), если иконка ещё не задана.
+ * Вызывается в getMainMenuCommands() — после того как все init.js уже выполнились.
+ */
+function resolveMenuIcons(items) {
+    if (!Array.isArray(items)) return;
+    let layoutMemory = null;
+    let modelDefs = null;
+    try { layoutMemory = require('../../drive_root/layoutMemory'); } catch (e) {}
+
+    const getEntityIcon = (tableName) => {
+        try {
+            if (!modelDefs) {
+                const gCtx = require('../../drive_root/globalServerContext');
+                modelDefs = (gCtx.collectAllModelDefs().models || []);
+            }
+            const def = modelDefs.find(m => m.tableName === tableName);
+            const et = (def && def.entityConfig && def.entityConfig.entityType) || null;
+            return et === 'document' ? ICON_DOCUMENT : ICON_CATALOG;
+        } catch (e) { return ICON_CATALOG; }
+    };
+
+    const recurse = (arr) => {
+        for (const item of arr) {
+            if (!item.icon && item.appName === 'uniForm' && item.params && item.params.dbTable) {
+                const tableName = item.params.dbTable;
+                let icon = layoutMemory ? layoutMemory.getTableIcon(tableName) : null;
+                if (!icon) icon = getEntityIcon(tableName);
+                item.icon = icon;
+            }
+            if (Array.isArray(item.items)) recurse(item.items);
+        }
+    };
+    recurse(items);
+}
+
 async function getMainMenuCommands(appsJsonUrl = '/drive_forms/apps.json') {
     const fs = require('fs').promises;
     const path = require('path');
     const result = [];
-    // include runtime dynamic items first
     if (Array.isArray(dynamicMenuItems) && dynamicMenuItems.length) {
         try { console.log('[main_menu] getMainMenuCommands -> dynamicMenuItems:', JSON.stringify(dynamicMenuItems, null, 2)); } catch(e){}
         result.push(...cloneMenuItems(dynamicMenuItems));
@@ -170,6 +209,7 @@ async function getMainMenuCommands(appsJsonUrl = '/drive_forms/apps.json') {
             } catch (e) { }
         }
     } catch (e) { }
+    resolveMenuIcons(result);
     return result;
 }
 

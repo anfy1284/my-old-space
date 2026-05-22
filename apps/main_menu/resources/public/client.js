@@ -26,14 +26,27 @@
             items.forEach(item => {
                 const itemDiv = document.createElement('div');
                 Object.assign(itemDiv.style, {
-                    padding: '3px 20px 3px 5px',
+                    padding: '3px 20px 3px 4px',
                     cursor: 'default',
                     fontSize: '12px',
                     fontFamily: 'MS Sans Serif, sans-serif',
                     position: 'relative',
                     whiteSpace: 'nowrap',
-                    userSelect: 'none'
+                    userSelect: 'none',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px'
                 });
+
+                if (item.icon) {
+                    const iconImg = document.createElement('img');
+                    iconImg.src = item.icon;
+                    iconImg.style.width = '16px';
+                    iconImg.style.height = '16px';
+                    iconImg.style.flexShrink = '0';
+                    iconImg.style.pointerEvents = 'none';
+                    itemDiv.appendChild(iconImg);
+                }
 
                 const text = document.createElement('span');
                 text.textContent = item.caption;
@@ -135,6 +148,7 @@
     function transformItems(items) {
         return items.map(item => {
             const newItem = { caption: item.caption };
+            if (item.icon) newItem.icon = item.icon;
             if (item.items) {
                 newItem.items = transformItems(item.items);
             }
@@ -175,9 +189,24 @@
         });
     }
 
+    function buildAppIconRegistry(rawItems) {
+        if (!Array.isArray(rawItems)) return;
+        window.MySpaceAppIcons = window.MySpaceAppIcons || {};
+        for (const item of rawItems) {
+            if (item.icon && item.appName && item.action === 'open') {
+                const key = (item.params && item.params.dbTable)
+                    ? `${item.appName}:${item.params.dbTable}`
+                    : item.appName;
+                window.MySpaceAppIcons[key] = item.icon;
+            }
+            if (item.items) buildAppIconRegistry(item.items);
+        }
+    }
+
     function getMainMenuCommands() {
         callServerMethod('main_menu', 'getMainMenuCommands', {})
             .then(result => {
+                buildAppIconRegistry(result);
                 // Merge commands
                 const mergedCommands = {};
                 for (const cmd of result) {

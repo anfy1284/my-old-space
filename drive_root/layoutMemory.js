@@ -44,6 +44,10 @@ const _registeredPrefixes = new Set();
 // Any app can query getTableIcon(tableName) without needing its own layout.
 const _tableIcons = new Map();
 
+// Table-level caption registry: tableName → string | { i18n: 'key' }.
+// Populated automatically by saveLayout when appCaption is provided.
+const _tableCaptions = new Map();
+
 
 
 /**
@@ -76,20 +80,24 @@ function makePrefix(appName, mode, tableName) {
  * @param {string}          [opts.clientScript] — UID клиентского скрипта (loadScript).
  *   Используется как дефолт для всех events в лейауте, чтобы не дублировать clientScript в каждом binding.
  * @param {string}          [opts.formIcon] — URL иконки формы для заголовка и таскбара.
+ * @param {string|object}   [opts.appCaption] — Человекочитаемое имя формы/приложения.
+ *   Строка или объект { i18n: 'key' } — резолвится сервером при выдаче.
  */
-async function saveLayout({ appName, mode, tableName, roles, layout, events, clientScript, formIcon, windowState }) {
+async function saveLayout({ appName, mode, tableName, roles, layout, events, clientScript, formIcon, appCaption, windowState }) {
     if (!appName || !tableName || !Array.isArray(layout)) {
         throw new Error('[layoutMemory.saveLayout] appName, tableName and layout (Array) are required');
     }
     const effectiveMode = mode || 'record';
     const roleList = Array.isArray(roles) ? roles : (roles ? [String(roles)] : ['*']);
     for (const role of roleList) {
-        await memoryStore.set(NAMESPACE, makeKey(appName, effectiveMode, tableName, role), { layout, events: events || null, clientScript: clientScript || null, formIcon: formIcon || null, windowState: windowState || null });
+        await memoryStore.set(NAMESPACE, makeKey(appName, effectiveMode, tableName, role), { layout, events: events || null, clientScript: clientScript || null, formIcon: formIcon || null, appCaption: appCaption || null, windowState: windowState || null });
     }
     // Register prefix so hot-path can skip tables with no layouts at all
     _registeredPrefixes.add(makePrefix(appName, effectiveMode, tableName));
     // Auto-register table-level icon
     if (formIcon) _tableIcons.set(tableName, formIcon);
+    // Auto-register table-level caption
+    if (appCaption) _tableCaptions.set(tableName, appCaption);
     console.log(`[layoutMemory] saved layout for ${appName}/${effectiveMode}/${tableName} roles=[${roleList.join(',')}]`);
 }
 
@@ -140,14 +148,14 @@ async function getLayoutForUser(appName, tableName, userRole, sessionID, mode) {
     // 1. Exact role match (in-memory Map → instant)
     if (userRole) {
         const stored = memoryStore.getSync(NAMESPACE, makeKey(appName, effectiveMode, tableName, userRole));
-        if (stored) result = stored.layout !== undefined ? stored : { layout: stored, events: null, clientScript: null, formIcon: null };
+        if (stored) result = stored.layout !== undefined ? stored : { layout: stored, events: null, clientScript: null, formIcon: null, appCaption: null };
     }
 
     // 2. Wildcard match (any role)
     if (!result) {
         const fallback = memoryStore.getSync(NAMESPACE, makeKey(appName, effectiveMode, tableName, '*'));
         if (!fallback) return null;
-        result = fallback.layout !== undefined ? fallback : { layout: fallback, events: null, clientScript: null, formIcon: null };
+        result = fallback.layout !== undefined ? fallback : { layout: fallback, events: null, clientScript: null, formIcon: null, appCaption: null };
     }
 
     // 3. Translate { i18n: 'key' } captions when sessionID is provided
@@ -210,4 +218,14 @@ function getTableIcon(tableName) {
     return _tableIcons.get(tableName) || null;
 }
 
-module.exports = { saveLayout, getLayoutForUser, getUserRoleBySession, hasRegistered, getTableIcon };
+/**
+ * Get the caption registered for a table (set by any saveLayout with appCaption).
+ * Returns the raw value (string or { i18n: 'key' }) — caller must resolve i18n.
+ * @param {string} tableName
+ * @returns {string|object|null}
+ */
+function getTableCaption(tableName) {
+    return _tableCaptions.get(tableName) || null;
+}
+
+module.exports = { saveLayout, getLayoutForUser, getUserRoleBySession, hasRegistered, getTableIcon, getTableCaption };

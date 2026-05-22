@@ -42,6 +42,7 @@ module.exports = async function (modelsDB) {
             roles:     'user',
             layout,
             clientScript: clientUID,
+            formIcon:  '/apps/general_icons/resources/public/16x16/settings.png',
             events: {
                 onLoadData: { serverScript: serverScriptName, fn: 'onLoadData' },
                 onSave:     { serverScript: serverScriptName, fn: 'onSave' }

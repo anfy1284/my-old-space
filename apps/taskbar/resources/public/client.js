@@ -41,6 +41,7 @@ const Taskbar = {
         window.addEventListener('form-activated', (e) => this.updateActive(e.detail.form));
         window.addEventListener('form-minimized', (e) => this.updateActive(null));
         window.addEventListener('form-restored', (e) => this.updateActive(e.detail.form));
+        window.addEventListener('form-title-changed', (e) => this.updateTitle(e.detail.form));
         
         // Check existing forms
         if (typeof Form !== 'undefined' && Form._allForms) {
@@ -120,6 +121,15 @@ const Taskbar = {
         if (form._taskbarBtn) {
             form._taskbarBtn.remove();
             form._taskbarBtn = null;
+        }
+    },
+
+    updateTitle: function(form) {
+        if (!form || !form._taskbarBtn) return;
+        // Find the span text node inside the button
+        const spans = form._taskbarBtn.querySelectorAll('span');
+        if (spans.length > 0) {
+            spans[spans.length - 1].textContent = form.getTitle();
         }
     },
     

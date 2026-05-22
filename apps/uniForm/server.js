@@ -16,6 +16,60 @@ const globalServerContext = require('../../drive_root/globalServerContext');
 
 try { const dbg = memoryStore.debugKeysSync('datasets'); console.log('[uniForm] memoryStore init; datasetsCount=', dbg.count); } catch (e) {}
 
+// ── Иконки по умолчанию для типов сущностей ─────────────────────────────────────────────────
+const ICON_DOCUMENT  = '/apps/general_icons/resources/public/16x16/document.png';
+const ICON_CATALOG   = '/apps/general_icons/resources/public/16x16/catalog.png';
+
+/**
+ * Определяет иконку по умолчанию для таблицы:
+ * 1. Иконка из layoutMemory._tableIcons (задана через saveLayout formIcon)
+ * 2. Иконка по entityType из db.json (document → document.png, справочник/catalog → catalog.png)
+ * 3. Дефолтная общая иконка (catalog.png)
+ */
+function getDefaultIconForTable(tableName) {
+    try {
+        const layoutMemory2 = require('../../drive_root/layoutMemory');
+        const registered = layoutMemory2.getTableIcon(tableName);
+        if (registered) return registered;
+    } catch(e) {}
+
+    const entityType = getEntityTypeForTable(tableName);
+    if (entityType === 'document') return ICON_DOCUMENT;
+    if (entityType === 'catalog' || entityType === 'справочник') return ICON_CATALOG;
+    return ICON_CATALOG; // дефолт для таблиц без entityConfig
+}
+
+/**
+ * Читает entityConfig.entityType из db.json для таблицы.
+ */
+function getEntityTypeForTable(tableName) {
+    try {
+        const gCtx = require('../../drive_root/globalServerContext');
+        const { models } = gCtx.collectAllModelDefs();
+        const def = (models || []).find(m => m.tableName === tableName);
+        return (def && def.entityConfig && def.entityConfig.entityType) || null;
+    } catch(e) {
+        return null;
+    }
+}
+
+/**
+ * Резолвит appCaption в строку для сессии.
+ * Принимает строку или объект { i18n: 'key' }.
+ */
+async function resolveAppCaption(caption, sessionID) {
+    if (!caption) return null;
+    if (typeof caption === 'string') return caption;
+    if (typeof caption === 'object' && caption.i18n) {
+        try {
+            return await tForSession(caption.i18n, sessionID);
+        } catch(e) {
+            return caption.i18n;
+        }
+    }
+    return String(caption);
+}
+
 // ── Вспомогательная функция: проверить layoutMemory по нескольким именам приложений ──────────
 // Порядок: сначала 'uniForm', потом старые имена для backward-compat.
 const LAYOUT_APP_NAMES_LIST   = ['uniForm', 'uniListForm'];
@@ -78,10 +132,12 @@ async function getLayoutWithData(params, sessionID) {
 
                 const payload = { layout: clLayout, data: listData, params: params || {} };
                 const datasetId = dataApp.storeDataset(payload);
+                const resolvedCaption = await resolveAppCaption(customLayout.appCaption, sessionID);
                 return {
                     layout: clLayout, data: listData, datasetId,
                     clientScript: customLayout.clientScript || null,
                     formIcon: customLayout.formIcon || null,
+                    appCaption: resolvedCaption || null,
                     windowState: customLayout.windowState || 'maximized'
                 };
             }
@@ -102,9 +158,11 @@ async function getLayoutWithData(params, sessionID) {
             }];
             const payload = { layout, data: [], params: params || {} };
             const datasetId = dataApp.storeDataset(payload);
+            const formIcon = getDefaultIconForTable(tableName);
             const layoutMemory2 = require('../../drive_root/layoutMemory');
-            const formIcon = (tableName && layoutMemory2.getTableIcon(tableName)) || '/apps/general_icons/resources/public/16x16/catalog.png';
-            return { layout, data: [], datasetId, formIcon, windowState: 'maximized' };
+            const rawCaption = layoutMemory2.getTableCaption(tableName);
+            const appCaption = rawCaption ? await resolveAppCaption(rawCaption, sessionID) : null;
+            return { layout, data: [], datasetId, formIcon, appCaption, windowState: 'maximized' };
         }
 
         // ── РЕЖИМ ЗАПИСИ ──────────────────────────────────────────────────────────────────────
@@ -120,7 +178,7 @@ async function getLayoutWithData(params, sessionID) {
                     });
                     const spec = await generateFormSpec(resolvedParams.tableName, resolvedParams, sessionID);
                     return { layout: spec.layout, data: spec.data, datasetId: spec.datasetId,
-                             clientScript: spec.clientScript || null, formIcon: spec.formIcon || null, windowState: spec.windowState || null };
+                             clientScript: spec.clientScript || null, formIcon: spec.formIcon || null, appCaption: spec.appCaption || null, windowState: spec.windowState || null };
                 }
             } catch (e) {
                 console.error('[uniForm/getLayoutWithData] datasetId refresh error:', e && e.message || e);
@@ -137,7 +195,7 @@ async function getLayoutWithData(params, sessionID) {
                     table: params.tableName,
                     id: params.recordID || params.recordId || params.id
                 });
-                return { layout: spec.layout, data: spec.data, datasetId, clientScript: spec.clientScript || null, formIcon: spec.formIcon || null, windowState: spec.windowState || null };
+                return { layout: spec.layout, data: spec.data, datasetId, clientScript: spec.clientScript || null, formIcon: spec.formIcon || null, appCaption: spec.appCaption || null, windowState: spec.windowState || null };
             } catch (e) {
                 console.error('[uniForm/getLayoutWithData] generateFormSpec error:', e && e.message || e);
             }
@@ -584,6 +642,7 @@ async function generateFormSpec(tableName, params, sessionID) {
         let customLayoutObj = null;
         let clientScript = null;
         let formIcon = null;
+        let appCaption = null;
         let windowState = null;
         try {
             const layoutMemory = require('../../drive_root/layoutMemory');
@@ -595,6 +654,7 @@ async function generateFormSpec(tableName, params, sessionID) {
                     clientScript = customLayoutObj.clientScript || null;
                     formIcon = customLayoutObj.formIcon || null;
                     windowState = customLayoutObj.windowState || null;
+                    appCaption = customLayoutObj.appCaption || null;
                     break;
                 }
             }
@@ -626,7 +686,7 @@ async function generateFormSpec(tableName, params, sessionID) {
                         table: tableName,
                         id: params && (params.recordID || params.recordId || params.id)
                     });
-                    return { layout, data, datasetId, clientScript, formIcon, windowState };
+                    return { layout, data, datasetId, clientScript, formIcon, appCaption: await resolveAppCaption(appCaption, sessionID), windowState };
                 }
             } catch (e) {
                 console.error('[uniForm/generateFormSpec] onLoadData dispatch error:', e && e.message || e);
@@ -944,11 +1004,13 @@ async function generateFormSpec(tableName, params, sessionID) {
         });
 
         if (!formIcon) {
-            const layoutMemory2 = require('../../drive_root/layoutMemory');
-            formIcon = layoutMemory2.getTableIcon(tableName) || '/apps/general_icons/resources/public/16x16/catalog.png';
+            formIcon = getDefaultIconForTable(tableName);
         }
 
-        return { data, layout, datasetId, clientScript, formIcon, windowState };
+        // Resolve appCaption
+        const resolvedCaption = await resolveAppCaption(appCaption, sessionID);
+
+        return { data, layout, datasetId, clientScript, formIcon, appCaption: resolvedCaption, windowState };
     } catch (e) {
         console.error('[uniForm/generateFormSpec] failed:', e && e.message || e);
         return { data: [], layout: [] };
