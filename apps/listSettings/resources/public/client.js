@@ -126,6 +126,10 @@
                     // ---- Описание интерфейса исключительно через UI_classes ----
                     const layout = [
                         {
+                            type: 'group',
+                            noBorder: true,
+                            orientation: 'vertical',
+                            layout: [{
                             type: 'tabs',
                             name: 'mainTabs',
                             tabs: [
@@ -167,13 +171,14 @@
                                     layout: []
                                 }
                             ]
+                        }]
                         }
                     ];
 
                     const content = appForm.contentArea || (appForm.getContentArea && appForm.getContentArea());
                     if (!content) return;
                     content.innerHTML = '';
-                    content.style.padding = '0';
+                    content.style.padding = '8px';
                     await appForm.renderLayout(content, layout);
                 },
 

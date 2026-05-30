@@ -991,6 +991,7 @@ class Form extends UIObject {
             this.contentArea.style.width = '100%';
             this.contentArea.style.overflow = 'auto';
             this.contentArea.style.boxSizing = 'border-box';
+            this.contentArea.classList.add('ui-form-content');
             this.element.appendChild(this.contentArea);
 
             // Set contentArea height after adding to DOM
@@ -1978,10 +1979,11 @@ class DataForm extends Form {
         contentArea = contentArea || this.getContentArea();
         let element = null;
         const properties = item.properties || {};
-        // Резолвим caption: если пришёл объект { i18n: 'key' } — переводим через __t
+        // Резолвим caption: если пришёл объект { i18n: 'key' } — сервер должен был перевести,
+        // но на случай если не перевёл — берём ключ как fallback (не показываем [object Object])
         const rawCaption = (properties && properties.noCaption) ? '' : (item.caption || '');
         const caption = (rawCaption && typeof rawCaption === 'object' && rawCaption.i18n)
-            ? (typeof __t === 'function' ? __t(rawCaption.i18n) : (rawCaption.i18n || ''))
+            ? String(rawCaption.i18n)
             : rawCaption;
 
         // Helper to create textbox-like controls (single and multiline)
@@ -2211,6 +2213,8 @@ class DataForm extends Form {
                 const grp = new Group(contentArea, properties);
                 grp.setCaption(caption);
                 if (item.orientation) grp.orientation = item.orientation;
+                if (item.noBorder) grp.noBorder = true;
+                if (item.boldCaption) grp.boldCaption = true;
                 grp.Draw(contentArea);
                 if (grp.element && item.layout && Array.isArray(item.layout)) {
                     await this.renderLayout(grp.element, item.layout);
@@ -2264,14 +2268,6 @@ class DataForm extends Form {
                 //   extraButtons: [{ name, caption, icon, events, ... }] — добавить свои
                 const cmdBarEl = document.createElement('div');
                 cmdBarEl.classList.add('ui-toolbar');
-                // Компенсируем padding contentArea (10px): тянем фон к краям формы,
-                // но внутренний отступ для кнопок = 10px, чтобы совпасть с контентом ниже
-                cmdBarEl.style.marginTop    = '-10px';
-                cmdBarEl.style.marginLeft   = '-10px';
-                cmdBarEl.style.marginRight  = '-10px';
-                cmdBarEl.style.marginBottom = '5px';
-                cmdBarEl.style.paddingLeft  = '10px';
-                cmdBarEl.style.paddingRight = '10px';
                 contentArea.appendChild(cmdBarEl);
 
                 const hiddenCmdBtns = Array.isArray(item.hiddenButtons) ? item.hiddenButtons : [];
@@ -2407,7 +2403,15 @@ class DataForm extends Form {
             case 'tabs': {
                 try {
                     let tabsCtrl = null;
-                    try { tabsCtrl = new Tabs(contentArea, { tabs: item.tabs || [], appForm: this }); } catch (e) {
+                    // Captions should already be translated by server, but fallback to key if still an object
+                    const resolvedTabs = (item.tabs || []).map(t => {
+                        const rawCap = t.caption || '';
+                        const resolvedCap = (rawCap && typeof rawCap === 'object' && rawCap.i18n)
+                            ? String(rawCap.i18n)
+                            : rawCap;
+                        return Object.assign({}, t, { caption: resolvedCap });
+                    });
+                    try { tabsCtrl = new Tabs(contentArea, { tabs: resolvedTabs, appForm: this }); } catch (e) {
                         const TabsClass = (window.UI_Classes && window.UI_Classes.Tabs) ? window.UI_Classes.Tabs : null;
                         if (!TabsClass) throw new Error('Tabs control is not available');
                         tabsCtrl = new TabsClass(contentArea, { tabs: item.tabs || [], appForm: this });
@@ -5302,9 +5306,21 @@ class Group extends UIObject {
             this.element = document.createElement('fieldset');
             this.element.className = 'ui-group';
             try { this.element.classList.add('ui-fieldset'); } catch (e) {}
+            // noBorder group: no visible frame, caption still shown if set
+            if (this.noBorder) {
+                this.element.classList.add('ui-group-no-border');
+            }
+            if (this.boldCaption) {
+                this.element.classList.add('ui-group-bold-caption');
+            }
             const legend = document.createElement('legend');
             // Use caption (if provided) as legend text so it visually interrupts the border
-            legend.textContent = this.caption || this.title;
+            const legendText = this.caption || this.title;
+            legend.textContent = legendText;
+            // Hide legend when there is no caption text (prevents gap in border)
+            if (!legendText) {
+                legend.style.display = 'none';
+            }
             this.element.appendChild(legend);
 
             const orientation = this.orientation || 'horizontal';
@@ -8619,6 +8635,7 @@ class Tabs extends UIObject {
         this.element = null;
         this._header = null;
         this._content = null;
+        this._panes = []; // { btn, pane, tab }
     }
 
     setCaption(c) {
@@ -8629,22 +8646,21 @@ class Tabs extends UIObject {
         } } catch (e) {}
     }
 
-    async _renderTab(tab, btn) {
-        try {
-            if (!this._content) return;
-            // Highlight active tab button
-            if (this._header) {
-                this._header.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+    _showTab(idx) {
+        this._panes.forEach((p, i) => {
+            p.btn.classList.toggle('active', i === idx);
+            if (i === idx) {
+                p.pane.style.position = 'relative';
+                p.pane.style.visibility = 'visible';
+                p.pane.style.pointerEvents = '';
+            } else {
+                p.pane.style.position = 'absolute';
+                p.pane.style.top = '0';
+                p.pane.style.left = '0';
+                p.pane.style.visibility = 'hidden';
+                p.pane.style.pointerEvents = 'none';
             }
-            if (btn) btn.classList.add('active');
-
-            this._content.innerHTML = '';
-            if (tab && Array.isArray(tab.layout) && this.appForm && typeof this.appForm.renderLayout === 'function') {
-                await this.appForm.renderLayout(this._content, tab.layout);
-            }
-        } catch (e) {
-            console.error('Tabs._renderTab error', e);
-        }
+        });
     }
 
     Draw(container) {
@@ -8657,6 +8673,7 @@ class Tabs extends UIObject {
 
             const content = document.createElement('div');
             content.classList.add('ui-tabs-content');
+            content.style.position = 'relative';
 
             wrapper.appendChild(header);
             wrapper.appendChild(content);
@@ -8665,24 +8682,50 @@ class Tabs extends UIObject {
             this._header = header;
             this._content = content;
 
-            // create buttons
-            try {
-                this._header.innerHTML = '';
-                this.tabs.forEach((t, idx) => {
-                    const btn = document.createElement('button');
-                    try { btn.type = 'button'; } catch (e) {}
-                    btn.textContent = t.caption || ('Tab ' + (idx + 1));
-                    btn.tabIndex = -1;
-                    btn.addEventListener('click', async () => { try { await this._renderTab(t, btn); } catch (e) {} });
-                    this._header.appendChild(btn);
-                    if (idx === 0) {
-                        this._activeTab = t;
-                        this._activeBtn = btn;
+            // Create buttons and pane containers for all tabs
+            this.tabs.forEach((t, idx) => {
+                const btn = document.createElement('button');
+                try { btn.type = 'button'; } catch (e) {}
+                btn.textContent = t.caption || ('Tab ' + (idx + 1));
+                btn.tabIndex = -1;
+                btn.addEventListener('click', () => { try { this._showTab(idx); } catch (e) {} });
+                header.appendChild(btn);
+
+                const pane = document.createElement('div');
+                pane.style.width = '100%';
+                // First tab visible, rest stacked behind as absolute
+                if (idx === 0) {
+                    pane.style.position = 'relative';
+                    pane.style.visibility = 'visible';
+                    btn.classList.add('active');
+                } else {
+                    pane.style.position = 'absolute';
+                    pane.style.top = '0';
+                    pane.style.left = '0';
+                    pane.style.visibility = 'hidden';
+                    pane.style.pointerEvents = 'none';
+                }
+                content.appendChild(pane);
+                this._panes.push({ btn, pane, tab: t });
+            });
+
+            // Render ALL tabs upfront, then fix min-height to tallest pane
+            if (this.appForm && typeof this.appForm.renderLayout === 'function') {
+                const renderAll = async () => {
+                    for (let i = 0; i < this._panes.length; i++) {
+                        try {
+                            await this.appForm.renderLayout(this._panes[i].pane, this._panes[i].tab.layout || []);
+                        } catch (e) { console.error('Tabs pane render error', e); }
                     }
-                });
-                if (this.tabs.length > 0) this._renderTab(this._activeTab, this._activeBtn);
-            } catch (e) {
-                // ignore
+                    // After all panes rendered — lock min-height to tallest pane
+                    requestAnimationFrame(() => {
+                        try {
+                            const maxH = Math.max(...this._panes.map(p => p.pane.offsetHeight || 0));
+                            if (maxH > 0) content.style.minHeight = maxH + 'px';
+                        } catch (e) {}
+                    });
+                };
+                renderAll().catch(e => console.error('Tabs renderAll error', e));
             }
         }
 

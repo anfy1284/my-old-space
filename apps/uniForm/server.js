@@ -54,6 +54,50 @@ function getEntityTypeForTable(tableName) {
 }
 
 /**
+ * Рекурсивно переводит все { i18n: 'key' } объекты в дереве layout.
+ * Обрабатывает: item.caption, item.options[].caption, tab.caption,
+ *               item.layout[], item.tabs[].layout[].
+ * Мутирует объекты in-place.
+ */
+async function translateLayoutI18n(items, sessionID) {
+    if (!Array.isArray(items)) return;
+    for (const item of items) {
+        if (!item || typeof item !== 'object') continue;
+        // Translate item caption
+        if (item.caption && typeof item.caption === 'object' && item.caption.i18n) {
+            try { item.caption = await tForSession(item.caption.i18n, sessionID); }
+            catch(e) { item.caption = item.caption.i18n; }
+        }
+        // Translate options captions (emunList etc.)
+        if (Array.isArray(item.options)) {
+            for (const opt of item.options) {
+                if (opt && opt.caption && typeof opt.caption === 'object' && opt.caption.i18n) {
+                    try { opt.caption = await tForSession(opt.caption.i18n, sessionID); }
+                    catch(e) { opt.caption = opt.caption.i18n; }
+                }
+            }
+        }
+        // Recurse into nested layout
+        if (Array.isArray(item.layout)) {
+            await translateLayoutI18n(item.layout, sessionID);
+        }
+        // Recurse into tabs
+        if (Array.isArray(item.tabs)) {
+            for (const tab of item.tabs) {
+                if (!tab || typeof tab !== 'object') continue;
+                if (tab.caption && typeof tab.caption === 'object' && tab.caption.i18n) {
+                    try { tab.caption = await tForSession(tab.caption.i18n, sessionID); }
+                    catch(e) { tab.caption = tab.caption.i18n; }
+                }
+                if (Array.isArray(tab.layout)) {
+                    await translateLayoutI18n(tab.layout, sessionID);
+                }
+            }
+        }
+    }
+}
+
+/**
  * Резолвит appCaption в строку для сессии.
  * Принимает строку или объект { i18n: 'key' }.
  */
@@ -133,6 +177,10 @@ async function getLayoutWithData(params, sessionID) {
                 const payload = { layout: clLayout, data: listData, params: params || {} };
                 const datasetId = dataApp.storeDataset(payload);
                 const resolvedCaption = await resolveAppCaption(customLayout.appCaption, sessionID);
+                // Translate all { i18n: 'key' } objects in list layout
+                if (Array.isArray(clLayout)) {
+                    await translateLayoutI18n(clLayout, sessionID);
+                }
                 return {
                     layout: clLayout, data: listData, datasetId,
                     clientScript: customLayout.clientScript || null,
@@ -1009,6 +1057,11 @@ async function generateFormSpec(tableName, params, sessionID) {
 
         // Resolve appCaption
         const resolvedCaption = await resolveAppCaption(appCaption, sessionID);
+
+        // Translate all { i18n: 'key' } objects in layout before sending to client
+        if (Array.isArray(layout)) {
+            await translateLayoutI18n(layout, sessionID);
+        }
 
         return { data, layout, datasetId, clientScript, formIcon, appCaption: resolvedCaption, windowState };
     } catch (e) {

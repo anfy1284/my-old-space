@@ -206,7 +206,7 @@ html, body {
 .ui-group {
   box-sizing: border-box;
   padding: 8px;
-  margin: 8px 0;
+  margin: 0; /* spacing handled by parent flex gap */
   background: var(--color-mid);
   /* Draw framing using two pseudo-elements: light frame and a dark frame shifted -1px,-1px */
   border: none;
@@ -285,6 +285,32 @@ html, body {
 
 /* Nested groups inherit same framing */
 
+/* noBorder group — no visible frame, no padding offset (content flush with edges) */
+.ui-group-no-border::before,
+.ui-group-no-border::after {
+    display: none;
+}
+.ui-group-no-border {
+    margin: 0;
+    padding: 0;
+}
+/* Legend repositioned to top-left corner (no border to sit on) */
+.ui-group-no-border > legend {
+    left: 0;
+    top: 0;
+    transform: none;
+    padding: 0;
+    background: transparent;
+}
+/* When noBorder group has a visible caption — add top padding to make room for it */
+.ui-group-no-border.ui-group-bold-caption {
+    padding-top: 16px;
+}
+/* Bold caption group — legend text is bold */
+.ui-group-bold-caption > legend {
+    font-weight: bold;
+}
+
 
 /* Additional UI component styles (moved from UI_classes.js) */
 .ui-form {
@@ -318,9 +344,10 @@ html, body {
 .ui-title-button { width:18px; height:18px; padding:0; margin:0; display:flex; align-items:center; justify-content:center; line-height:18px; box-sizing:border-box; background:transparent; border:none; outline:none; cursor:default; }
 
 .ui-form-content { position:relative; width:100%; overflow:auto; box-sizing:border-box; 
-  /* Flexbox layout для вертикального размещения элементов */
   display: flex;
   flex-direction: column;
+  gap: 14px;
+  padding: 4px;
 }
 
 /* Все прямые дочерние элементы content area по умолчанию не растягиваются по вертикали */
@@ -538,14 +565,14 @@ input[type="checkbox"],
 .ui-tabs {
     display: flex;
     flex-direction: column;
-    padding: 6px;
+    margin-top: -8px; /* reduce gap after toolbar: 14px - 8px = 6px */
 }
 
 .ui-tabs-header {
     display: flex;
     flex-direction: row;
     align-items: flex-end;
-    padding-left: 2px;
+    padding-left: 0;
     z-index: 2;
 }
 
@@ -554,14 +581,14 @@ input[type="checkbox"],
     font-size: 11px;
     background-color: var(--color-mid);
     border: none;
-    padding: 3px 8px;
+    padding: 3px 10px;
     margin-right: 2px;
     position: relative;
     outline: none;
-    border-top: 1px solid var(--color-light);
-    border-left: 1px solid var(--color-light);
-    border-right: 1px solid var(--color-dark);
-    border-bottom: 1px solid var(--color-mid);
+    border-top: 2px solid var(--color-light);
+    border-left: 2px solid var(--color-light);
+    border-right: 2px solid #808080;
+    border-bottom: 2px solid var(--color-mid);
     border-radius: 2px 2px 0 0;
     cursor: default;
 }
@@ -571,32 +598,26 @@ input[type="checkbox"],
     padding-bottom: 4px;
     margin-top: -2px;
     z-index: 3;
-    border-bottom: 1px solid var(--color-mid);
+    border-bottom: 2px solid var(--color-mid);
 }
 
 .ui-tabs-content {
     background-color: var(--color-mid);
-    border-top: 1px solid var(--color-light);
-    border-left: 1px solid var(--color-light);
-    border-right: 1px solid var(--color-dark);
-    border-bottom: 1px solid var(--color-dark);
+    border-top: 2px solid var(--color-light);
+    border-left: 2px solid var(--color-light);
+    border-right: 2px solid #808080;
+    border-bottom: 2px solid #808080;
     padding: 8px;
-    margin-top: -1px;
+    margin-top: -2px;
     position: relative;
     z-index: 1;
-    min-height: 100px;
+    min-height: 60px;
     display: flex;
     flex-direction: column;
 }
 
-/* Второй контур для 3D эффекта вкладок */
 .ui-tabs-content::after {
-    content: '';
-    position: absolute;
-    top: 0; left: 0; right: 0; bottom: 0;
-    pointer-events: none;
-    border-right: 1px solid #000;
-    border-bottom: 1px solid #000;
+    display: none;
 }
 
 
