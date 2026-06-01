@@ -1,0 +1,56 @@
+[
+    {
+        "type": "group",
+        "name": "grpLogin",
+        "orientation": "vertical",
+        "noBorder": true,
+        "caption": "",
+        "layout": [
+            {
+                "type": "textbox",
+                "name": "username",
+                "caption": { "i18n": "login_username" }
+            },
+            {
+                "type": "textbox",
+                "name": "password",
+                "caption": { "i18n": "login_password" },
+                "properties": { "isPassword": true }
+            },
+            {
+                "type": "textbox",
+                "name": "confirmPassword",
+                "caption": { "i18n": "login_confirm_password" },
+                "properties": { "isPassword": true }
+            },
+            {
+                "type": "button",
+                "name": "btnLogin",
+                "caption": { "i18n": "login_btn_login" },
+                "icon": "/apps/general_icons/resources/public/16x16/select.png",
+                "events": { "onClick": "onLogin" }
+            },
+            {
+                "type": "button",
+                "name": "btnCreate",
+                "caption": { "i18n": "login_btn_create" },
+                "icon": "/apps/general_icons/resources/public/16x16/add.png",
+                "events": { "onClick": "onCreate" }
+            },
+            {
+                "type": "button",
+                "name": "btnGuest",
+                "caption": { "i18n": "login_btn_guest" },
+                "icon": "/apps/general_icons/resources/public/16x16/user.png",
+                "events": { "onClick": "onGuest" }
+            },
+            {
+                "type": "button",
+                "name": "btnCancel",
+                "caption": { "i18n": "login_btn_cancel" },
+                "icon": "/apps/general_icons/resources/public/16x16/cancel.png",
+                "events": { "onClick": "onCancel" }
+            }
+        ]
+    }
+]

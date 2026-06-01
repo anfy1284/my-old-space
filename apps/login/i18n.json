@@ -1,4 +1,64 @@
 {
+    "login_app_title": {
+        "en": "Sign in",
+        "ru": "Вход",
+        "de": "Anmeldung"
+    },
+    "login_username": {
+        "en": "Username",
+        "ru": "Имя пользователя",
+        "de": "Benutzername"
+    },
+    "login_password": {
+        "en": "Password",
+        "ru": "Пароль",
+        "de": "Passwort"
+    },
+    "login_confirm_password": {
+        "en": "Confirm password",
+        "ru": "Повторите пароль",
+        "de": "Passwort bestätigen"
+    },
+    "login_btn_login": {
+        "en": "Sign in",
+        "ru": "Войти",
+        "de": "Anmelden"
+    },
+    "login_btn_create": {
+        "en": "Create account",
+        "ru": "Создать аккаунт",
+        "de": "Konto erstellen"
+    },
+    "login_btn_confirm_create": {
+        "en": "Confirm",
+        "ru": "Подтвердить",
+        "de": "Bestätigen"
+    },
+    "login_btn_guest": {
+        "en": "Continue as guest",
+        "ru": "Войти как гость",
+        "de": "Als Gast fortfahren"
+    },
+    "login_btn_cancel": {
+        "en": "Cancel",
+        "ru": "Отмена",
+        "de": "Abbrechen"
+    },
+    "login_err_required": {
+        "en": "Username and password are required",
+        "ru": "Введите имя пользователя и пароль",
+        "de": "Benutzername und Passwort erforderlich"
+    },
+    "login_err_mismatch": {
+        "en": "Passwords do not match",
+        "ru": "Пароли не совпадают",
+        "de": "Passwörter stimmen nicht überein"
+    },
+    "login_err_failed": {
+        "en": "Operation failed",
+        "ru": "Не удалось выполнить операцию",
+        "de": "Vorgang fehlgeschlagen"
+    },
     "Username and password required": {
         "en": "Username and password required",
         "ru": "Необходимо указать имя пользователя и пароль",
@@ -18,15 +78,5 @@
         "en": "User already exists",
         "ru": "Пользователь уже существует",
         "de": "Benutzer existiert bereits"
-    },
-    "Cannot login as guest with password": {
-        "en": "Cannot login as guest with password",
-        "ru": "Гостевой вход с паролем недопустим",
-        "de": "Gastanmeldung mit Passwort nicht möglich"
-    },
-    "sessionID required": {
-        "en": "Session ID required",
-        "ru": "Идентификатор сессии обязателен",
-        "de": "Sitzungs-ID erforderlich"
     }
 }

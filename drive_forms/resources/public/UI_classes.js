@@ -982,7 +982,7 @@ class Form extends UIObject {
             };
             btnClose.onclick = (e) => {
                 e.stopPropagation();
-                try { this.doAction('cancel', { isStandard: true }); } catch (err) { this.close(); }
+                this.close();
             };
 
             // Create content area
@@ -1451,7 +1451,7 @@ class Form extends UIObject {
                     } catch (e) {}
 
                     if (!isEditable) {
-                        try { this.doAction('cancel', { isStandard: true }); } catch (err) { try { this.close(); } catch (e) {} }
+                        try { this.close(); } catch (err) {}
                         try { event.preventDefault && event.preventDefault(); } catch (e) {}
                     }
                 } catch (e) {}
@@ -1897,27 +1897,22 @@ class DataForm extends Form {
         }
     }
 
-    // Override close to prompt save if modified
+    // Override close to prompt discard if modified
     close() {
         if (this._closing) { super.close(); return; }
         if (!this._modified) { this._closing = true; super.close(); return; }
         // Show confirmation dialog
         const self = this;
         if (typeof showConfirm === 'function') {
-            showConfirm(__t('Data has been modified. Save changes?'), async () => {
-                // "Да" — save then close
-                try { await self.doAction('save'); } catch(e) { console.error(e); }
+            showConfirm(__t('Discard unsaved changes?'), () => {
                 self._closing = true;
                 self._modified = false;
-                super.close.call(self);
-            }, () => {
-                // "Нет" — close without saving
-                self._closing = true;
-                self._modified = false;
+                if (self._originalTitle) super.setTitle.call(self, self._originalTitle);
                 super.close.call(self);
             });
         } else {
             this._closing = true;
+            this._modified = false;
             super.close();
         }
     }
@@ -2268,6 +2263,9 @@ class DataForm extends Form {
                 //   extraButtons: [{ name, caption, icon, events, ... }] — добавить свои
                 const cmdBarEl = document.createElement('div');
                 cmdBarEl.classList.add('ui-toolbar');
+                // Компенсируем padding contentArea (10px) — тулбар должен быть вплотную
+                // к верхнему и боковым краям формы, как в Win95-диалогах.
+                cmdBarEl.style.margin = '-10px -10px 5px -10px';
                 contentArea.appendChild(cmdBarEl);
 
                 const hiddenCmdBtns = Array.isArray(item.hiddenButtons) ? item.hiddenButtons : [];
@@ -2847,26 +2845,7 @@ class DataForm extends Form {
             return;
         }
         if (action === 'cancel') {
-            // Если данные не изменены — закрываем сразу.
-            // Если изменены — спрашиваем "Отменить изменения?".
-            if (!this._modified) {
-                this._closing = true;
-                this.close();
-            } else {
-                const self = this;
-                if (typeof showConfirm === 'function') {
-                    showConfirm(__t('Discard unsaved changes?'), () => {
-                        self._closing = true;
-                        self._modified = false;
-                        if (self._originalTitle) super.setTitle(self._originalTitle);
-                        self.close();
-                    });
-                } else {
-                    this._closing = true;
-                    this._modified = false;
-                    this.close();
-                }
-            }
+            this.close();
             return;
         }
         return super.doAction(action, params);
