@@ -241,6 +241,12 @@ async function buildLayout(modelsDB) {
                     caption: { i18n: 'Apply' },
                     icon:    '/apps/general_icons/resources/public/16x16/save.png',
                     events:  { onClick: 'applySettings' }
+                },
+                {
+                    name:    'btnChangePassword',
+                    caption: { i18n: 'cp_btn_open' },
+                    icon:    '/apps/general_icons/resources/public/16x16/user.png',
+                    events:  { onClick: 'openChangePassword' }
                 }
             ]
         },

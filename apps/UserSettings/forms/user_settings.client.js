@@ -28,4 +28,13 @@ async function applySettings(ev, ctx) {
     showAlert(__t('Settings saved'));
 }
 
-return { applySettings };
+// Открывает форму смены пароля из приложения login (mode: 'changePassword').
+function openChangePassword(ev, ctx) {
+    if (window.MySpace && typeof window.MySpace.open === 'function') {
+        window.MySpace.open('login', { mode: 'changePassword' });
+    } else {
+        console.error('[UserSettings] MySpace.open is not available');
+    }
+}
+
+return { applySettings, openChangePassword };

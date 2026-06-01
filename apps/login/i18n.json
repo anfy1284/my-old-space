@@ -24,16 +24,6 @@
         "ru": "Войти",
         "de": "Anmelden"
     },
-    "login_btn_create": {
-        "en": "Create account",
-        "ru": "Создать аккаунт",
-        "de": "Konto erstellen"
-    },
-    "login_btn_confirm_create": {
-        "en": "Confirm",
-        "ru": "Подтвердить",
-        "de": "Bestätigen"
-    },
     "login_btn_guest": {
         "en": "Continue as guest",
         "ru": "Войти как гость",
@@ -58,6 +48,56 @@
         "en": "Operation failed",
         "ru": "Не удалось выполнить операцию",
         "de": "Vorgang fehlgeschlagen"
+    },
+    "cp_app_title": {
+        "en": "Change password",
+        "ru": "Смена пароля",
+        "de": "Passwort ändern"
+    },
+    "cp_old_password": {
+        "en": "Current password",
+        "ru": "Текущий пароль",
+        "de": "Aktuelles Passwort"
+    },
+    "cp_new_password": {
+        "en": "New password",
+        "ru": "Новый пароль",
+        "de": "Neues Passwort"
+    },
+    "cp_btn_submit": {
+        "en": "Change password",
+        "ru": "Сменить пароль",
+        "de": "Passwort ändern"
+    },
+    "cp_btn_open": {
+        "en": "Change password",
+        "ru": "Сменить пароль",
+        "de": "Passwort ändern"
+    },
+    "cp_success": {
+        "en": "Password changed",
+        "ru": "Пароль изменён",
+        "de": "Passwort geändert"
+    },
+    "cp_err_old_required": {
+        "en": "Enter your current password",
+        "ru": "Введите текущий пароль",
+        "de": "Aktuelles Passwort eingeben"
+    },
+    "cp_err_new_required": {
+        "en": "Enter a new password",
+        "ru": "Введите новый пароль",
+        "de": "Neues Passwort eingeben"
+    },
+    "New password is required": {
+        "en": "New password is required",
+        "ru": "Необходимо указать новый пароль",
+        "de": "Neues Passwort erforderlich"
+    },
+    "User not authorized": {
+        "en": "User not authorized",
+        "ru": "Пользователь не авторизован",
+        "de": "Benutzer nicht autorisiert"
     },
     "Username and password required": {
         "en": "Username and password required",

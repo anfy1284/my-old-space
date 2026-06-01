@@ -6,10 +6,8 @@
 // Регистрируется в init.js через loadServerScript('login.actions', ...).
 // Каждая функция получает (params, ctx), где ctx = { sessionID, user, role }.
 //
-// Аутентификация выполняется штатными API фреймворка:
-//   - globalServerContext.createNewUser / createGuestUser — создание пользователя и привязка сессии
-//   - Utilities.hashPassword / validatePassword            — работа с паролем
-//   - modelsDB.Users / modelsDB.Sessions                   — поиск и обновление сессии
+// ВНИМАНИЕ: саморегистрация удалена, гостевой вход отключён — у нас ERP, пользователи
+// заводятся только администратором.
 
 const { tForSession } = require('../../../drive_forms/globalServerContext');
 const globalCtx = require('../../../drive_root/globalServerContext');
@@ -17,6 +15,7 @@ const globalCtx = require('../../../drive_root/globalServerContext');
 module.exports = function (modelsDB, Utilities) {
 
     // Вход по имени и паролю. Привязывает текущую сессию к найденному пользователю.
+    // Возвращает mustChangePassword — клиент по нему решает, показать ли форму смены пароля.
     async function login(params, ctx) {
         const sessionID = ctx && ctx.sessionID;
         const { username, password } = params || {};
@@ -41,35 +40,64 @@ module.exports = function (modelsDB, Utilities) {
             await modelsDB.Sessions.create({ sessionId: sessionID, userId: user.UID });
         }
 
-        return { success: true };
+        return { success: true, mustChangePassword: !!user.mustChangePassword };
     }
 
-    // Регистрация нового пользователя. createNewUser сам привязывает сессию.
-    async function createUser(params, ctx) {
+    // Смена пароля текущего (по сессии) пользователя.
+    //   - Принудительная смена (флаг mustChangePassword) — старый пароль НЕ требуется.
+    //   - Добровольная смена (флаг не стоит) — требуется верный старый пароль.
+    // После успешной смены флаг mustChangePassword сбрасывается.
+    async function changePassword(params, ctx) {
         const sessionID = ctx && ctx.sessionID;
-        const { username, password } = params || {};
-        if (!username || !password) {
-            return { success: false, error: await tForSession('Username and password required', sessionID) };
+        const { oldPassword, newPassword } = params || {};
+
+        const sessionUser = await globalCtx.getUserBySessionID(sessionID);
+        if (!sessionUser) {
+            return { success: false, error: await tForSession('User not authorized', sessionID) };
+        }
+        if (!newPassword) {
+            return { success: false, error: await tForSession('New password is required', sessionID) };
         }
 
-        const existing = await modelsDB.Users.findOne({ where: { name: username } });
-        if (existing) {
-            return { success: false, error: await tForSession('User already exists', sessionID) };
+        // Полная запись (с password_hash и флагом) для проверки и обновления.
+        const user = await modelsDB.Users.scope('withPassword').findOne({ where: { UID: sessionUser.UID } });
+        if (!user) {
+            return { success: false, error: await tForSession('User not found', sessionID) };
         }
 
-        const user = await globalCtx.createNewUser(sessionID, username, ['mySpace'], ['user']);
-        const hashedPassword = await Utilities.hashPassword(password);
-        await user.update({ password_hash: hashedPassword });
+        // Добровольная смена — подтверждаем личность старым паролем.
+        if (!user.mustChangePassword) {
+            const ok = await Utilities.validatePassword(oldPassword || '', user.password_hash || '');
+            if (!ok) {
+                return { success: false, error: await tForSession('Invalid password', sessionID) };
+            }
+        }
+
+        const hashedPassword = await Utilities.hashPassword(newPassword);
+        await user.update({ password_hash: hashedPassword, mustChangePassword: false });
 
         return { success: true };
     }
 
-    // Гостевой вход: создаёт гостевого пользователя и привязывает сессию.
+    // Информация для точки входа: авторизован ли пользователь и его роль.
+    // По ней autoStart-точка решает, показывать ли форму входа (только для неавторизованных).
+    async function getBootInfo(params, ctx) {
+        return {
+            authenticated: !!(ctx && ctx.user),
+            role: (ctx && ctx.role) || null
+        };
+    }
+
+    // ── Гостевой вход временно отключён (гостей пока нет; всё через админа) ──────
+    // Чтобы вернуть: убери ранний return и верни кнопку/обработчик на клиенте.
     async function loginAsGuest(params, ctx) {
+        return { success: false, error: await tForSession('Guest login is disabled', ctx && ctx.sessionID) };
+        /*
         const sessionID = ctx && ctx.sessionID;
         await globalCtx.createGuestUser(sessionID, ['mySpace'], ['public']);
         return { success: true };
+        */
     }
 
-    return { login, createUser, loginAsGuest };
+    return { login, changePassword, getBootInfo, loginAsGuest };
 };

@@ -74,6 +74,11 @@
                     "type": "STRING",
                     "allowNull": false,
                     "defaultValue": "eng"
+                },
+                "mustChangePassword": {
+                    "type": "BOOLEAN",
+                    "allowNull": false,
+                    "defaultValue": false
                 }
             },
             "options": {

@@ -3,12 +3,17 @@
 // Точка регистрации приложения "login".
 // Автоматически вызывается фреймворком при старте (drive_forms/init.js).
 //
-// login — standalone-приложение для роли nologged (uniForm недоступен до входа).
-// Серверный лейаут (forms/login.layout.json) отдаётся клиенту через серверную
-// функцию getFormSpec, клиент рендерит его штатным DataForm.renderLayout.
+// login — standalone-приложение (uniForm недоступен до входа). Содержит две формы,
+// выбираемые параметром запуска mode:
+//   - 'login'          — форма входа (роль nologged);
+//   - 'changePassword' — форма смены пароля (после входа / из параметров пользователя).
+// Серверные лейауты отдаются клиенту через getFormSpec(mode), клиент рендерит их
+// штатным DataForm.renderLayout.
 //
-// Для неавторизованной сессии сервер видит роль 'public' (см. /server-call и /files),
-// поэтому серверный и клиентский скрипты регистрируются для ['public', 'nologged'].
+// Роли: неавторизованная сессия видится сервером как 'public'; авторизованная — 'user'/'admin'.
+// Клиентский скрипт (с обработчиками) должен быть доступен и тем, и другим, поэтому
+// грузится дважды (для 'public' и для 'user'); getFormSpec отдаёт UID по роли вызывающего
+// (admin имеет доступ к обоим — см. fileStore.hasRoleAccess).
 
 const path = require('path');
 const fs   = require('fs');
@@ -35,19 +40,31 @@ module.exports = async function (modelsDB) {
         const i18n = require('../../drive_root/i18n');
         const { getSessionContext } = require('../../drive_forms/globalServerContext');
 
-        // Серверные функции аутентификации (фабрика).
-        const authFns   = require('./forms/login.server')(modelsDB, Utilities);
-        const layoutRaw = require('./forms/login.layout.json');
+        // Серверные функции (фабрика): login, changePassword, getBootInfo, loginAsGuest.
+        const authFns = require('./forms/login.server')(modelsDB, Utilities);
+
+        // Лейауты по режимам.
+        const layouts = {
+            login:          require('./forms/login.layout.json'),
+            changePassword: require('./forms/change_password.layout.json')
+        };
 
         // Клиентские обработчики: __SERVER_SCRIPT__ → реальное имя серверного скрипта.
         const clientSource = fs
             .readFileSync(path.join(__dirname, 'forms/login.client.js'), 'utf8')
             .replace(/__SERVER_SCRIPT__/g, SERVER_SCRIPT_NAME);
-        // role 'public' — чтобы /files отдавал скрипт неавторизованной сессии.
-        const clientUID = await loadScript(clientSource, 'public');
+        // Один и тот же скрипт под двумя ролями — чтобы /files отдавал его и nologged (public),
+        // и авторизованному пользователю (user); admin имеет доступ к обоим.
+        const clientUID_public = await loadScript(clientSource, 'public');
+        const clientUID_user   = await loadScript(clientSource, 'user');
+        const pickClientUID = (role) =>
+            (role && role !== 'public' && role !== 'nologged') ? clientUID_user : clientUID_public;
 
-        // Отдаёт клиенту спецификацию формы: переведённый лейаут + UID клиентского скрипта.
+        // Отдаёт клиенту спецификацию формы для режима: переведённый лейаут + UID клиентского скрипта.
         async function getFormSpec(params, ctx) {
+            const mode = (params && params.mode) || 'login';
+            const layoutRaw = layouts[mode] || layouts.login;
+
             let language = 'en';
             try {
                 const sctx = await getSessionContext(ctx && ctx.sessionID);
@@ -56,16 +73,16 @@ module.exports = async function (modelsDB) {
 
             const cloned = JSON.parse(JSON.stringify(layoutRaw));
             translateCaptions(cloned, (key) => i18n.t(key, language));
-            return { layout: cloned, clientScript: clientUID };
+            return { layout: cloned, mode, clientScript: pickClientUID(ctx && ctx.role) };
         }
 
         loadServerScript(
             SERVER_SCRIPT_NAME,
             Object.assign({}, authFns, { getFormSpec }),
-            ['public', 'nologged']
+            ['public', 'nologged', 'user', 'admin']
         );
 
-        console.log('[login/init] Registered server script + client layout');
+        console.log('[login/init] Registered server script + login/changePassword layouts');
     } catch (e) {
         console.error('[login/init] Failed:', e && e.message || e);
     }
