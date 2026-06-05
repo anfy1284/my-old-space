@@ -5226,7 +5226,9 @@ class TextBox extends FormInput {
                     if (typeof this.setText === 'function') this.setText(String(display));
                     else if (this.element) this.element.value = String(display);
                 }
-                console.log('[TextBox.handleSelection] Updated TextBox:', textBoxId, 'with value:', display, 'UID:', val);
+                // Уведомляем подписчиков о смене значения (events: { onChange }).
+                // recordSelector раньше не вызывал onChange — теперь вызывает, как ComboBox.
+                if (typeof this.onChange === 'function') { try { this.onChange(val, display); } catch (_) {} }
             } catch (_) {}
 
             try { if (this.element) this.element.dispatchEvent(new Event('input', { bubbles: true })); } catch (_) {}
