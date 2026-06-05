@@ -95,6 +95,20 @@
   height: auto;
 }
 
+/* Uniform textbox height (Win95 controls are a single fixed height).
+   The inner white box gets a deterministic height so the presence of an
+   embedded "…"/"▾" button can't make a field taller than a plain one —
+   all children (input + buttons) stretch into the same box height. */
+.ui-input-container.ui-textbox-box {
+  height: var(--ui-control-height, 23px);
+  box-sizing: border-box;
+}
+/* Inside tables / borderless containers the row (cell) height rules,
+   so don't pin the box to a fixed height there. */
+.ui-input-no-border .ui-input-container.ui-textbox-box {
+  height: auto;
+}
+
 /* Helper class: remove borders/background for input containers (used inside tables) */
 .ui-input-no-border {
   border: none !important;

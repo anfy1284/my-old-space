@@ -3272,6 +3272,7 @@ class TextBox extends FormInput {
         this._mm = '';        // month part (0-2 digits as string)
         this._yyyy = '';      // year part (0-4 digits as string)
         this._dateSection = 0; // 0=day, 1=month, 2=year
+        this._sectionFresh = true; // when true, next digit overwrites the section (Windows-style manual entry)
         this._calYear = null;
         this._calMonth = null;
         // Address autocomplete mode
@@ -3408,6 +3409,11 @@ class TextBox extends FormInput {
 
             this.inputContainer = document.createElement('div');
             this.inputContainer.classList.add('ui-input-container');
+            // Marker for the inner white input box (input + embedded buttons).
+            // Gets a fixed control height in style.css so a textbox with "…"/"▾"
+            // buttons stays exactly as tall as a plain textbox. In table cells
+            // (.ui-input-no-border) the row controls height, so it's reset there.
+            this.inputContainer.classList.add('ui-textbox-box');
             this.inputContainer.style.display = 'flex';
             this.inputContainer.style.flexDirection = 'row';
             this.inputContainer.style.alignItems = 'stretch';
@@ -3501,15 +3507,26 @@ class TextBox extends FormInput {
                 }
             } catch (e) {}
 
-            // Calendar button: for date picker mode, a button identical in style to "..." and "▾"
+            // Calendar button: for date picker mode, a button identical in style to "..."
             try {
                 if (this.isDate && !this._dateBtn) {
                     const calBtn = document.createElement('button');
                     calBtn.type = 'button';
                     calBtn.tabIndex = -1;
-                    calBtn.textContent = '▾';
                     calBtn.title = __t('Select date');
                     try { calBtn.classList.add('input-field-button'); } catch (e) {}
+                    // Calendar glyph replaced by a proper icon from the catalog.
+                    try {
+                        const calImg = document.createElement('img');
+                        calImg.src = '/apps/general_icons/resources/public/16x16/calendar.png';
+                        calImg.alt = '';
+                        calImg.draggable = false;
+                        calImg.style.maxWidth = '100%';
+                        calImg.style.maxHeight = '100%';
+                        calImg.style.display = 'block';
+                        calImg.style.pointerEvents = 'none';
+                        calBtn.appendChild(calImg);
+                    } catch (e) { calBtn.textContent = '▾'; }
                     calBtn.addEventListener('click', (ev) => {
                         try { ev.stopPropagation(); ev.preventDefault(); this._toggleCalendar && this._toggleCalendar(); } catch (_) {}
                     });
@@ -4361,14 +4378,10 @@ class TextBox extends FormInput {
                     try { if (this.element && typeof this.element.focus === 'function') this.element.focus(); } catch (_) {}
 
                     if (this.isDate) {
-                        // Determine which date section was clicked based on cursor position
-                        try {
-                            const pos = this.element.selectionStart || 0;
-                            if (pos <= 2) { this._dateSection = 0; }
-                            else if (pos <= 5) { this._dateSection = 1; }
-                            else { this._dateSection = 2; }
-                            this._setDateSection && this._setDateSection(this._dateSection);
-                        } catch (_) {}
+                        // Read the caret position deferred — the browser sets it from the
+                        // click only after this handler returns, so select the section in a
+                        // microtask (otherwise every click resolves to the first section).
+                        try { setTimeout(() => { try { this._syncDateSectionFromCaret(); } catch (_) {} }, 0); } catch (_) {}
                         try { e.stopPropagation(); } catch (_) {}
                     }
 
@@ -4534,9 +4547,13 @@ class TextBox extends FormInput {
             this.element.addEventListener('focus', (e) => {
                 try {
                     if (this.isDate) {
-                        // On focus, validate date and position cursor at current section
-                        try { this._updateDateDisplay && this._updateDateDisplay(); } catch (_) {}
-                        try { setTimeout(() => { try { this._setDateSection && this._setDateSection(this._dateSection || 0); } catch(_){} }, 0); } catch (_) {}
+                        // Arm overwrite so the first typed digit replaces the section.
+                        this._sectionFresh = true;
+                        // Defer section selection to a microtask: by then the browser has
+                        // finalized the caret (Tab-focus selects all → section 0 / day;
+                        // mouse focus → the clicked section). Doing it synchronously here
+                        // would clobber the click caret and always land on the first block.
+                        try { setTimeout(() => { try { this._syncDateSectionFromCaret(); } catch(_){} }, 0); } catch (_) {}
                     }
                     // Open list on focus when in listMode — only if triggered by user interaction (click/tab), not programmatic focus
                     if (this.listMode && this._userInteracted) {
@@ -4553,6 +4570,7 @@ class TextBox extends FormInput {
 
             this.element.addEventListener('blur', (e) => {
                 this._userInteracted = false;
+                if (this.isDate) { try { this._padDatePartsOnBlur(); } catch (_) {} }
                 // this.element.style.borderTop = '2px solid #808080';
                 // this.element.style.borderLeft = '2px solid #808080';
             });
@@ -4617,6 +4635,51 @@ class TextBox extends FormInput {
         return dd + '.' + mm + '.' + yyyy;
     }
 
+    // On blur, normalize a manually-typed date so it stays valid without forcing the
+    // user to type leading zeros or a 4-digit year (1C-style auto-completion):
+    //   - single-digit day/month → padded with a leading zero ("5" → "05");
+    //   - 2-digit year → expanded to 4 digits via a century pivot ("25" → "2025",
+    //     "99" → "1999"); a 1- or 3-digit year is left as-is (ambiguous).
+    _padDatePartsOnBlur() {
+        let changed = false;
+        if ((this._dd || '').length === 1) { this._dd = '0' + this._dd; changed = true; }
+        if ((this._mm || '').length === 1) { this._mm = '0' + this._mm; changed = true; }
+        const yr = (this._yyyy || '');
+        if (yr.length === 2) {
+            const yy = parseInt(yr, 10);
+            if (!isNaN(yy)) { this._yyyy = String(yy < 50 ? 2000 + yy : 1900 + yy); changed = true; }
+        }
+        // Clamp month/day to valid ranges (the month may have been entered after the
+        // day, e.g. "31.02" → "28.02", or a 31-day day typed into a 30-day month).
+        if ((this._mm || '').length === 2) {
+            const m = parseInt(this._mm, 10);
+            if (m < 1) { this._mm = '01'; changed = true; }
+            else if (m > 12) { this._mm = '12'; changed = true; }
+        }
+        if ((this._dd || '').length === 2) {
+            const maxD = this._maxDayFor(this._mm, this._yyyy);
+            const d = parseInt(this._dd, 10);
+            if (d < 1) { this._dd = '01'; changed = true; }
+            else if (d > maxD) { this._dd = String(maxD).padStart(2, '0'); changed = true; }
+        }
+        if (changed && this.element) this._updateDateDisplay();
+    }
+
+    // Number of days in the given month/year. Used to validate the day part.
+    // If month is unknown/invalid → 31 (loosest); for February with an unknown
+    // year → 29 (allow leap-day until the year disambiguates it on blur).
+    _maxDayFor(mm, yyyy) {
+        const m = parseInt(mm, 10);
+        if (!(m >= 1 && m <= 12)) return 31;
+        const y = parseInt(yyyy, 10);
+        if (m === 2) {
+            if (!(y >= 1)) return 29;
+            const leap = (y % 4 === 0 && y % 100 !== 0) || (y % 400 === 0);
+            return leap ? 29 : 28;
+        }
+        return [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][m - 1];
+    }
+
     _getDateISO() {
         if ((this._dd || '').length === 2 && (this._mm || '').length === 2 && (this._yyyy || '').length === 4) {
             const d = parseInt(this._dd, 10);
@@ -4672,11 +4735,37 @@ class TextBox extends FormInput {
         // Only reposition cursor if element is focused
         if (document.activeElement !== this.element) return;
         const starts = [0, 3, 6];
+        const lens = [2, 2, 4];
         const parts = [this._dd, this._mm, this._yyyy];
         const s = starts[n];
-        const partLen = (parts[n] || '').length;
-        const pos = s + partLen;
-        try { this.element.setSelectionRange(pos, pos); } catch (_) {}
+        if (this._sectionFresh) {
+            // 1C/Windows-style: a freshly-entered section is fully highlighted so the
+            // user sees what they're about to overwrite, instead of a lone caret sitting
+            // "after the block". The first typed digit replaces the whole section.
+            try { this.element.setSelectionRange(s, s + lens[n]); } catch (_) {}
+        } else {
+            // While typing inside a section, keep a plain caret after the entered digits.
+            const partLen = (parts[n] || '').length;
+            const pos = s + partLen;
+            try { this.element.setSelectionRange(pos, pos); } catch (_) {}
+        }
+    }
+
+    // Pick the date section from the current caret position and highlight it.
+    // Must be called deferred (setTimeout 0) from click/focus: the browser only
+    // finalizes the caret position from a mouse click after the event handler
+    // returns, so reading selectionStart synchronously gives a stale value (it
+    // would always resolve to the first section).
+    _syncDateSectionFromCaret() {
+        if (!this.element || document.activeElement !== this.element) return;
+        const pos = this.element.selectionStart || 0;
+        let sec;
+        if (pos <= 2) sec = 0;
+        else if (pos <= 5) sec = 1;
+        else sec = 2;
+        this._dateSection = sec;
+        this._sectionFresh = true; // arm overwrite + highlight the chosen section
+        this._setDateSection(sec);
     }
 
     _handleDateKeydown(e) {
@@ -4690,24 +4779,39 @@ class TextBox extends FormInput {
         const sec = this._dateSection;
 
         if (/^\d$/.test(k)) {
-            const cur = getPart(sec);
+            // Fresh section (just focused / arrowed into / auto-advanced): the digit
+            // starts a new value, overwriting whatever was there. This is what lets the
+            // user retype an already-filled date manually, like the Windows date picker.
+            let cur = this._sectionFresh ? '' : getPart(sec);
+            this._sectionFresh = false;
             if (cur.length < sectionMaxLen[sec]) {
                 const next = cur + k;
                 setPart(sec, next);
                 // Auto-advance to next section once section is full
                 if (next.length === sectionMaxLen[sec]) {
-                    // Validate range before advancing
-                    if (sec === 1) {
-                        const mv = parseInt(next, 10);
-                        if (mv < 1 || mv > 12) { setPart(1, ''); this._updateDateDisplay(); return; }
+                    // Validate the completed section. On an out-of-range value drop just
+                    // the offending (second) digit and keep editing this section, so the
+                    // user can correct it without retyping the whole part.
+                    const val = parseInt(next, 10);
+                    if (sec === 0) {
+                        const maxD = this._maxDayFor(this._mm, this._yyyy);
+                        if (val < 1 || val > maxD) { setPart(0, cur); this._updateDateDisplay(); return; }
+                    } else if (sec === 1) {
+                        if (val < 1 || val > 12) { setPart(1, cur); this._updateDateDisplay(); return; }
                     }
-                    if (sec < 2) { this._dateSection = sec + 1; }
+                    if (sec < 2) { this._dateSection = sec + 1; this._sectionFresh = true; }
                 }
             }
             this._updateDateDisplay();
         } else if (k === 'Backspace' || k === 'Delete') {
+            const wasFresh = this._sectionFresh;
+            this._sectionFresh = false;
             const cur = getPart(sec);
-            if (cur.length > 0) {
+            if (wasFresh && cur.length > 0) {
+                // Highlighted (fresh) section: delete clears the whole section at once.
+                setPart(sec, '');
+                this._updateDateDisplay();
+            } else if (cur.length > 0) {
                 setPart(sec, cur.slice(0, -1));
                 this._updateDateDisplay();
             } else if (sec > 0) {
@@ -4715,12 +4819,12 @@ class TextBox extends FormInput {
                 this._updateDateDisplay();
             }
         } else if (k === 'ArrowLeft') {
-            if (sec > 0) { this._dateSection = sec - 1; this._updateDateDisplay(); }
+            if (sec > 0) { this._dateSection = sec - 1; this._sectionFresh = true; this._updateDateDisplay(); }
         } else if (k === 'ArrowRight' || k === '.') {
-            if (sec < 2) { this._dateSection = sec + 1; this._updateDateDisplay(); }
+            if (sec < 2) { this._dateSection = sec + 1; this._sectionFresh = true; this._updateDateDisplay(); }
         } else if (k === 'Tab') {
             if (!e.shiftKey) {
-                if (sec < 2) { this._dateSection = sec + 1; this._updateDateDisplay(); }
+                if (sec < 2) { this._dateSection = sec + 1; this._sectionFresh = true; this._updateDateDisplay(); }
                 else {
                     // Allow Tab to propagate to next field
                     e.preventDefault = () => {}; // already prevented above — need to re-allow
@@ -4731,7 +4835,7 @@ class TextBox extends FormInput {
                     } catch (_) {}
                 }
             } else {
-                if (sec > 0) { this._dateSection = sec - 1; this._updateDateDisplay(); }
+                if (sec > 0) { this._dateSection = sec - 1; this._sectionFresh = true; this._updateDateDisplay(); }
                 else {
                     try {
                         const prev = this._findNextFocusable(false);
