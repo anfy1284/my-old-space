@@ -3607,6 +3607,18 @@ class TextBox extends FormInput {
             this.element.id = 'textbox_' + Math.random().toString(36).substr(2, 9);
             this.element.name = this.element.id;
 
+            // Подавляем автозаполнение браузера. Рандомного name выше хватает только
+            // против парольного автофилла; адресный/контактный автофилл Chrome опирается
+            // на подписи полей ("Adresse"/"E-Mail"/"Telefon") и игнорирует name — его
+            // глушит только нераспознаваемый токен autocomplete. Для парольных полей
+            // используем 'new-password' — это надёжнее подавляет менеджер паролей.
+            try {
+                this.element.setAttribute('autocomplete', this.isPassword ? 'new-password' : 'off');
+                this.element.setAttribute('autocorrect', 'off');
+                this.element.setAttribute('autocapitalize', 'off');
+                this.element.setAttribute('spellcheck', 'false');
+            } catch (_) {}
+
             if (this.maxLength && !this.digitsOnly) {
                 try { this.element.maxLength = this.maxLength; } catch (_) {}
             } else if (this.digitsOnly) {
@@ -5334,6 +5346,14 @@ class MultilineTextBox extends FormInput {
 
             this.element.id = 'textarea_' + Math.random().toString(36).substr(2, 9);
             this.element.name = this.element.id;
+
+            // Подавляем автозаполнение браузера (см. подробный комментарий в Textbox.Draw).
+            try {
+                this.element.setAttribute('autocomplete', 'off');
+                this.element.setAttribute('autocorrect', 'off');
+                this.element.setAttribute('autocapitalize', 'off');
+                this.element.setAttribute('spellcheck', 'false');
+            } catch (_) {}
 
             // Dataset props for debugging
             try {
