@@ -1078,7 +1078,7 @@ async function getPlacesConfig(params, sessionID) {
 }
 
 // ── Quick search for recordSelector typeahead ─────────────────────────────────────────────────
-async function quickSearch({ tableName, searchText, limit }, sessionID) {
+async function quickSearch({ tableName, searchText, limit, displayField: requestedDisplayField }, sessionID) {
     const user = await globalServerContext.getUserBySessionID(sessionID);
     if (!user) throw new Error('User not authorized');
 
@@ -1091,23 +1091,38 @@ async function quickSearch({ tableName, searchText, limit }, sessionID) {
     const safeText = String(searchText || '').replace(/[%_\\]/g, c => '\\' + c);
     const lim = Math.max(1, Math.min(limit || 10, 20));
 
-    // Determine display field (prefer 'name', fallback to first string attribute, then 'UID')
-    let displayField = 'name';
+    // Determine display field:
+    //   1) explicit requestedDisplayField (if it's a real STRING attribute — e.g. rooms.number)
+    //   2) 'name' if present
+    //   3) first STRING attribute that isn't UID/timestamps
+    //   4) 'UID' as last resort
+    // Note: ILIKE requires a text column, so a requested non-STRING field is ignored.
+    const SKIP = new Set(['UID', 'createdAt', 'updatedAt', 'deletedAt']);
+    // Honour a requested displayField even if attribute introspection fails.
+    let displayField = requestedDisplayField || 'name';
     try {
         const gsCtx = globalServerContext;
         const models = gsCtx.getModels ? gsCtx.getModels() : null;
-        if (models && models[modelName]) {
-            const attrs = models[modelName].rawAttributes || {};
-            if (!attrs['name']) {
-                displayField = Object.keys(attrs).find(k => {
-                    try {
-                        const t = attrs[k].type ? (attrs[k].type.key || attrs[k].type.constructor.key) : '';
-                        return t === 'STRING';
-                    } catch (e) { return false; }
-                }) || 'UID';
+        const attrs = (models && models[modelName] && models[modelName].rawAttributes) || {};
+        const isString = (k) => {
+            try {
+                const ty = attrs[k] && attrs[k].type;
+                const t = String((ty && (ty.key || (ty.constructor && ty.constructor.key))) || '').toUpperCase();
+                return t === 'STRING' || t === 'TEXT' || t.indexOf('CHAR') >= 0;
+            } catch (e) { return false; }
+        };
+        if (Object.keys(attrs).length) {
+            if (requestedDisplayField && attrs[requestedDisplayField]) {
+                displayField = requestedDisplayField;                 // trust the form's display field
+            } else if (attrs['name']) {
+                displayField = 'name';
+            } else {
+                displayField = Object.keys(attrs).find(k => !SKIP.has(k) && isString(k))
+                    || Object.keys(attrs).find(k => !SKIP.has(k))
+                    || 'UID';
             }
         }
-    } catch (e) { /* use 'name' as default */ }
+    } catch (e) { /* keep requestedDisplayField || 'name' */ }
 
     const rows = await dbGW.execute({
         operation: 'read',
@@ -1123,7 +1138,7 @@ async function quickSearch({ tableName, searchText, limit }, sessionID) {
     });
 
     const items = (Array.isArray(rows) ? rows : []).map(r => ({ UID: r.UID, name: r[displayField] || '' }));
-    return { items };
+    return { items, displayField };
 }
 
 module.exports = {

@@ -503,6 +503,27 @@ if (typeof window !== 'undefined') {
 
             getInstance(id) { return instances[id] || null; },
 
+            // Список открытых (живых) окон — чтобы агент/код знали, что сейчас на экране.
+            listInstances() {
+                const out = [];
+                for (const k in instances) {
+                    const inst = instances[k];
+                    if (!inst) continue;
+                    const form = inst.form || inst;
+                    const alive = !!(form && form.element && (typeof document === 'undefined' || document.contains(form.element)));
+                    if (!alive) continue;
+                    let title = '';
+                    try { title = (typeof form.getTitle === 'function' && form.getTitle()) || form._originalTitle || ''; } catch (e) {}
+                    out.push({
+                        id: inst.id,
+                        appName: inst.appName,
+                        title: title,
+                        tableName: (form && (form.dbTable || form.tableName)) || null
+                    });
+                }
+                return out;
+            },
+
             close(id) { const inst = instances[id]; if (inst) { try { inst.destroy && inst.destroy(); } catch (e) {} delete instances[id]; } }
         };
     })();
@@ -3219,6 +3240,20 @@ async function _getAddressPredictions(text) {
             });
         } catch (e) { resolve([]); }
     });
+}
+
+// Публичный резолвер адресов — чтобы агент/прочий код нормализовали адрес тем же
+// механизмом Google Places, что и поле AddressBox у человека (одна среда, без дублирования).
+if (typeof window !== 'undefined') {
+    window.MySpaceAddress = {
+        // query → лучший formatted_address (как при выборе подсказки в AddressBox)
+        async resolve(query) {
+            const preds = await _getAddressPredictions(String(query || ''));
+            if (!preds || !preds.length) return null;
+            return await _getPlaceDetails(preds[0].placeId);
+        },
+        async suggest(query) { return await _getAddressPredictions(String(query || '')); }
+    };
 }
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 
