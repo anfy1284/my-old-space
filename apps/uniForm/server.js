@@ -17,25 +17,33 @@ const globalServerContext = require('../../drive_root/globalServerContext');
 try { const dbg = memoryStore.debugKeysSync('datasets'); console.log('[uniForm] memoryStore init; datasetsCount=', dbg.count); } catch (e) {}
 
 // ── Иконки по умолчанию для типов сущностей ─────────────────────────────────────────────────
-const ICON_DOCUMENT  = '/apps/general_icons/resources/public/16x16/document.png';
-const ICON_CATALOG   = '/apps/general_icons/resources/public/16x16/catalog.png';
+// Запись (одиночный объект) и список различаются: документ → лист / журнал,
+// справочник → элемент / справочник.
+const ICON_DOCUMENT  = '/apps/general_icons/resources/public/16x16/document.png'; // запись-документ
+const ICON_JOURNAL   = '/apps/general_icons/resources/public/16x16/journal.png';  // список документов
+const ICON_CATALOG   = '/apps/general_icons/resources/public/16x16/catalog.png';  // список справочника
 
 /**
- * Определяет иконку по умолчанию для таблицы:
- * 1. Иконка из layoutMemory._tableIcons (задана через saveLayout formIcon)
- * 2. Иконка по entityType из db.json (document → document.png, справочник/catalog → catalog.png)
- * 3. Дефолтная общая иконка (catalog.png)
+ * Определяет иконку по умолчанию для таблицы с учётом режима (запись/список).
+ * 1. Явно заданная иконка из layoutMemory (formIcon для записи, listIcon для списка).
+ * 2. Иконка по entityType: документ → document/journal, справочник → catalog.
+ * 3. Дефолт (catalog).
+ * @param {string} tableName
+ * @param {string} [mode] — 'record' (по умолчанию) | 'list'
  */
-function getDefaultIconForTable(tableName) {
+function getDefaultIconForTable(tableName, mode) {
+    const isList = mode === 'list';
     try {
         const layoutMemory2 = require('../../drive_root/layoutMemory');
-        const registered = layoutMemory2.getTableIcon(tableName);
+        const registered = isList
+            ? (layoutMemory2.getTableListIcon(tableName) || layoutMemory2.getTableIcon(tableName))
+            : layoutMemory2.getTableIcon(tableName);
         if (registered) return registered;
     } catch(e) {}
 
     const entityType = getEntityTypeForTable(tableName);
-    if (entityType === 'document') return ICON_DOCUMENT;
-    if (entityType === 'catalog' || entityType === 'справочник') return ICON_CATALOG;
+    if (entityType === 'document') return isList ? ICON_JOURNAL : ICON_DOCUMENT;
+    if (entityType === 'catalog' || entityType === 'справочник' || entityType === 'directory') return ICON_CATALOG;
     return ICON_CATALOG; // дефолт для таблиц без entityConfig
 }
 
@@ -184,7 +192,7 @@ async function getLayoutWithData(params, sessionID) {
                 return {
                     layout: clLayout, data: listData, datasetId,
                     clientScript: customLayout.clientScript || null,
-                    formIcon: customLayout.formIcon || null,
+                    formIcon: customLayout.listIcon || customLayout.formIcon || getDefaultIconForTable(tableName, 'list'),
                     appCaption: resolvedCaption || null,
                     windowState: customLayout.windowState || 'maximized'
                 };
@@ -206,7 +214,7 @@ async function getLayoutWithData(params, sessionID) {
             }];
             const payload = { layout, data: [], params: params || {} };
             const datasetId = dataApp.storeDataset(payload);
-            const formIcon = getDefaultIconForTable(tableName);
+            const formIcon = getDefaultIconForTable(tableName, 'list');
             const layoutMemory2 = require('../../drive_root/layoutMemory');
             const rawCaption = layoutMemory2.getTableCaption(tableName);
             const appCaption = rawCaption ? await resolveAppCaption(rawCaption, sessionID) : null;
@@ -691,6 +699,7 @@ async function generateFormSpec(tableName, params, sessionID) {
         let clientScript = null;
         let formIcon = null;
         let appCaption = null;
+        let recordCaption = null;
         let windowState = null;
         try {
             const layoutMemory = require('../../drive_root/layoutMemory');
@@ -703,6 +712,7 @@ async function generateFormSpec(tableName, params, sessionID) {
                     formIcon = customLayoutObj.formIcon || null;
                     windowState = customLayoutObj.windowState || null;
                     appCaption = customLayoutObj.appCaption || null;
+                    recordCaption = customLayoutObj.recordCaption || null;
                     break;
                 }
             }
@@ -1052,11 +1062,17 @@ async function generateFormSpec(tableName, params, sessionID) {
         });
 
         if (!formIcon) {
-            formIcon = getDefaultIconForTable(tableName);
+            formIcon = getDefaultIconForTable(tableName, 'record');
         }
 
-        // Resolve appCaption
-        const resolvedCaption = await resolveAppCaption(appCaption, sessionID);
+        // Заголовок окна записи = подпись в ЕДИНСТВЕННОМ числе (recordCaption) + представление
+        // записи (поле name). Для новой записи (name пуст) — только подпись.
+        // Fallback на appCaption (множественное) если recordCaption не задан.
+        let resolvedCaption = await resolveAppCaption(recordCaption || appCaption, sessionID);
+        const presentation = (record && record.name != null) ? String(record.name).trim() : '';
+        if (presentation) {
+            resolvedCaption = resolvedCaption ? (resolvedCaption + ' ' + presentation) : presentation;
+        }
 
         // Translate all { i18n: 'key' } objects in layout before sending to client
         if (Array.isArray(layout)) {

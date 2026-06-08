@@ -94,7 +94,9 @@ function clearDynamicMenu() {
 function getDynamicMenu() {
     return cloneMenuItems(dynamicMenuItems);
 }
-const ICON_DOCUMENT = '/apps/general_icons/resources/public/16x16/document.png';
+// Пункт меню открывает СПИСОК (mode:'list'), поэтому для иконки берём список:
+// документ → журнал, справочник → справочник.
+const ICON_JOURNAL  = '/apps/general_icons/resources/public/16x16/journal.png';
 const ICON_CATALOG  = '/apps/general_icons/resources/public/16x16/catalog.png';
 
 /**
@@ -116,7 +118,7 @@ function resolveMenuIcons(items) {
             }
             const def = modelDefs.find(m => m.tableName === tableName);
             const et = (def && def.entityConfig && def.entityConfig.entityType) || null;
-            return et === 'document' ? ICON_DOCUMENT : ICON_CATALOG;
+            return et === 'document' ? ICON_JOURNAL : ICON_CATALOG;
         } catch (e) { return ICON_CATALOG; }
     };
 
@@ -124,7 +126,10 @@ function resolveMenuIcons(items) {
         for (const item of arr) {
             if (!item.icon && item.appName === 'uniForm' && item.params && item.params.dbTable) {
                 const tableName = item.params.dbTable;
-                let icon = layoutMemory ? layoutMemory.getTableIcon(tableName) : null;
+                // Иконка списка (listIcon) приоритетнее иконки записи (formIcon).
+                let icon = layoutMemory
+                    ? (layoutMemory.getTableListIcon(tableName) || layoutMemory.getTableIcon(tableName))
+                    : null;
                 if (!icon) icon = getEntityIcon(tableName);
                 item.icon = icon;
             }

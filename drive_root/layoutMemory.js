@@ -46,7 +46,15 @@ const _tableIcons = new Map();
 
 // Table-level caption registry: tableName → string | { i18n: 'key' }.
 // Populated automatically by saveLayout when appCaption is provided.
+// _tableCaptions       — заголовок СПИСКА (множественное число, напр. «Бронирования»).
+// _tableRecordCaptions — заголовок ЗАПИСИ  (единственное число, напр. «Бронирование»),
+//                        к нему добавляется представление (name) записи.
 const _tableCaptions = new Map();
+const _tableRecordCaptions = new Map();
+
+// Table-level icon registry для режима списка: tableName → iconPath.
+// Иконка записи (формы) хранится в _tableIcons (formIcon); иконка списка — здесь (listIcon).
+const _tableListIcons = new Map();
 
 
 
@@ -83,21 +91,23 @@ function makePrefix(appName, mode, tableName) {
  * @param {string|object}   [opts.appCaption] — Человекочитаемое имя формы/приложения.
  *   Строка или объект { i18n: 'key' } — резолвится сервером при выдаче.
  */
-async function saveLayout({ appName, mode, tableName, roles, layout, events, clientScript, formIcon, appCaption, windowState }) {
+async function saveLayout({ appName, mode, tableName, roles, layout, events, clientScript, formIcon, appCaption, recordCaption, listIcon, windowState }) {
     if (!appName || !tableName || !Array.isArray(layout)) {
         throw new Error('[layoutMemory.saveLayout] appName, tableName and layout (Array) are required');
     }
     const effectiveMode = mode || 'record';
     const roleList = Array.isArray(roles) ? roles : (roles ? [String(roles)] : ['*']);
     for (const role of roleList) {
-        await memoryStore.set(NAMESPACE, makeKey(appName, effectiveMode, tableName, role), { layout, events: events || null, clientScript: clientScript || null, formIcon: formIcon || null, appCaption: appCaption || null, windowState: windowState || null });
+        await memoryStore.set(NAMESPACE, makeKey(appName, effectiveMode, tableName, role), { layout, events: events || null, clientScript: clientScript || null, formIcon: formIcon || null, appCaption: appCaption || null, recordCaption: recordCaption || null, listIcon: listIcon || null, windowState: windowState || null });
     }
     // Register prefix so hot-path can skip tables with no layouts at all
     _registeredPrefixes.add(makePrefix(appName, effectiveMode, tableName));
-    // Auto-register table-level icon
+    // Auto-register table-level icon записи (formIcon) и списка (listIcon)
     if (formIcon) _tableIcons.set(tableName, formIcon);
-    // Auto-register table-level caption
+    if (listIcon) _tableListIcons.set(tableName, listIcon);
+    // Auto-register table-level caption списка (appCaption) и записи (recordCaption)
     if (appCaption) _tableCaptions.set(tableName, appCaption);
+    if (recordCaption) _tableRecordCaptions.set(tableName, recordCaption);
     console.log(`[layoutMemory] saved layout for ${appName}/${effectiveMode}/${tableName} roles=[${roleList.join(',')}]`);
 }
 
@@ -228,4 +238,24 @@ function getTableCaption(tableName) {
     return _tableCaptions.get(tableName) || null;
 }
 
-module.exports = { saveLayout, getLayoutForUser, getUserRoleBySession, hasRegistered, getTableIcon, getTableCaption };
+/**
+ * Get the singular record-caption registered for a table (saveLayout recordCaption).
+ * Used as the record window title prefix (before the record's presentation/name).
+ * Returns the raw value (string or { i18n: 'key' }).
+ * @param {string} tableName
+ * @returns {string|object|null}
+ */
+function getTableRecordCaption(tableName) {
+    return _tableRecordCaptions.get(tableName) || null;
+}
+
+/**
+ * Get the list-mode icon registered for a table (saveLayout listIcon).
+ * @param {string} tableName
+ * @returns {string|null}
+ */
+function getTableListIcon(tableName) {
+    return _tableListIcons.get(tableName) || null;
+}
+
+module.exports = { saveLayout, getLayoutForUser, getUserRoleBySession, hasRegistered, getTableIcon, getTableCaption, getTableRecordCaption, getTableListIcon };

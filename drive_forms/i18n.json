@@ -58,5 +58,15 @@
         "en": "Forbidden",
         "ru": "Доступ запрещён",
         "de": "Zugriff verweigert"
+    },
+    "number_field": {
+        "en": "Number",
+        "ru": "Номер",
+        "de": "Nummer"
+    },
+    "name_field": {
+        "en": "Name",
+        "ru": "Наименование",
+        "de": "Bezeichnung"
     }
 }

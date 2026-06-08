@@ -97,7 +97,7 @@ function generateModelsFromDefs(modelDefs) {
             }
         }
     }
-    
+
     // Second pass: create Sequelize models
     for (const def of mergedDefs.values()) {
         try {
@@ -227,6 +227,18 @@ function collectAllModelDefs() {
     } catch (e) {
         console.error('[globalModels] Unexpected error processing apps.json:', e.message);
     }
+
+    // Системно: реквизит `number` + автонумерация для сущностей (документы/справочники).
+    // Здесь — единый источник определений: используется и для построения моделей
+    // (generateModelsFromDefs), и для метаданных/подписей (getTableMetadata → _cachedModelDefs).
+    // require-кэш отдаёт одни и те же объекты, поэтому мутация попадает во все потребители.
+    try {
+        const { injectEntityNumber } = require('./db/entityNumber');
+        for (const def of defs) injectEntityNumber(def);
+    } catch (e) {
+        console.error('[globalModels] entity number injection failed:', e && e.message || e);
+    }
+
     return { models: defs, associations };
 }
 

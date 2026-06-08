@@ -2810,8 +2810,10 @@ class DataForm extends Form {
                     // таблицы (ключи вида ts_booking_rooms__r0__roomId). Если обновить их
                     // через setValue(UID, undefined), они потеряют отображаемые имена.
                     // Поэтому обновляем ТОЛЬКО контролы, чьё поле реально пришло от сервера.
+                    let refreshedCaption = null;
                     try {
                         const freshBoth = await callServerMethod(this.appName, 'getLayoutWithData', { datasetId: this._datasetId });
+                        if (freshBoth && freshBoth.appCaption) refreshedCaption = freshBoth.appCaption;
                         if (freshBoth && Array.isArray(freshBoth.data)) {
                             if (freshBoth.datasetId) this._datasetId = freshBoth.datasetId;
                             // Собираем имена скалярных полей из свежего ответа
@@ -2853,7 +2855,14 @@ class DataForm extends Form {
                     // Сбрасываем флаг изменённости и снимаем блокировку
                     this._modified = false;
                     this._suppressModified = false;
-                    if (this._originalTitle) super.setTitle(this._originalTitle);
+                    // После сохранения сервер возвращает обновлённый заголовок (для документов —
+                    // ед. число + представление name, напр. «Buchung 00001 Herr Kaiser …»). Применяем.
+                    if (refreshedCaption) {
+                        this._originalTitle = refreshedCaption;
+                        super.setTitle(refreshedCaption);
+                    } else if (this._originalTitle) {
+                        super.setTitle(this._originalTitle);
+                    }
                 } else {
                     const errMsg = (res && res.error ? res.error : __t('Unknown error'));
                     if (typeof showAlert === 'function') showAlert(__t('Save error: ') + errMsg);

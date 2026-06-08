@@ -221,10 +221,19 @@ use('root', async function entityHooksMiddleware(request, next) {
     const modelName = globalCtx.getModelNameForTable(table);
     const Model = modelName ? globalCtx.modelsDB[modelName] : null;
 
-    if (Model && Model.entityConfig) {
+    if (Model) {
         const event = operation === 'create' ? 'beforeCreate' : 'beforeUpdate';
-        const context = { modelsDB: globalCtx.modelsDB, dbGateway: module.exports };
-        await entityHooks.runHooks(event, Model, request, context);
+        const context = {
+            modelsDB: globalCtx.modelsDB,
+            dbGateway: module.exports,
+            sessionID: request.context && request.context.sessionID
+        };
+        // 1. Декларативные хуки сущности (entityConfig.hooks) — автонумерация и пр.
+        if (Model.entityConfig) {
+            await entityHooks.runHooks(event, Model, request, context);
+        }
+        // 2. Представление (поле name) — ПОСЛЕ хуков, чтобы номер уже был присвоен.
+        await entityHooks.applyPresentation(operation, Model, request, context);
     }
 
     return await next(request);
