@@ -1998,6 +1998,26 @@ class DataForm extends Form {
         }
     }
 
+    // Cached FK lookup for a table: ONE getLookupList per table per form
+    // (RLS-filtered). Returns { totalRows, items:[{value:UID, caption:name}] }.
+    // The in-flight promise is cached, so concurrently-rendered cells of the same
+    // column share a single request instead of firing one per cell. totalRows = -1
+    // signals an error (callers then fall back to the "..." selector).
+    async _fetchFkLookup(table) {
+        if (!this._fkLookupCache) this._fkLookupCache = {};
+        if (!this._fkLookupCache[table]) {
+            this._fkLookupCache[table] = (async () => {
+                try {
+                    const resp = await callServerMethod('uniForm', 'getLookupList', { tableName: table, firstRow: 0, visibleRows: 50 });
+                    const rows = (resp && resp.rows) || [];
+                    const total = (resp && typeof resp.totalRows === 'number') ? resp.totalRows : rows.length;
+                    return { totalRows: total, items: rows.map(r => ({ value: r.UID, caption: r.display })) };
+                } catch (e) { return { totalRows: -1, items: [] }; }
+            })();
+        }
+        return this._fkLookupCache[table];
+    }
+
     // Aligned-field group ("alignFields": true on a group): render the children
     // as a 2-column grid — column 1 holds the field captions (suppressed on the
     // controls themselves), column 2 holds the controls. Each caption+control
@@ -2220,17 +2240,11 @@ class DataForm extends Form {
                     useSelect = !!(properties && properties.showSelectionButton);
                     useList   = !!(properties && properties.showListButton);
                 } else if (sel && sel.table) {
-                    try {
-                        const resp = await callServerMethod('uniForm', 'getLookupList', { tableName: sel.table, firstRow: 0, visibleRows: 10 });
-                        const rows = (resp && resp.rows) || [];
-                        const total = (resp && typeof resp.totalRows === 'number') ? resp.totalRows : rows.length;
-                        if (total < 10) {
-                            useList = true;
-                            listItemsSel = rows.map(r => ({ value: r.UID, caption: r.display }));
-                        } else {
-                            useSelect = true;
-                        }
-                    } catch (e) { useSelect = true; } // on error fall back to the always-works "..."
+                    // AUTO — decided once per table (cached on the form), so every
+                    // other field/cell on the same table reuses it (no per-cell calls).
+                    const lk = await this._fetchFkLookup(sel.table);
+                    if (lk.totalRows >= 0 && lk.totalRows < 10) { useList = true; listItemsSel = lk.items; }
+                    else { useSelect = true; }
                 } else {
                     useSelect = true; // no selection metadata → plain "..."
                 }
@@ -2238,11 +2252,8 @@ class DataForm extends Form {
                 propClone2.listMode = useList;
                 if (useList) {
                     if (!listItemsSel && sel && sel.table) {
-                        // Forced list/both mode — fetch the visible names once for the dropdown.
-                        try {
-                            const resp = await callServerMethod('uniForm', 'getLookupList', { tableName: sel.table, firstRow: 0, visibleRows: 200 });
-                            listItemsSel = ((resp && resp.rows) || []).map(r => ({ value: r.UID, caption: r.display }));
-                        } catch (e) { listItemsSel = []; }
+                        const lk = await this._fetchFkLookup(sel.table); // forced list/both — reuse cached names
+                        listItemsSel = lk.items;
                     }
                     propClone2.listItems = listItemsSel || [];
                 }
