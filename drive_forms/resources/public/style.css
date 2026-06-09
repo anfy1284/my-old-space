@@ -580,6 +580,9 @@ input[type="checkbox"],
     display: flex;
     flex-direction: column;
     margin-top: -8px; /* reduce gap after toolbar: 14px - 8px = 6px */
+    /* Private stacking context: tab/panel z-index layering stays isolated
+       from the rest of the form. */
+    isolation: isolate;
 }
 
 .ui-tabs-header {
@@ -587,7 +590,8 @@ input[type="checkbox"],
     flex-direction: row;
     align-items: flex-end;
     padding-left: 0;
-    z-index: 2;
+    /* No z-index here: the header must NOT create a stacking context, otherwise
+       individual tab buttons could not sit in front of / behind the panel. */
 }
 
 .ui-tabs-header button {
@@ -596,7 +600,7 @@ input[type="checkbox"],
     background-color: var(--color-mid);
     border: none;
     padding: 3px 10px;
-    margin-right: 2px;
+    margin-right: 0; /* tabs flush, no gap between tongues */
     position: relative;
     outline: none;
     border-top: 2px solid var(--color-light);
@@ -605,14 +609,27 @@ input[type="checkbox"],
     border-bottom: 2px solid var(--color-mid);
     border-radius: 2px 2px 0 0;
     cursor: default;
+    /* Inactive tab: sits BEHIND the panel, so the panel's raised top line is
+       painted over the bottom of the tongue → reads as "inactive". */
+    z-index: 1;
 }
 
 .ui-tabs-header button.active {
-    padding-top: 5px;
-    padding-bottom: 4px;
-    margin-top: -2px;
+    /* Same geometry as inactive tabs (no enlargement). Only the stacking order
+       differs: the active tab sits IN FRONT of the panel and covers its top
+       line → the tongue looks connected to the panel.
+
+       No bottom border: a mid-coloured bottom border would form diagonal miter
+       corners with the light/dark 3D side borders, and because the active tab
+       is painted over the panel those corners stuck out past the panel's top
+       line as a 3px artefact. Without it the side borders run straight down to
+       the seam and the tab's own background (between them) covers the panel
+       line — so the weld is clean and nothing leaks sideways onto the line.
+       The removed 2px is added back as padding so the height stays identical
+       to the inactive tabs. */
     z-index: 3;
-    border-bottom: 2px solid var(--color-mid);
+    border-bottom: none;
+    padding-bottom: 5px;
 }
 
 .ui-tabs-content {
@@ -622,9 +639,11 @@ input[type="checkbox"],
     border-right: 2px solid #808080;
     border-bottom: 2px solid #808080;
     padding: 8px;
-    margin-top: -2px;
+    margin-top: -2px; /* overlap header bottom by the 2px border thickness */
     position: relative;
-    z-index: 1;
+    /* Between inactive tabs (1) and the active tab (3): the raised top line
+       covers inactive tongues but is itself covered by the active tongue. */
+    z-index: 2;
     min-height: 60px;
     display: flex;
     flex-direction: column;
