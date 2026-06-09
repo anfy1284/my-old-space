@@ -327,6 +327,25 @@ html, body {
     font-weight: bold;
 }
 
+/* Aligned-field group (layout flag "alignFields"): two-column grid — captions
+   in column 1 (auto-sized to the widest label), controls in column 2. Each
+   caption+control pair shares one grid row, so they never drift vertically —
+   works regardless of control height or selector/calendar buttons. Higher
+   specificity than .ui-group.vertical so display:grid wins over display:flex. */
+.ui-group.ui-group-aligned {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    column-gap: 8px;
+    row-gap: 5px;
+    align-items: center;
+}
+.ui-aligned-label {
+    white-space: nowrap;
+    font-family: MS Sans Serif, Tahoma, Arial, sans-serif;
+    font-size: 11px;
+    color: var(--color-text);
+}
+
 
 /* Additional UI component styles (moved from UI_classes.js) */
 .ui-form {

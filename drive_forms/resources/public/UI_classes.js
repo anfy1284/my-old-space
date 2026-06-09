@@ -1991,6 +1991,33 @@ class DataForm extends Form {
         }
     }
 
+    // Aligned-field group ("alignFields": true on a group): render the children
+    // as a 2-column grid — column 1 holds the field captions (suppressed on the
+    // controls themselves), column 2 holds the controls. Each caption+control
+    // pair shares ONE grid row, so they stay vertically aligned regardless of
+    // control height (selector/calendar buttons, taller fields), and the caption
+    // column auto-sizes to the widest label. Same visual as a "labels column +
+    // fields column" split, but rows can never drift out of sync.
+    async _renderAlignedFields(container, items) {
+        try { container.classList.add('ui-group-aligned'); } catch (e) {}
+        for (const child of items) {
+            if (!child || typeof child !== 'object') continue;
+            // Resolve the caption (server usually pre-translates; fall back to __t / raw key).
+            const rawCap = (child.properties && child.properties.noCaption) ? '' : (child.caption || '');
+            const capStr = (rawCap && typeof rawCap === 'object' && rawCap.i18n)
+                ? (typeof __t === 'function' ? __t(rawCap.i18n) : String(rawCap.i18n))
+                : rawCap;
+            // Column 1: caption cell (':' suffix matches the inline field labels).
+            const lab = document.createElement('label');
+            lab.className = 'ui-aligned-label';
+            lab.textContent = capStr ? (capStr + ':') : '';
+            container.appendChild(lab);
+            // Column 2: the control itself, rendered WITHOUT its own inline caption.
+            const childNoCaption = Object.assign({}, child, { caption: '' });
+            await this.renderItem(childNoCaption, container);
+        }
+    }
+
     async renderItem(item, contentArea = null) {
         contentArea = contentArea || this.getContentArea();
         let element = null;
@@ -2233,7 +2260,11 @@ class DataForm extends Form {
                 if (item.boldCaption) grp.boldCaption = true;
                 grp.Draw(contentArea);
                 if (grp.element && item.layout && Array.isArray(item.layout)) {
-                    await this.renderLayout(grp.element, item.layout);
+                    if (item.alignFields) {
+                        await this._renderAlignedFields(grp.element, item.layout);
+                    } else {
+                        await this.renderLayout(grp.element, item.layout);
+                    }
                 }
                 break;
             }
