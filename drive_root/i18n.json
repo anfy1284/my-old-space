@@ -194,6 +194,11 @@
         "ru": "Выбрать дату",
         "de": "Datum auswählen"
     },
+    "Open record (F2)": {
+        "en": "Open record (F2)",
+        "ru": "Открыть запись (F2)",
+        "de": "Datensatz öffnen (F2)"
+    },
     "Date selection": {
         "en": "Date selection",
         "ru": "Выбор даты",

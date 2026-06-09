@@ -387,6 +387,12 @@ class FormInput extends UIObject {
                 }
             } catch (e) {}
             try {
+                if (this._openBtn) {
+                    try { if (this._openBtn._ro && typeof this._openBtn._ro.disconnect === 'function') this._openBtn._ro.disconnect(); } catch (e) {}
+                    try { if (this._openBtn._win) window.removeEventListener('resize', this._openBtn._win); } catch (e) {}
+                }
+            } catch (e) {}
+            try {
                 if (this._calOpen && typeof this._closeCalendar === 'function') this._closeCalendar();
                 else if (this._calPopup) { try { this._calPopup.remove(); } catch (_) {} this._calPopup = null; }
                 if (this._calKeyCapture) { try { document.removeEventListener('keydown', this._calKeyCapture, true); } catch (_) {} this._calKeyCapture = null; }
@@ -406,6 +412,7 @@ class FormInput extends UIObject {
         try { this._listBtn = null; } catch (e) {}
         try { this._selectBtn = null; } catch (e) {}
         try { this._dateBtn = null; } catch (e) {}
+        try { this._openBtn = null; } catch (e) {}
         try { this._calPopup = null; } catch (e) {}
         try { if (this._qsDebounce) { clearTimeout(this._qsDebounce); this._qsDebounce = null; } } catch(e) {}
         try { if (this._qsKeyCapture) { document.removeEventListener('keydown', this._qsKeyCapture, true); this._qsKeyCapture = null; } } catch(e) {}
@@ -3543,6 +3550,46 @@ class TextBox extends FormInput {
             } catch (e) {}
             this.inputContainer.appendChild(this.element);
 
+            // Optional "open record" button (1C-style), placed to the LEFT of the
+            // "..." selection button. Shown only when the layout sets showOpenButton.
+            // The F2 shortcut (keydown handler) works regardless of this button.
+            try {
+                if (this.showOpenButton && !this._openBtn) {
+                    const obtn = document.createElement('button');
+                    obtn.type = 'button';
+                    obtn.tabIndex = -1;
+                    obtn.dataset.role = 'open';
+                    obtn.title = (typeof __t === 'function') ? __t('Open record (F2)') : 'Open record (F2)';
+                    try { obtn.classList.add('input-field-button'); } catch (e) {}
+                    try {
+                        const oimg = document.createElement('img');
+                        oimg.src = '/apps/general_icons/resources/public/16x16/open.png';
+                        oimg.alt = '';
+                        oimg.draggable = false;
+                        oimg.style.maxWidth = '100%';
+                        oimg.style.maxHeight = '100%';
+                        oimg.style.display = 'block';
+                        oimg.style.pointerEvents = 'none';
+                        obtn.appendChild(oimg);
+                    } catch (e) { obtn.textContent = '↗'; }
+                    obtn.addEventListener('click', (ev) => { try { ev.stopPropagation(); ev.preventDefault(); this.openCurrentRecord(); } catch (_) {} });
+                    this._openBtn = obtn;
+                    this.inputContainer.appendChild(this._openBtn);
+                    try {
+                        const syncOpenBtn = (b) => {
+                            try {
+                                const update = () => { try { const h = Math.round((b.offsetHeight || (b.getBoundingClientRect && b.getBoundingClientRect().height) || 0)); if (h > 0) b.style.width = h + 'px'; } catch (_) {} };
+                                update();
+                                if (typeof ResizeObserver !== 'undefined') { try { const ro = new ResizeObserver(update); ro.observe(b.parentElement || b); b._ro = ro; } catch(_) {} }
+                                const winHandler = () => update();
+                                try { window.addEventListener('resize', winHandler); b._win = winHandler; } catch(_) {}
+                            } catch (_) {}
+                        };
+                        syncOpenBtn(this._openBtn);
+                    } catch (e) {}
+                }
+            } catch (e) {}
+
             // If requested, add selection button ("...") to the input container.
             // It should appear to the right of the input and (if present) to the left of the dropdown list button.
             try {
@@ -4486,6 +4533,14 @@ class TextBox extends FormInput {
             });
 
             this.element.addEventListener('keydown', (e) => {
+                // F2 — open the referenced record's form (1C-style). Works on any
+                // reference field that holds a value, regardless of the open button.
+                if (e.key === 'F2' && this.selection && this.selection.table
+                    && this.rawValue !== undefined && this.rawValue !== null && this.rawValue !== '') {
+                    try { e.preventDefault(); e.stopPropagation(); } catch (_) {}
+                    this.openCurrentRecord();
+                    return;
+                }
                 if (this.isDate) { try { this._handleDateKeydown && this._handleDateKeydown(e); } catch (_) {} return; }
                 if (this.digitsOnly) {
                     // allow control combinations
@@ -5237,6 +5292,22 @@ class TextBox extends FormInput {
     }
 
     // ======================== END DATE MODE METHODS ========================
+
+    // Open the referenced record's form (1C-style "open" / F2). Uses the
+    // selection table + the current raw value (FK UID). No-op without a value.
+    openCurrentRecord() {
+        try {
+            const selMeta = this.selection || {};
+            const table = selMeta.table || null;
+            const uid = (this.rawValue !== undefined && this.rawValue !== null && this.rawValue !== '')
+                ? this.rawValue
+                : (typeof this.getValue === 'function' ? this.getValue() : null);
+            if (!table || uid === undefined || uid === null || uid === '') return;
+            if (typeof window !== 'undefined' && window.MySpace && typeof window.MySpace.open === 'function') {
+                window.MySpace.open('uniForm', { mode: 'record', tableName: table, recordID: uid });
+            }
+        } catch (e) { console.error('[TextBox.openCurrentRecord] error:', e); }
+    }
 
     onSelectionStart() {
         // Open uniListForm chooser directly and forward selection to `handleSelection`.
@@ -9082,6 +9153,14 @@ class DynamicTable extends Table {
             });
             tr.addEventListener('keydown', (ev) => {
                 try {
+                    if (ev.key === 'F2') {
+                        // 1C-style: F2 opens the record form — in ANY mode (normal
+                        // and select mode). Always opens, never selects.
+                        if (self._activeRowIndex !== gi) self.activateRow(gi);
+                        try { ev.preventDefault(); ev.stopPropagation(); } catch (e) {}
+                        try { self.openRecord(gi); } catch (e) {}
+                        return;
+                    }
                     if (ev.key === 'Enter') {
                         if (self.readOnly) {
                             if (self._activeRowIndex !== gi) self.activateRow(gi);
@@ -9287,35 +9366,45 @@ class DynamicTable extends Table {
             if (!row || !row.loaded) return;
             const isSelect = !!(this.appForm && this.appForm.selectMode);
             if (!isSelect) {
-                // If recordOpen is disabled for this table — do not open on double-click
-                if (Array.isArray(this.hiddenButtons) && this.hiddenButtons.includes('recordOpen')) return;
-                const tableName = this.tableName || (this.appForm && (this.appForm.dbTable || this.dataKey)) || '';
-                if (typeof window !== 'undefined' && window.MySpace && typeof window.MySpace.open === 'function') {
-                    const self = this;
-                    (async () => {
-                        try {
-                            const instId = await window.MySpace.open('uniForm', { mode: 'record', tableName, recordID: row.UID });
-                            if (instId) {
-                                const onFD = (ev) => {
-                                    try {
-                                        const inst = window.MySpace.getInstance(instId);
-                                        const df = ev && ev.detail && ev.detail.form;
-                                        if (inst && inst.form && df === inst.form) {
-                                            window.removeEventListener('form-destroyed', onFD);
-                                            try { self.refresh(); } catch (e) {}
-                                        }
-                                    } catch (e) {}
-                                };
-                                window.addEventListener('form-destroyed', onFD);
-                            }
-                        } catch (e) {}
-                    })();
-                }
+                this.openRecord(globalIndex);
             } else {
                 if (this.appForm) this.appForm._currentRecord = row;
                 const inst = this.appForm && this.appForm.instance;
                 if (inst && typeof inst.onSelect === 'function') { try { inst.onSelect({}); } catch (e) {} }
                 else if (this.appForm && typeof this.appForm.onSelect === 'function') { try { this.appForm.onSelect({}); } catch (e) {} }
+            }
+        } catch (e) {}
+    }
+
+    // Open the row's record form. Used by double-click in normal mode AND by F2
+    // in ANY mode (incl. select mode) — F2 always opens, never selects. Honours a
+    // hidden recordOpen button (table where opening is disabled).
+    openRecord(globalIndex) {
+        try {
+            const row = this.dataCache[globalIndex];
+            if (!row || !row.loaded) return;
+            if (Array.isArray(this.hiddenButtons) && this.hiddenButtons.includes('recordOpen')) return;
+            const tableName = this.tableName || (this.appForm && (this.appForm.dbTable || this.dataKey)) || '';
+            if (typeof window !== 'undefined' && window.MySpace && typeof window.MySpace.open === 'function') {
+                const self = this;
+                (async () => {
+                    try {
+                        const instId = await window.MySpace.open('uniForm', { mode: 'record', tableName, recordID: row.UID });
+                        if (instId) {
+                            const onFD = (ev) => {
+                                try {
+                                    const inst = window.MySpace.getInstance(instId);
+                                    const df = ev && ev.detail && ev.detail.form;
+                                    if (inst && inst.form && df === inst.form) {
+                                        window.removeEventListener('form-destroyed', onFD);
+                                        try { self.refresh(); } catch (e) {}
+                                    }
+                                } catch (e) {}
+                            };
+                            window.addEventListener('form-destroyed', onFD);
+                        }
+                    } catch (e) {}
+                })();
             }
         } catch (e) {}
     }
