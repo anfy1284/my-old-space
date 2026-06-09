@@ -2426,7 +2426,7 @@ class DataForm extends Form {
                     const resolvedTabs = (item.tabs || []).map(t => {
                         const rawCap = t.caption || '';
                         const resolvedCap = (rawCap && typeof rawCap === 'object' && rawCap.i18n)
-                            ? String(rawCap.i18n)
+                            ? (typeof __t === 'function' ? __t(rawCap.i18n) : String(rawCap.i18n))
                             : rawCap;
                         return Object.assign({}, t, { caption: resolvedCap });
                     });
@@ -5455,16 +5455,20 @@ class Group extends UIObject {
             this.element = document.createElement('fieldset');
             this.element.className = 'ui-group';
             try { this.element.classList.add('ui-fieldset'); } catch (e) {}
+            // Use caption (if provided) as legend text so it visually interrupts the border
+            const legendText = this.caption || this.title;
             // noBorder group: no visible frame, caption still shown if set
             if (this.noBorder) {
                 this.element.classList.add('ui-group-no-border');
+                // Frameless group WITH a caption: reserve top room so the corner
+                // caption doesn't overlap the content. Sides/bottom stay flush
+                // (no border, no padding) — independent of bold styling.
+                if (legendText) this.element.classList.add('ui-group-no-border-titled');
             }
             if (this.boldCaption) {
                 this.element.classList.add('ui-group-bold-caption');
             }
             const legend = document.createElement('legend');
-            // Use caption (if provided) as legend text so it visually interrupts the border
-            const legendText = this.caption || this.title;
             legend.textContent = legendText;
             // Hide legend when there is no caption text (prevents gap in border)
             if (!legendText) {

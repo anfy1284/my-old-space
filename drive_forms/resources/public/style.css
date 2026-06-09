@@ -316,8 +316,10 @@ html, body {
     padding: 0;
     background: transparent;
 }
-/* When noBorder group has a visible caption — add top padding to make room for it */
-.ui-group-no-border.ui-group-bold-caption {
+/* Frameless group WITH a caption: reserve top room so the corner caption does
+   not overlap the content. Sides/bottom stay flush (no border padding).
+   Decoupled from bold styling — applies to any captioned no-border group. */
+.ui-group-no-border.ui-group-no-border-titled {
     padding-top: 16px;
 }
 /* Bold caption group — legend text is bold */
