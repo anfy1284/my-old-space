@@ -7600,10 +7600,6 @@ class Table extends UIObject {
     // Create header table and return { headerTable, hcolgroup, renderHeaderAdjust }
     buildHeader(headerContainer, getBcolgroup) {
         const headerTable = document.createElement('table');
-        try {
-            console.log('[Table.buildHeader] columns.length=', (this.columns && this.columns.length) || 0, 'tableName=', this.tableName || '');
-            try { console.log('[Table.buildHeader] captions=', (this.columns || []).map(c => (c && (c.caption || c.data)) || '').slice(0, 50)); } catch(e) {}
-        } catch (e) {}
         headerTable.style.width = '100%';
         headerTable.style.borderCollapse = 'separate';
         headerTable.style.borderSpacing = '0';
@@ -7652,7 +7648,6 @@ class Table extends UIObject {
             });
 
             th.addEventListener('click', (e) => {
-                try { console.log('[DynamicTable] header click', col && col.data ? col.data : i, 'isResizing=', this.resizeState && this.resizeState.isResizing); } catch (e) {}
                 if (this.resizeState.isResizing || this._resizeOccurred) {
                     this._resizeOccurred = false;
                     return;
@@ -8067,7 +8062,6 @@ class Table extends UIObject {
             try {
                 if (col && col.inputType) {
                     cellItem.type = col.inputType;
-                    try { console.log('[DynamicTable] used inputType from column ->', col.data, '->', cellItem.type); } catch (e) {}
                 }
             } catch (e) {}
 
@@ -8109,7 +8103,6 @@ class Table extends UIObject {
             // If server did not specify a type (after mapping), default to textbox (keep client simple)
             if (!cellItem.type) {
                 cellItem.type = 'textbox';
-                try { console.log('[DynamicTable] defaulted field -> type', col && col.data, '->', cellItem.type); } catch (e) {}
             }
         } catch (e) { try { console.error('[DynamicTable] Error mapping column type', e); } catch (ee) {} }
 
@@ -8117,7 +8110,6 @@ class Table extends UIObject {
             if (this.appForm && typeof this.appForm.renderItem === 'function') {
                 (async (cellItemLocal, containerLocal, rowIndexLocal, colDef, key) => {
                     try {
-                        try { console.log('[DynamicTable] about to call renderItem with', cellItemLocal, 'field:', colDef && colDef.data); } catch (e) {}
                         await this.appForm.renderItem(cellItemLocal, containerLocal);
                     } catch (e) {}
                     try {
