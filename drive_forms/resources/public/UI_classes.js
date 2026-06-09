@@ -4040,6 +4040,8 @@ class TextBox extends FormInput {
                                 // that can detach the popup from its input (scroll/resize/move)
                                 this._listScrollHandler = (ev) => {
                                     try {
+                                        // Ignore layout churn during an auto-open settling window.
+                                        if (this._autoOpenGuardUntil && Date.now() < this._autoOpenGuardUntil) return;
                                         // If the interaction started inside the popup, list button, or input, don't close.
                                         if (ev && ev.target) {
                                             try {
@@ -4081,6 +4083,10 @@ class TextBox extends FormInput {
                                     const observeTarget = (this.containerElement || container) || document.body;
                                     if (typeof MutationObserver !== 'undefined') {
                                         this._listMutationObserver = new MutationObserver((mutations) => {
+                                            // Ignore DOM churn during an auto-open settling window — e.g. the
+                                            // masterFor re-render right after adding a tabular row would
+                                            // otherwise close the dropdown the instant it opens.
+                                            if (this._autoOpenGuardUntil && Date.now() < this._autoOpenGuardUntil) return;
                                             try { this._closeList && this._closeList(); } catch(_) {}
                                         });
                                         try {
@@ -7429,6 +7435,9 @@ class Table extends UIObject {
         this.showToolbar = (properties.showToolbar !== false);
         this.hiddenButtons = Array.isArray(properties.hiddenButtons) ? properties.hiddenButtons : [];
         this.tableName = properties.tableName || '';
+        // Auto-open the single reference picker when a new row is added (default on;
+        // opt out per table with "autoPickSingleRef": false in the layout).
+        this.autoPickSingleRef = (properties.autoPickSingleRef !== false);
         // Признак табличной части — выставляется автоматически в Draw() из _dataMap
         this.isTabularSection = false;
         this.currentFilters = [];
@@ -7436,6 +7445,52 @@ class Table extends UIObject {
 
     // Обрабатывает действие тулбара внутри таблицы.
     // Возвращает true если действие обработано (tabular section); false — передать в appForm.
+    // When a tabular section has exactly ONE editable reference column, opening a
+    // new row immediately starts picking that reference: dropdown → open it
+    // (focused); "..." → open the selection form; both buttons → dropdown.
+    // The cell control renders asynchronously, so retry a few frames until it
+    // appears in the form's controlsMap (registered only after Draw completes).
+    _autoStartSingleRefSelection(newRowIndex) {
+        try {
+            if (this.autoPickSingleRef === false) return;
+            const refCols = (this.columns || []).filter(col => {
+                if (!col || col.readOnly) return false;
+                const isRS = (col.inputType === 'recordSelector') || (col.type === 'recordSelector');
+                const hasSel = !!(col.properties && col.properties.selection && col.properties.selection.table);
+                const hasFK = !!(col.foreignKey && (col.foreignKey.table || col.foreignKey.field));
+                return (isRS && hasSel) || hasFK;
+            });
+            if (refCols.length !== 1) return;
+            const fkCol = refCols[0];
+            const cellKey = (this.dataKey || '') + '__r' + newRowIndex + '__' + fkCol.data;
+            const form = this.appForm;
+            if (!form || !form.controlsMap) return;
+            let tries = 0;
+            const tryTrigger = () => {
+                const ctrl = form.controlsMap[cellKey];
+                if (ctrl) {
+                    try { if (ctrl.element && typeof ctrl.element.focus === 'function') ctrl.element.focus(); } catch (_) {}
+                    try {
+                        // both buttons → dropdown wins, so test listMode first
+                        if (ctrl.listMode && typeof ctrl._openList === 'function') {
+                            // Guard: the row-add + masterFor re-render churn fires DOM
+                            // mutations/scroll right after open, which the dropdown's own
+                            // MutationObserver/scroll handlers would treat as "close me".
+                            // Suppress that auto-close for a short settling window.
+                            ctrl._autoOpenGuardUntil = Date.now() + 600;
+                            ctrl._openList();
+                        } else if (ctrl.showSelectionButton && typeof ctrl.onSelectionStart === 'function') {
+                            ctrl.onSelectionStart();
+                        }
+                    } catch (_) {}
+                    return;
+                }
+                if (tries++ < 60) { try { requestAnimationFrame(tryTrigger); } catch (_) {} }
+            };
+            try { requestAnimationFrame(tryTrigger); } catch (_) { tryTrigger(); }
+        } catch (_) {}
+    }
+
     doToolbarAction(action) {
         if (action === 'recordAdd' && this.isTabularSection) {
             // Запрашиваем UID с сервера, затем добавляем строку
@@ -7468,6 +7523,7 @@ class Table extends UIObject {
                 self.data_updateValue(self.dataKey, rows);
                 try { if (typeof self._invokeRenderBodyRows === 'function') self._invokeRenderBodyRows(); } catch (_) {}
                 try { if (typeof self.activateRow === 'function') self.activateRow(rows.length - 1); } catch (_) {}
+                try { self._autoStartSingleRefSelection(rows.length - 1); } catch (_) {}
                 try { if (self.appForm && typeof self.appForm.setModified === 'function') self.appForm.setModified(true); } catch (_) {}
             };
             doAdd();
