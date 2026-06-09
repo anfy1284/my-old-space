@@ -2200,10 +2200,52 @@ class DataForm extends Form {
 
                 const propClone = Object.assign({}, properties || {});
                 const propClone2 = Object.assign({}, propClone);
-                if (properties && properties.selection) propClone2.selection = properties.selection;
-                propClone2.showSelectionButton = !properties.readOnly;
-                if (properties && properties.readOnly) propClone2.listMode = false;
+                const sel = (properties && properties.selection) ? properties.selection : null;
+                if (sel) propClone2.selection = sel;
                 if (properties && properties.noQuickSearch) propClone2.quickSearch = false;
+
+                // ── Selector buttons ────────────────────────────────────────────
+                // "..." = showSelectionButton (opens the list form). Dropdown =
+                // showListButton (inline list of names). Layout API: set either
+                // boolean to force it. If NEITHER is given → AUTO: count the rows
+                // the user can actually see (RLS-filtered totalRows) — < 10 ⇒
+                // dropdown only, ≥ 10 ⇒ "..." only. readOnly ⇒ no buttons.
+                // The dropdown always shows a single field (name).
+                let useSelect = false, useList = false, listItemsSel = null;
+                const hasSelFlag  = !!(properties && Object.prototype.hasOwnProperty.call(properties, 'showSelectionButton'));
+                const hasListFlag = !!(properties && Object.prototype.hasOwnProperty.call(properties, 'showListButton'));
+                if (properties && properties.readOnly) {
+                    // no buttons for read-only selectors
+                } else if (hasSelFlag || hasListFlag) {
+                    useSelect = !!(properties && properties.showSelectionButton);
+                    useList   = !!(properties && properties.showListButton);
+                } else if (sel && sel.table) {
+                    try {
+                        const resp = await callServerMethod('uniForm', 'getLookupList', { tableName: sel.table, firstRow: 0, visibleRows: 10 });
+                        const rows = (resp && resp.rows) || [];
+                        const total = (resp && typeof resp.totalRows === 'number') ? resp.totalRows : rows.length;
+                        if (total < 10) {
+                            useList = true;
+                            listItemsSel = rows.map(r => ({ value: r.UID, caption: r.display }));
+                        } else {
+                            useSelect = true;
+                        }
+                    } catch (e) { useSelect = true; } // on error fall back to the always-works "..."
+                } else {
+                    useSelect = true; // no selection metadata → plain "..."
+                }
+                propClone2.showSelectionButton = useSelect;
+                propClone2.listMode = useList;
+                if (useList) {
+                    if (!listItemsSel && sel && sel.table) {
+                        // Forced list/both mode — fetch the visible names once for the dropdown.
+                        try {
+                            const resp = await callServerMethod('uniForm', 'getLookupList', { tableName: sel.table, firstRow: 0, visibleRows: 200 });
+                            listItemsSel = ((resp && resp.rows) || []).map(r => ({ value: r.UID, caption: r.display }));
+                        } catch (e) { listItemsSel = []; }
+                    }
+                    propClone2.listItems = listItemsSel || [];
+                }
                 
                 const ctrlSel = new TextBox(contentArea, propClone2);
                 try { 
