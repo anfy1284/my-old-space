@@ -63,8 +63,8 @@ function getEntityTypeForTable(tableName) {
 
 /**
  * Рекурсивно переводит все { i18n: 'key' } объекты в дереве layout.
- * Обрабатывает: item.caption, item.options[].caption, tab.caption,
- *               item.layout[], item.tabs[].layout[].
+ * Обрабатывает: item.caption, item.options[].caption, item.columns[].caption,
+ *               tab.caption, item.layout[], item.tabs[].layout[].
  * Мутирует объекты in-place.
  */
 async function translateLayoutI18n(items, sessionID) {
@@ -88,6 +88,10 @@ async function translateLayoutI18n(items, sessionID) {
         // Recurse into nested layout
         if (Array.isArray(item.layout)) {
             await translateLayoutI18n(item.layout, sessionID);
+        }
+        // Recurse into table columns (each column is a node with its own caption)
+        if (Array.isArray(item.columns)) {
+            await translateLayoutI18n(item.columns, sessionID);
         }
         // Recurse into tabs
         if (Array.isArray(item.tabs)) {
