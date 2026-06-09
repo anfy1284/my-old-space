@@ -8845,6 +8845,7 @@ class Tabs extends UIObject {
                 header.appendChild(btn);
 
                 const pane = document.createElement('div');
+                pane.classList.add('ui-tabs-pane');
                 pane.style.width = '100%';
                 // First tab visible, rest stacked behind as absolute
                 if (idx === 0) {

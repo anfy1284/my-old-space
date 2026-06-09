@@ -651,6 +651,16 @@ input[type="checkbox"],
     flex-direction: column;
 }
 
+/* Tab pane: lay out its content blocks like the form body — a vertical stack
+   with the same 14px gap as .ui-form-content — so groups inside a tab are spaced
+   consistently with the rest of the form (a pane is a plain holder otherwise, so
+   its children would sit flush against each other). */
+.ui-tabs-pane {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
 .ui-tabs-content::after {
     display: none;
 }
