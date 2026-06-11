@@ -6,12 +6,19 @@
   <title>App</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <link rel="stylesheet" href="/app/res/public/style.css">
+  <!-- ТЗ «Оптимизация фреймворка», п. 2.2 — ранний параллельный запрос крупных
+       скриптов (UI_classes.js ~505KB и собранный бандл /app/loadApps), пока
+       парсится HTML. Порядок выполнения сохраняется атрибутом defer ниже. -->
+  <link rel="preload" href="/app/res/public/UI_classes.js" as="script">
+  <link rel="preload" href="/app/loadApps" as="script">
 </head>
 <body>
   <h1></h1>
   <div id="app"></div>
-  <script src="/app/res/public/client.js"></script>
-  <script src="/app/res/public/UI_classes.js"></script>
-  <script src="/app/loadApps"></script>  
+  <!-- defer: грузятся параллельно, выполняются по порядку после парсинга HTML
+       (раньше три блокирующих <script> тормозили first paint). -->
+  <script defer src="/app/res/public/client.js"></script>
+  <script defer src="/app/res/public/UI_classes.js"></script>
+  <script defer src="/app/loadApps"></script>
 </body>
 </html>

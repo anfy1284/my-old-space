@@ -4,9 +4,21 @@ const fs = require('fs');
 const path = require('path');
 const { Sequelize, DataTypes } = require('sequelize');
 const sequelize = require('../drive_root/db/sequelize_instance');
+const log = require('../drive_root/log');
+
+// ТЗ «Оптимизация фреймворка», п. 2.1 — кэш собранного клиентского бандла.
+// Раньше каждый GET /app/loadApps заново: 3× чтение/парс apps.json + по config.json
+// на каждое приложение (existsSync+readFileSync+JSON.parse) + конкатенация всех
+// client.js. Состав приложений и их доступы фиксируются при старте, поэтому бандл
+// зависит только от (effectiveRole, language) и кэшируется по этому ключу.
+// Сами client.js уже кэшируются fileStore (п. 0.3) — здесь снимаем оставшиеся
+// fs-операции и склейку. Выключатель: LOADAPPS_CACHE_DISABLE=1.
+const _loadAppsCache = new Map();
+const _LOADAPPS_CACHE_ON = process.env.LOADAPPS_CACHE_DISABLE !== '1';
+
 async function loadApps(user, sessionID) {
   const accessRole = await getUserAccessRole(user);
-  console.log(`[loadApps] Loading apps for user: ${user ? user.name : 'null'}, role: ${accessRole}`);
+  log.debug(`[loadApps] Loading apps for user: ${user ? user.name : 'null'}, role: ${accessRole}`);
   const localAppsPath = path.join(__dirname, 'apps.json');
   const packageAppsPath = path.join(__dirname, '..', 'apps.json');
   const projectAppsPath = path.resolve(process.cwd(), 'apps.json');
@@ -45,7 +57,7 @@ async function loadApps(user, sessionID) {
 
   const appsList = Array.from(appsMap.values());
   let allCode = '';
-  
+
   // Don't convert nologged to public - keep as is to load login app
   const effectiveRole = accessRole || 'nologged';
 
@@ -58,21 +70,28 @@ async function loadApps(user, sessionID) {
       language = ctx && ctx.language;
     } catch (e) { /* no session, serve without translation */ }
   }
-  
-  console.log('[loadApps] effectiveRole:', effectiveRole);
-  
+
+  // п. 2.1 — отдать готовый бандл из кэша (ключ: роль + язык)
+  const _cacheKey = `${effectiveRole}|${language || ''}`;
+  if (_LOADAPPS_CACHE_ON) {
+    const _cached = _loadAppsCache.get(_cacheKey);
+    if (_cached !== undefined) return _cached;
+  }
+
+  log.debug('[loadApps] effectiveRole:', effectiveRole);
+
   for (const app of appsList) {
     const baseDir = app.__appsBaseDir || path.resolve(__dirname, '..');
     const appsBasePath = app.__appsPath || 'apps';
     const cleanAppPath = (app.path || `/${app.name}`).replace(/^[/\\]+/, '');
     const configPath = path.resolve(baseDir, appsBasePath, cleanAppPath, 'config.json');
     if (!fs.existsSync(configPath)) {
-      console.log(`[loadApps] Config not found for ${app.name}: ${configPath}`);
+      log.debug(`[loadApps] Config not found for ${app.name}: ${configPath}`);
       continue;
     }
     const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
     if (Array.isArray(config.access) && config.access.includes(effectiveRole)) {
-      console.log(`[loadApps] Loading app: ${app.name}, autoStart: ${config.autoStart}`);
+      log.debug(`[loadApps] Loading app: ${app.name}, autoStart: ${config.autoStart}`);
       // Only load apps marked with autoStart: true
       if (config.autoStart === true) {
         const clientPath = path.resolve(baseDir, appsBasePath, cleanAppPath, 'resources', 'public', 'client.js');
@@ -81,9 +100,10 @@ async function loadApps(user, sessionID) {
         }
       }
     } else {
-      console.log(`[loadApps] Skipping app: ${app.name}, access: ${JSON.stringify(config.access)}, effectiveRole: ${effectiveRole}`);
+      log.debug(`[loadApps] Skipping app: ${app.name}, access: ${JSON.stringify(config.access)}, effectiveRole: ${effectiveRole}`);
     }
   }
+  if (_LOADAPPS_CACHE_ON) _loadAppsCache.set(_cacheKey, allCode);
   return allCode;
 }
 // Global functions for drive_forms server modules
