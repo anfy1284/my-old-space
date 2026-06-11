@@ -7,19 +7,29 @@
         "caption": "",
         "layout": [
             {
-                "type": "textbox",
-                "name": "username",
-                "caption": { "i18n": "login_username" }
-            },
-            {
-                "type": "textbox",
-                "name": "password",
-                "caption": { "i18n": "login_password" },
-                "properties": { "isPassword": true }
+                "type": "group",
+                "noBorder": true,
+                "caption": "",
+                "alignFields": true,
+                "orientation": "vertical",
+                "layout": [
+                    {
+                        "type": "textbox",
+                        "name": "username",
+                        "caption": { "i18n": "login_username" }
+                    },
+                    {
+                        "type": "textbox",
+                        "name": "password",
+                        "caption": { "i18n": "login_password" },
+                        "properties": { "isPassword": true }
+                    }
+                ]
             },
             {
                 "type": "button",
                 "name": "btnLogin",
+                "default": true,
                 "caption": { "i18n": "login_btn_login" },
                 "icon": "/apps/general_icons/resources/public/16x16/select.png",
                 "events": { "onClick": "onLogin" }

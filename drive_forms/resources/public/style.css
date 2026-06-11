@@ -29,6 +29,14 @@
 
 /* Compact variant merged: both input buttons use unified `.input-field-button` sizing */
 
+/* Spinner buttons ("−"/"+") for integer fields — same square sizing as the "..."
+   selector, with a slightly bolder glyph so +/- read clearly at small sizes. */
+.input-field-button.ui-spin-button {
+  font-size: 13px;
+  font-weight: bold;
+  padding-bottom: 1px;
+}
+
 /* Form / window */
 .ui-form {
   position: absolute;
@@ -391,6 +399,10 @@ html, body {
 }
 
 .ui-button { background-color: var(--color-mid); border-top:2px solid var(--color-light); border-left:2px solid var(--color-light); border-right:2px solid #808080; border-bottom:2px solid #808080; font-family: MS Sans Serif, sans-serif; font-size:11px; cursor:default; outline:none; box-sizing:border-box; display:inline-flex; align-items:center; justify-content:center; }
+
+/* Default form button (layout flag "default": true) — Win95 marks the Enter-default
+   button with a heavier dark outline inside the raised border. */
+.ui-button.ui-default-button { outline: 1px solid #000; outline-offset: -3px; }
 
 .ui-textbox { background-color:#ffffff; border-top:2px solid #808080; border-left:2px solid #808080; border-right:2px solid #ffffff; border-bottom:2px solid #ffffff; font-family: MS Sans Serif, sans-serif; font-size:11px; padding:2px 4px; outline:none; box-sizing:border-box; }
 

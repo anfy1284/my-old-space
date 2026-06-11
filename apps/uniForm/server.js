@@ -516,7 +516,7 @@ async function buildTableFieldsFromModel(tableName) {
             let inputType = 'textbox';
             if (f.foreignKey) inputType = 'recordSelector';
             else if (f.isAddress) inputType = 'address';
-            else if (typeKey === 'INTEGER') inputType = 'number';
+            else if (typeKey === 'INTEGER') inputType = 'integer';
             else if (typeKey === 'BOOLEAN') inputType = 'checkbox';
             else if (typeKey === 'DATE' || typeKey === 'DATEONLY') inputType = 'date';
 
@@ -532,11 +532,11 @@ async function buildTableFieldsFromModel(tableName) {
 
             if (f.foreignKey) {
                 field.foreignKey = f.foreignKey;
+                // No explicit showSelectionButton/showListButton → the client auto-decides:
+                // a small option set (RLS-filtered < 10) renders an inline dropdown, a large
+                // one the "..." selector form. Same UX as the hand-built booking layout.
                 field.properties = {
-                    selection: { table: f.foreignKey.table, idField: f.foreignKey.field || 'UID', displayField: f.foreignKey.displayField || 'name' },
-                    showSelectionButton: true,
-                    listMode: true,
-                    listSource: { app: config.name, table: f.foreignKey.table, idField: f.foreignKey.field || 'UID', displayField: f.foreignKey.displayField || 'name', limit: 50 }
+                    selection: { table: f.foreignKey.table, idField: f.foreignKey.field || 'UID', displayField: f.foreignKey.displayField || 'name' }
                 };
             }
 
@@ -554,7 +554,8 @@ async function buildTableFieldsFromModel(tableName) {
 function mapInputTypeToControl(inputType) {
     const t = (inputType || '').toString().toLowerCase();
     if (t === 'textbox' || t === 'string') return 'textbox';
-    if (t === 'number' || t === 'integer') return 'number';
+    if (t === 'integer') return 'integer';
+    if (t === 'number') return 'number';
     if (t === 'checkbox' || t === 'boolean') return 'checkbox';
     if (t === 'date' || t === 'dateonly') return 'date';
     if (t === 'recordselector') return 'recordSelector';
@@ -855,7 +856,9 @@ async function generateFormSpec(tableName, params, sessionID) {
         if (!layout) {
             layout = [
                 { type: 'commandBar' },
-                { type: 'group', caption: tableName, orientation: 'vertical', layout: controls }
+                // alignFields: captions and controls render as a 2-column grid so labels
+                // and fields line up (same polish as the hand-built booking form).
+                { type: 'group', caption: tableName, orientation: 'vertical', alignFields: true, layout: controls }
             ];
 
             // Автоматические табличные части

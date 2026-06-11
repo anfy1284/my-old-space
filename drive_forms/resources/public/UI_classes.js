@@ -1987,6 +1987,10 @@ class DataForm extends Form {
         if (!contentArea) contentArea = this.getContentArea();
         const items = layout || this.layout || [];
         const isRoot = layout == null;
+        // Clear any stale default-button reference before a fresh root render — a
+        // re-render to a layout without a default button (e.g. login → change password)
+        // must not keep Enter bound to the previous, now-detached button.
+        if (isRoot) this._defaultButton = null;
         for (const item of items) {
             await this.renderItem(item, contentArea);
         }
@@ -1995,7 +1999,43 @@ class DataForm extends Form {
         // до того как активируются деталь-таблицы.
         if (isRoot) {
             setTimeout(() => { try { this._activateFirstRows(); } catch(e) {} }, 0);
+            try { this._setupDefaultButtonHandler(); } catch (e) {}
         }
+    }
+
+    // Wire the form-level "default button" behavior: pressing Enter inside the form
+    // triggers the button marked `default: true` in the layout (e.g. login "Sign in").
+    // Bubble-phase so popup/dropdown keyboard handlers (capture-phase) still get Enter
+    // first; ignores Enter inside a textarea (newline) and inside open list popups
+    // (which live in document.body, outside this.element, so they never reach here).
+    _setupDefaultButtonHandler() {
+        if (this._defaultBtnHandler || !this._defaultButton) return;
+        const formSelf = this;
+        this._defaultBtnHandler = (ev) => {
+            try {
+                if (ev.key !== 'Enter' || ev.shiftKey || ev.ctrlKey || ev.altKey || ev.metaKey) return;
+                const btn = formSelf._defaultButton;
+                if (!btn || !btn.element || btn.element.disabled) return;
+                const tgt = ev.target;
+                if (tgt && tgt.tagName && tgt.tagName.toLowerCase() === 'textarea') return;
+                ev.preventDefault();
+                try { btn.element.click(); } catch (_) {}
+            } catch (_) {}
+        };
+        const root = this.element || this.contentArea;
+        try { if (root && root.addEventListener) root.addEventListener('keydown', this._defaultBtnHandler); } catch (e) {}
+    }
+
+    destroy() {
+        // Remove the default-button keydown listener before the base teardown.
+        try {
+            if (this._defaultBtnHandler) {
+                const root = this.element || this.contentArea;
+                if (root && root.removeEventListener) root.removeEventListener('keydown', this._defaultBtnHandler);
+                this._defaultBtnHandler = null;
+            }
+        } catch (e) {}
+        try { super.destroy(); } catch (e) {}
     }
 
     // Cached FK lookup for a table: ONE getLookupList per table per form
@@ -2112,6 +2152,12 @@ class DataForm extends Form {
         };
 
         switch (item.type) {
+            case 'integer': {
+                // Integer field: digits only, no decimal separator, with ± spinner buttons.
+                properties.digitsOnly = true;
+                properties.allowFloat = false;
+                if (properties.spinButtons === undefined) properties.spinButtons = true;
+            }
             case 'number': {
                 properties.digitsOnly = true;
             }
@@ -2366,6 +2412,14 @@ class DataForm extends Form {
                 } catch (e) {}
 
                 try { if (item.name) this.controlsMap[item.name] = btn; } catch (e) {}
+                // Default button: the one "pressed" when the user hits Enter in the form
+                // (e.g. login "Sign in"). Marked with "default": true in the layout.
+                try {
+                    if (item.default === true || item.isDefault === true) {
+                        this._defaultButton = btn;
+                        try { if (btn.element) btn.element.classList.add('ui-default-button'); } catch (e) {}
+                    }
+                } catch (e) {}
                 break;
             }
             case 'commandBar': {
@@ -2529,6 +2583,12 @@ class DataForm extends Form {
                     try { if (typeof tabsCtrl.setCaption === 'function') tabsCtrl.setCaption(caption); } catch (e) {}
                     try { if (typeof tabsCtrl.Draw === 'function') tabsCtrl.Draw(contentArea); } catch (e) {}
                     if (item.name) this.controlsMap[item.name] = tabsCtrl;
+                    // Wait for tab panes (and the tables/selectors inside them) to finish
+                    // rendering before the root render loop completes — otherwise the
+                    // setTimeout(_activateFirstRows) scheduled at the end of the root
+                    // renderLayout fires before nested master tables exist in controlsMap,
+                    // and masterFor detail filters are never applied on open.
+                    try { if (tabsCtrl && tabsCtrl._renderAllPromise) await tabsCtrl._renderAllPromise; } catch (e) {}
                 } catch (e) {
                     console.error('Error creating tabs control', e);
                 }
@@ -3381,6 +3441,14 @@ class TextBox extends FormInput {
             this.allowNegative = !!this.allowNegative; // when true, allow a leading minus sign
             this.decimalPlaces = this.decimalPlaces ? (this.decimalPlaces | 0) : 0;
         }
+        // Spinner buttons ("−"/"+"): for integer fields, a pair of square buttons in
+        // the same slot as the "..." selector that step the value by ±step. Lets the
+        // user enter small numbers (1, 2, 3…) with the mouse without touching the keyboard.
+        this.spinButtons = !!this.spinButtons;
+        this.step = (typeof this.step === 'number' && this.step > 0) ? this.step : 1;
+        if (typeof this.minValue === 'undefined') this.minValue = (properties && typeof properties.minValue === 'number') ? properties.minValue : null;
+        if (typeof this.maxValue === 'undefined') this.maxValue = (properties && typeof properties.maxValue === 'number') ? properties.maxValue : null;
+        this._spinWrap = null;
         // containerElement and label are handled by FormInput helpers
         this.containerElement = null;
         this.label = null;
@@ -3465,6 +3533,26 @@ class TextBox extends FormInput {
     getText() {
         if (this.isDate) { return this._getDateDisplay(); }
         return this.element ? this.element.value : this.text;
+    }
+
+    // Step the integer value by delta (used by the "−"/"+" spinner buttons).
+    // Empty/non-numeric current value is treated as 0; result is clamped to
+    // minValue/maxValue when set, then written back and broadcast via input+change.
+    _spinValue(delta) {
+        try {
+            if (this.readOnly) return;
+            const cur = (this.element ? this.element.value : this.text);
+            let n = parseInt(cur, 10);
+            if (!Number.isFinite(n)) n = 0;
+            n += delta;
+            if (typeof this.minValue === 'number' && n < this.minValue) n = this.minValue;
+            if (typeof this.maxValue === 'number' && n > this.maxValue) n = this.maxValue;
+            if (!this.allowNegative && n < 0) n = 0;
+            this.setText(String(n));
+            try { if (this.element) this.element.dispatchEvent(new Event('input',  { bubbles: true })); } catch (_) {}
+            try { if (this.element) this.element.dispatchEvent(new Event('change', { bubbles: true })); } catch (_) {}
+            try { if (typeof this.onChange === 'function') this.onChange(n, String(n)); } catch (_) {}
+        } catch (e) {}
     }
 
     setPlaceholder(placeholder) {
@@ -3679,6 +3767,34 @@ class TextBox extends FormInput {
                             try { syncBtn(this._selectBtn); } catch (_) {}
                         } catch (e) {}
                     }
+                }
+            } catch (e) {}
+
+            // Spinner buttons ("−"/"+") for integer fields. Placed in the same slot as
+            // the "..." selector (right of the input). Each click steps the value by
+            // ±step, clamped to min/max, then dispatches input+change so form/cell data
+            // updates through the normal path. Disabled inactive-row state is handled by
+            // the table cell logic (button without dataset.role='selection').
+            try {
+                if (this.spinButtons && this.digitsOnly && !this._spinWrap) {
+                    const mkSpin = (glyph, delta, role) => {
+                        const b = document.createElement('button');
+                        b.type = 'button';
+                        b.tabIndex = -1;
+                        b.textContent = glyph;
+                        b.dataset.role = role;
+                        try { b.classList.add('input-field-button', 'ui-spin-button'); } catch (e) {}
+                        b.addEventListener('click', (ev) => {
+                            try { ev.stopPropagation(); ev.preventDefault(); this._spinValue(delta); } catch (_) {}
+                        });
+                        return b;
+                    };
+                    // "−" then "+" — two buttons sitting next to each other.
+                    const minus = mkSpin('−', -this.step, 'spin-down');
+                    const plus  = mkSpin('+',        this.step, 'spin-up');
+                    this.inputContainer.appendChild(minus);
+                    this.inputContainer.appendChild(plus);
+                    this._spinWrap = { minus, plus };
                 }
             } catch (e) {}
 
@@ -3938,8 +4054,14 @@ class TextBox extends FormInput {
                                             this.rawValue = it.value;
                                             // set underlying value; setText will display caption when available
                                             this.setText(it.value);
+                                            const disp = (typeof it.caption !== 'undefined' && it.caption !== null) ? String(it.caption) : String(it.value);
                                             // notify any listeners (so clients can pick up the new value)
                                             try { if (this.element) this.element.dispatchEvent(new Event('input', { bubbles: true })); } catch (_) {}
+                                            // Fire onChange + a change event, mirroring the "..." selection path
+                                            // (handleSelection) so events: { onChange } wired via _wireItemEvents
+                                            // (e.g. org-settings reload) trigger from a dropdown pick too.
+                                            try { if (typeof this.onChange === 'function') this.onChange(it.value, disp); } catch (_) {}
+                                            try { if (this.element) this.element.dispatchEvent(new Event('change', { bubbles: true })); } catch (_) {}
                                         } catch (_) {}
                                         try { this._closeList && this._closeList(); } catch (_) {}
                                     });
@@ -9082,7 +9204,13 @@ class Tabs extends UIObject {
                         } catch (e) {}
                     });
                 };
-                renderAll().catch(e => console.error('Tabs renderAll error', e));
+                // Expose the render promise so the form's renderItem('tabs') can await
+                // pane rendering before scheduling _activateFirstRows(). Pane content
+                // (tables, recordSelectors) renders asynchronously — including network
+                // FK lookups — so without awaiting, master tables would not yet be in
+                // controlsMap when the form auto-activates first rows → masterFor filters
+                // never set → detail tabular sections show ALL rows on open.
+                this._renderAllPromise = renderAll().catch(e => console.error('Tabs renderAll error', e));
             }
         }
 
