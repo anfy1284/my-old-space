@@ -10,6 +10,8 @@ const qs = require('querystring');
 const { getOrCreateSession } = require('./db/sessionManager');
 const perfMetrics = require('./perfMetrics');
 const httpCompression = require('./httpCompression');
+const httpCache = require('./httpCache');
+const log = require('./log');
 
 // Universal function to find and run init.js
 function runInitIfExists(dir) {
@@ -85,8 +87,19 @@ function checkProtectedAccess(sessionId, filePath) {
     return false;
 }
 
+// 0.7: статические пути не должны создавать/удалять сессию в БД. Браузер шлёт
+// HTML '/' первым → там сессия и cookie создаются; последующая статика уже несёт
+// cookie. Создание сессии на каждую иконку/JS = лишние insert'ы + гонка сессий.
+function isStaticPath(url) {
+    return url.startsWith('/res/')
+        || url.startsWith('/apps/')
+        || url.startsWith(`/${appAlias}/res/`)
+        || url === '/favicon.ico'
+        || url === '/favicon.svg';
+}
+
 async function handleRequest(req, res) {
-    console.log('[drive_root] Request:', req.method, req.url);
+    log.debug('[drive_root] Request:', req.method, req.url);
 
     // Universal App API routing: /api/apps/:appName/...
     if (req.url.startsWith('/api/apps/')) {
@@ -109,20 +122,27 @@ async function handleRequest(req, res) {
     }
 
     const sessionStartNs = process.hrtime.bigint();
-    await getOrCreateSession(req, res);
+    // 0.7: для статики сессию НЕ создаём (только пассивно читаем cookie ниже).
+    if (!isStaticPath(req.url)) {
+        await getOrCreateSession(req, res);
+    }
     perfMetrics.markSince('session', sessionStartNs);
 
     // Handle favicon
     if (req.url === '/favicon.ico' || req.url === '/favicon.svg') {
         const faviconPath = path.join(__dirname, 'resources', 'public', 'favicon.svg');
-        if (fs.existsSync(faviconPath)) {
+        let favStat = null;
+        try { favStat = fs.statSync(faviconPath); } catch (e) { favStat = null; }
+        if (favStat && favStat.isFile()) {
+            const headers = httpCache.fileHeaders(favStat, 'image/svg+xml');
+            if (httpCache.maybe304(req, res, headers)) return;
             fs.readFile(faviconPath, (err, data) => {
                 if (err) {
                     res.writeHead(404);
                     res.end();
                     return;
                 }
-                res.writeHead(200, { 'Content-Type': 'image/svg+xml' });
+                res.writeHead(200, headers);
                 res.end(data);
             });
         } else {
@@ -165,17 +185,25 @@ async function handleRequest(req, res) {
                                 language = ctx && ctx.language;
                             } catch (e) { /* no session */ }
                         }
-                        res.writeHead(200, { 'Content-Type': contentType });
-                        res.end(await fileStore.serveFileFromPath(filePath, 'public', language));
+                        const text = await fileStore.serveFileFromPath(filePath, 'public', language);
+                        // ETag по содержимому: различается между языками (перевод __t()).
+                        const headers = httpCache.jsHeaders(text, contentType);
+                        if (httpCache.maybe304(req, res, headers)) return;
+                        res.writeHead(200, headers);
+                        res.end(text);
                     })();
                 } else {
+                    let st = null;
+                    try { st = fs.statSync(filePath); } catch (e) { }
+                    const headers = st ? httpCache.fileHeaders(st, contentType) : { 'Content-Type': contentType };
+                    if (st && httpCache.maybe304(req, res, headers)) return;
                     fs.readFile(filePath, (err, data) => {
                         if (err) {
                             res.writeHead(500, { 'Content-Type': 'text/plain' });
                             res.end('Error reading file');
                             return;
                         }
-                        res.writeHead(200, { 'Content-Type': contentType });
+                        res.writeHead(200, headers);
                         res.end(data);
                     });
                 }
@@ -272,16 +300,24 @@ async function handleRequest(req, res) {
                     const contentType = getContentType(resolvedPath);
                     const ext = path.extname(resolvedPath).slice(1).toLowerCase();
                     if (ext === 'js') {
-                        res.writeHead(200, { 'Content-Type': contentType });
-                        res.end(await fileStore.serveFileFromPath(resolvedPath, 'public', language));
+                        const text = await fileStore.serveFileFromPath(resolvedPath, 'public', language);
+                        const headers = httpCache.jsHeaders(text, contentType);
+                        if (httpCache.maybe304(req, res, headers)) return;
+                        res.writeHead(200, headers);
+                        res.end(text);
                     } else {
+                        // Иконки 16×16 и пр.: длинный max-age + ETag по mtime → 304.
+                        let st = null;
+                        try { st = fs.statSync(resolvedPath); } catch (e) { }
+                        const headers = st ? httpCache.fileHeaders(st, contentType) : { 'Content-Type': contentType };
+                        if (st && httpCache.maybe304(req, res, headers)) return;
                         fs.readFile(resolvedPath, (err, data) => {
                             if (err) {
                                 res.writeHead(500, { 'Content-Type': 'text/plain' });
                                 res.end('Error reading file');
                                 return;
                             }
-                            res.writeHead(200, { 'Content-Type': contentType });
+                            res.writeHead(200, headers);
                             res.end(data);
                         });
                     }

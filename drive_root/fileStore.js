@@ -16,8 +16,21 @@ const { generateUID } = require('./db/utilites');
 
 const FILE_STORE_NS = 'client_files';
 
-// Cache for files served from disk: key = `${filePath}|${role}|${language}` -> processed text
-const _fileCache = new Map();
+// 0.3 (оптимизация): раздельный кэш минификации и перевода с инвалидацией по mtime.
+//  _minCache:  filePath          → { mtimeMs, text }  — минифицированный (или сырой) базовый текст
+//  _langCache: `${filePath}|${language}` → { mtimeMs, text } — базовый + наложенный перевод __t()
+// Минификация НЕ зависит от языка/роли (зависит только перевод!), поэтому базовый
+// текст кэшируется один раз на файл. Раньше ключ был filePath|role|language —
+// терсер гонялся заново для каждого языка/роли, а кэш был вечным (правка файла
+// требовала рестарта).
+const _minCache = new Map();
+const _langCache = new Map();
+
+// На слабом CPU terser (особенно для UI_classes.js ~505KB) — секунды чистого CPU
+// и блокировка event loop. После внедрения gzip (0.4) минификация даёт мало:
+// gzip жмёт сильнее и на порядок дешевле. Поэтому в рантайме по умолчанию НЕ
+// минифицируем; включить — MINIFY_JS=1.
+const MINIFY_JS = process.env.MINIFY_JS === '1';
 
 /**
  * Проверка доступа: есть ли у пользователя требуемая роль.
@@ -77,20 +90,43 @@ function translateJsMarkers(text, language) {
  * @returns {Promise<string>}
  */
 async function serveFileFromPath(filePath, role, language) {
-    const cacheKey = `${filePath}|${role}|${language}`;
-    if (_fileCache.has(cacheKey)) return _fileCache.get(cacheKey);
-
-    const raw = fs.readFileSync(filePath, 'utf8');
-    const ext = path.extname(filePath).slice(1).toLowerCase();
-
-    let result = raw;
-    if (ext === 'js') {
-        result = await optimizeJS(raw);
-        result = translateJsMarkers(result, language);
+    // mtime файла — ключ инвалидации: правка файла больше не требует рестарта.
+    let mtimeMs;
+    try {
+        mtimeMs = fs.statSync(filePath).mtimeMs;
+    } catch (e) {
+        mtimeMs = 0;
     }
 
-    _fileCache.set(cacheKey, result);
-    return result;
+    const ext = path.extname(filePath).slice(1).toLowerCase();
+
+    // Не-JS: ни минификации, ни перевода — отдаём сырой текст (кэш базы).
+    if (ext !== 'js') {
+        const base = _minCache.get(filePath);
+        if (base && base.mtimeMs === mtimeMs) return base.text;
+        const raw = fs.readFileSync(filePath, 'utf8');
+        _minCache.set(filePath, { mtimeMs, text: raw });
+        return raw;
+    }
+
+    // JS: уровень 2 — готовый (база + перевод) по языку.
+    const langKey = `${filePath}|${language}`;
+    const cachedLang = _langCache.get(langKey);
+    if (cachedLang && cachedLang.mtimeMs === mtimeMs) return cachedLang.text;
+
+    // Уровень 1 — базовый текст (минифицированный или сырой), один на файл.
+    let base = _minCache.get(filePath);
+    if (!base || base.mtimeMs !== mtimeMs) {
+        const raw = fs.readFileSync(filePath, 'utf8');
+        const text = MINIFY_JS ? await optimizeJS(raw) : raw;
+        base = { mtimeMs, text };
+        _minCache.set(filePath, base);
+    }
+
+    // Перевод __t() накладываем поверх базы и кэшируем по языку.
+    const out = translateJsMarkers(base.text, language);
+    _langCache.set(langKey, { mtimeMs, text: out });
+    return out;
 }
 
 /**

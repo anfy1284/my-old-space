@@ -2,6 +2,8 @@
 const formsGlobal = require('./globalServerContext');
 const globalRoot = require('../drive_root/globalServerContext');
 const { t } = require('../drive_root/i18n');
+const httpCache = require('../drive_root/httpCache');
+const log = require('../drive_root/log');
 const fs = require('fs');
 const path = require('path');
 
@@ -141,7 +143,7 @@ function invokeAppMethod(appName, methodName, params, sessionID, callback, req, 
 
 function handleRequest(req, res, appDir, appAlias) {
 	// Processing resources and API endpoints
-	console.log('[drive_forms/handleRequest] Request:', req.method, req.url, 'appAlias:', appAlias);
+	log.debug('[drive_forms/handleRequest] Request:', req.method, req.url, 'appAlias:', appAlias);
 	try {
 		// --- Endpoint for GET requests with parameters (for SSE) - CHECK FIRST ---
 		// --- Global SSE endpoint for session-scoped events (one EventSource per session) ---
@@ -172,13 +174,13 @@ function handleRequest(req, res, appDir, appAlias) {
 				const clientId = Math.random().toString(36).substr(2, 9);
 				const clientInfo = { res, clientId };
 				set.add(clientInfo);
-				console.log(`[drive_forms/events] session SSE connected session=${sessionID} user=${user.id} clientId=${clientId} total=${set.size}`);
+				log.debug(`[drive_forms/events] session SSE connected session=${sessionID} user=${user.UID} clientId=${clientId} total=${set.size}`);
 				res.write(`data: ${JSON.stringify({ type: 'connected', clientId })}\n\n`);
 
 				req.on('close', () => {
 					try {
 						set.delete(clientInfo);
-						console.log(`[drive_forms/events] session SSE disconnected session=${sessionID} clientId=${clientId} remaining=${set.size}`);
+						log.debug(`[drive_forms/events] session SSE disconnected session=${sessionID} clientId=${clientId} remaining=${set.size}`);
 						if (set.size === 0) global._sessionSseClients.delete(sessionID);
 					} catch (e) { console.error('[drive_forms/events] error on close handler:', e); }
 				});
@@ -192,7 +194,7 @@ function handleRequest(req, res, appDir, appAlias) {
 			const urlObj = new URL(req.url, `http://${req.headers.host}`);
 			const pathParts = urlObj.pathname.split('/').filter(Boolean);
 
-			console.log('[drive_forms] GET request:', req.url, 'pathParts:', pathParts);
+			log.debug('[drive_forms] GET request:', req.url, 'pathParts:', pathParts);
 
 			// Format: /{appAlias}/{appName}/{methodName}?params
 			// pathParts will be ['appAlias', 'appName', 'methodName']
@@ -200,7 +202,7 @@ function handleRequest(req, res, appDir, appAlias) {
 				const appName = pathParts[1];
 				const methodName = pathParts[2];
 
-				console.log('[drive_forms] Invoking:', appName, methodName);
+				log.debug('[drive_forms] Invoking:', appName, methodName);
 
 				// Extract params from query string
 				const params = {};
@@ -224,7 +226,7 @@ function handleRequest(req, res, appDir, appAlias) {
 						// Check if request handled inside method (SSE, etc)
 						if (result && (result._sse || result._handled)) {
 							// Connection already handled inside method, don't close
-							console.log('[drive_forms] Request handled by app method');
+							log.debug('[drive_forms] Request handled by app method');
 							return;
 						}
 						res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -267,17 +269,24 @@ function handleRequest(req, res, appDir, appAlias) {
 									language = ctx && ctx.language;
 								} catch (e) { /* no session */ }
 							}
-							res.writeHead(200, { 'Content-Type': contentType });
-							res.end(await fileStore.serveFileFromPath(filePath, 'public', language));
+							const text = await fileStore.serveFileFromPath(filePath, 'public', language);
+							const headers = httpCache.jsHeaders(text, contentType);
+							if (httpCache.maybe304(req, res, headers)) return;
+							res.writeHead(200, headers);
+							res.end(text);
 						})();
 					} else {
+						let st = null;
+						try { st = fs.statSync(filePath); } catch (e) { }
+						const fheaders = st ? httpCache.fileHeaders(st, contentType) : { 'Content-Type': contentType };
+						if (st && httpCache.maybe304(req, res, fheaders)) return;
 						fs.readFile(filePath, (err, data) => {
 							if (err) {
 								res.writeHead(500, { 'Content-Type': 'text/plain' });
 								res.end('Error reading file');
 								return;
 							}
-							res.writeHead(200, { 'Content-Type': contentType });
+							res.writeHead(200, fheaders);
 							res.end(data);
 						});
 					}
@@ -332,7 +341,9 @@ function handleRequest(req, res, appDir, appAlias) {
 				return formsGlobal.loadApps(user, sessionID);
 			}).then(result => {
 				if (req.method === 'GET') {
-					res.writeHead(200, { 'Content-Type': 'application/javascript' });
+					const _h = httpCache.jsHeaders(result, 'application/javascript');
+					if (httpCache.maybe304(req, res, _h)) return;
+					res.writeHead(200, _h);
 					res.end(result);
 				} else {
 					res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -406,8 +417,8 @@ function handleRequest(req, res, appDir, appAlias) {
 					const match = req.headers.cookie.match(/(?:^|; )sessionID=([^;]+)/);
 					if (match) sessionID = decodeURIComponent(match[1]);
 				}
-				console.log('[drive_forms/call] Cookie header:', req.headers.cookie);
-				console.log('[drive_forms/call] Extracted sessionID:', sessionID);
+				log.debug('[drive_forms/call] Cookie header:', req.headers.cookie);
+				log.debug('[drive_forms/call] Extracted sessionID:', sessionID);
 				invokeAppMethod(app, method, params || {}, sessionID, async (err, result) => {
 					if (err) {
 						res.writeHead(500, { 'Content-Type': 'application/json' });
