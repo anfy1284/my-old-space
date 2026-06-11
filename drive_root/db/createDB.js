@@ -293,6 +293,74 @@ async function ensureNameColumns(sequelize, modelsDefs) {
   }
 }
 
+/**
+ * 3.1: Автоматически создаёт индексы на горячих колонках, которых нет в схеме:
+ *   - каждая FK-колонка (поле с `references`) — PostgreSQL НЕ индексирует FK сам;
+ *   - колонки контроля доступа (required_access_fields проекта) — RLS-фильтры по
+ *     ним выполняются на КАЖДУЮ операцию БД (см. dbGateway);
+ *   - sessions.sessionId — поиск сессии на каждый кэш-промах.
+ * `CREATE INDEX IF NOT EXISTS` идемпотентен (PostgreSQL/SQLite). Ошибки не фатальны
+ * (как ensureNameColumns) — логируются и не валят миграцию.
+ */
+async function ensureIndexes(sequelize, modelsDefs) {
+  const dialect = sequelize.getDialect();
+  // CREATE INDEX IF NOT EXISTS поддержан в postgres и sqlite; для прочих — пропуск.
+  if (dialect !== 'postgres' && dialect !== 'sqlite') {
+    console.log(`[MIGRATION] ensureIndexes: dialect ${dialect} не поддержан, пропуск`);
+    return;
+  }
+
+  // required_access_fields проекта (по умолчанию — стандартный набор RLS).
+  let requiredAccessFields = ['organizationId', 'hotelId', 'userId'];
+  try {
+    const cfgRoot = process.env.PROJECT_ROOT || process.cwd();
+    const cfgPath = path.join(cfgRoot, 'app.config.json');
+    if (fs.existsSync(cfgPath)) {
+      const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+      if (Array.isArray(cfg.required_access_fields) && cfg.required_access_fields.length) {
+        requiredAccessFields = cfg.required_access_fields;
+      }
+    }
+  } catch (e) { /* остаётся дефолт */ }
+  const accessSet = new Set(requiredAccessFields);
+
+  const quote = (id) => `"${id}"`; // postgres/sqlite — двойные кавычки
+  const indexName = (table, col) => {
+    let n = `idx_${table}_${col}`;
+    if (n.length > 60) { // защита от лимита идентификатора Postgres (63 байта)
+      const crypto = require('crypto');
+      const h = crypto.createHash('md5').update(`${table}_${col}`).digest('hex').slice(0, 8);
+      n = `idx_${table.slice(0, 24)}_${col.slice(0, 20)}_${h}`;
+    }
+    return n;
+  };
+
+  let count = 0;
+  for (const def of modelsDefs) {
+    const table = def.tableName;
+    if (!table || !def.fields) continue;
+    const cols = new Set();
+    for (const [field, opts] of Object.entries(def.fields)) {
+      if (!opts) continue;
+      if (opts.references || accessSet.has(field)) cols.add(field);
+    }
+    // sessions.sessionId — поиск сессии на каждый кэш-промах (не FK, не access-поле).
+    if (table === 'sessions' && def.fields.sessionId) cols.add('sessionId');
+
+    for (const col of cols) {
+      const name = indexName(table, col);
+      const sql = `CREATE INDEX IF NOT EXISTS ${quote(name)} ON ${quote(table)} (${quote(col)})`;
+      try {
+        await sequelize.query(sql);
+        count++;
+      } catch (e) {
+        console.warn(`[MIGRATION] ensureIndexes: ${table}.${col} -> ${e.message}`);
+      }
+    }
+  }
+  console.log(`[MIGRATION] ensureIndexes: ensured ${count} index(es) on FK / access / session columns`);
+}
+
 async function createAll() {
   await ensureDatabase();
   const sequelize = getSequelizeInstance();
@@ -941,6 +1009,13 @@ async function createAll() {
       await ensureNameColumns(sequelize, mergedModelsDef);
     } catch (e) {
       console.error('[MIGRATION] ensureNameColumns failed:', e.message);
+    }
+
+    // 3.1: авто-индексы на FK / колонках доступа / sessions.sessionId (после commit).
+    try {
+      await ensureIndexes(sequelize, mergedModelsDef);
+    } catch (e) {
+      console.error('[MIGRATION] ensureIndexes failed:', e.message);
     }
 
     // Call user event handler after full database init

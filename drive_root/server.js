@@ -81,6 +81,29 @@ try {
     process.exit(1);
 }
 
+// 2.3: appsBasePath (override "path" из apps.json) резолвится ОДИН раз при старте,
+// а не парсится на каждый запрос статики /apps/.../resources/public (раньше checkPath
+// делал 3× existsSync+readFileSync+JSON.parse на каждую иконку). Состав apps.json
+// фиксируется при старте → рантайм-инвалидация не нужна.
+let _resolvedAppsBasePath = 'apps';
+(function resolveAppsBasePathOnce() {
+    try {
+        const candidates = [
+            path.join(appDir, 'apps.json'),
+            path.join(__dirname, '..', 'apps.json'),
+            path.resolve(process.cwd(), 'apps.json'),
+        ];
+        for (const p of candidates) {
+            if (fs.existsSync(p)) {
+                try {
+                    const cfg = JSON.parse(fs.readFileSync(p, 'utf8'));
+                    if (cfg.path) _resolvedAppsBasePath = cfg.path.replace(/^[/\\]+/, '');
+                } catch (e) { /* битый apps.json — игнор, остаётся дефолт */ }
+            }
+        }
+    } catch (e) { /* оставляем 'apps' */ }
+})();
+
 // Check access to protected resources (stub)
 function checkProtectedAccess(sessionId, filePath) {
     // TODO: Implement real access check by sessionId and filePath
@@ -258,25 +281,9 @@ async function handleRequest(req, res) {
             const resType = parts[3];
             const relPath = parts.slice(4).join(path.sep);
 
-            // Path to apps folder relative to drive_root, but prefer project-level apps when present
-            let appsBasePath = "apps"; // Default
-            try {
-                // Try to find path in apps.json files: appDir/apps.json, drive_root/../apps.json, project/apps.json
-                const localAppsJsonPath = path.join(appDir, 'apps.json');
-                const rootAppsJsonPath = path.join(__dirname, '..', 'apps.json');
-                const projectAppsJsonPath = path.resolve(process.cwd(), 'apps.json');
-                const checkPath = (p) => {
-                    if (fs.existsSync(p)) {
-                        try {
-                            const cfg = JSON.parse(fs.readFileSync(p, 'utf8'));
-                            if (cfg.path) appsBasePath = cfg.path.replace(/^[/\\]+/, '');
-                        } catch (e) { }
-                    }
-                };
-                checkPath(localAppsJsonPath);
-                checkPath(rootAppsJsonPath);
-                checkPath(projectAppsJsonPath);
-            } catch (e) { }
+            // 2.3: appsBasePath резолвится один раз при старте (см. _resolvedAppsBasePath),
+            // больше не парсим apps.json на каждый запрос статики приложения.
+            const appsBasePath = _resolvedAppsBasePath;
 
             const appsDirPackage = path.join(__dirname, '..', appsBasePath);
             const appsDirProject = path.join(process.cwd(), appsBasePath);

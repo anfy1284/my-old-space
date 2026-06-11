@@ -865,63 +865,75 @@ async function generateFormSpec(tableName, params, sessionID) {
             try {
                 const tsDefs = getTabularSectionsForTable(tableName);
                 if (tsDefs.length > 0) {
-                    const tsLayoutItems = [];
-                    for (const tsDef of tsDefs) {
+                    // 3.4: независимые табличные части грузятся ПАРАЛЛЕЛЬНО (Promise.all),
+                    // а не последовательным for-циклом — форма с несколькими ТЧ (booking:
+                    // гости + услуги) больше не ждёт каждую секцию по очереди. Внутри
+                    // секции независимые чтения (строки ТЧ и метаданные полей) тоже идут
+                    // конкурентно, как и резолв разных FK-таблиц. Порядок секций (для
+                    // вкладок) сохраняется — Promise.all не меняет порядок массива.
+                    const tsResults = await Promise.all(tsDefs.map(async (tsDef) => {
                         const tsTableName = tsDef.tableName;
                         const tsParentField = tsDef.tabularSection && tsDef.tabularSection.parentField;
-                        if (!tsTableName || !tsParentField) continue;
+                        if (!tsTableName || !tsParentField) return null;
 
-                        let tsRows = [];
-                        if (effectiveRecordId && !isNew) {
-                            try {
-                                const tsDbGW = require('../../drive_root/dbGateway');
-                                const fetched = await tsDbGW.execute({
-                                    operation: 'read', table: tsTableName, where: { [tsParentField]: effectiveRecordId },
-                                    options: { raw: true }, context: { appName: 'uniForm', sessionID }
-                                });
-                                if (Array.isArray(fetched)) tsRows = fetched;
-                            } catch (e) {
-                                console.error('[uniForm/generateFormSpec] TS load error for', tsTableName, ':', e && e.message);
-                            }
-                        }
-
-                        let tsColumns = [];
-                        let tsFkFields = [];
-                        try {
-                            const tsFields = await buildTableFieldsFromModel(tsTableName);
-                            if (Array.isArray(tsFields)) {
-                                tsColumns = tsFields
-                                    .filter(f => f.name !== tsParentField && f.name !== 'UID')
-                                    .map(f => {
-                                        const col = {
-                                            caption: f.caption || f.name,
-                                            data: f.name,
-                                            width: f.width || 120,
-                                            inputType: mapInputTypeToControl(f.inputType || 'textbox')
-                                        };
-                                        if (f.properties) col.properties = f.properties;
-                                        if (f.foreignKey) col.foreignKey = f.foreignKey;
-                                        return col;
+                        // Строки ТЧ и метаданные полей независимы → читаем параллельно.
+                        const tsRowsP = (effectiveRecordId && !isNew)
+                            ? (async () => {
+                                try {
+                                    const tsDbGW = require('../../drive_root/dbGateway');
+                                    const fetched = await tsDbGW.execute({
+                                        operation: 'read', table: tsTableName, where: { [tsParentField]: effectiveRecordId },
+                                        options: { raw: true }, context: { appName: 'uniForm', sessionID }
                                     });
-                                tsFkFields = tsFields.filter(f =>
-                                    f.name !== tsParentField && f.name !== 'UID' &&
-                                    f.foreignKey && f.foreignKey.table
-                                );
-                            }
-                        } catch (e) {
-                            console.error('[uniForm/generateFormSpec] TS fields error for', tsTableName, ':', e && e.message);
-                        }
+                                    return Array.isArray(fetched) ? fetched : [];
+                                } catch (e) {
+                                    console.error('[uniForm/generateFormSpec] TS load error for', tsTableName, ':', e && e.message);
+                                    return [];
+                                }
+                            })()
+                            : Promise.resolve([]);
 
-                        // Резолвим FK display-значения в строках ТЧ
+                        const tsFieldsP = (async () => {
+                            try {
+                                const tsFields = await buildTableFieldsFromModel(tsTableName);
+                                return Array.isArray(tsFields) ? tsFields : [];
+                            } catch (e) {
+                                console.error('[uniForm/generateFormSpec] TS fields error for', tsTableName, ':', e && e.message);
+                                return [];
+                            }
+                        })();
+
+                        const [tsRows, tsFields] = await Promise.all([tsRowsP, tsFieldsP]);
+
+                        const tsColumns = tsFields
+                            .filter(f => f.name !== tsParentField && f.name !== 'UID')
+                            .map(f => {
+                                const col = {
+                                    caption: f.caption || f.name,
+                                    data: f.name,
+                                    width: f.width || 120,
+                                    inputType: mapInputTypeToControl(f.inputType || 'textbox')
+                                };
+                                if (f.properties) col.properties = f.properties;
+                                if (f.foreignKey) col.foreignKey = f.foreignKey;
+                                return col;
+                            });
+                        const tsFkFields = tsFields.filter(f =>
+                            f.name !== tsParentField && f.name !== 'UID' &&
+                            f.foreignKey && f.foreignKey.table
+                        );
+
+                        // Резолвим FK display-значения в строках ТЧ: один запрос на
+                        // FK-таблицу, разные FK-таблицы — параллельно.
                         if (tsRows.length > 0 && tsFkFields.length > 0) {
                             try {
                                 const resolveDbGW = require('../../drive_root/dbGateway');
-                                for (const fkField of tsFkFields) {
+                                await Promise.all(tsFkFields.map(async (fkField) => {
                                     const fkTable = fkField.foreignKey.table;
                                     const fkIdField = fkField.foreignKey.field || 'UID';
                                     const fkDispField = fkField.foreignKey.displayField || 'name';
                                     const fkValues = [...new Set(tsRows.map(r => r[fkField.name]).filter(v => v !== null && v !== undefined && v !== ''))];
-                                    if (fkValues.length === 0) continue;
+                                    if (fkValues.length === 0) return;
                                     try {
                                         const lookupRows = await resolveDbGW.execute({
                                             operation: 'read', table: fkTable, where: { [fkIdField]: fkValues },
@@ -940,28 +952,36 @@ async function generateFormSpec(tableName, params, sessionID) {
                                     } catch (e) {
                                         console.warn('[uniForm/generateFormSpec] FK resolve error for', fkField.name, ':', e && e.message);
                                     }
-                                }
+                                }));
                             } catch (e) {
                                 console.warn('[uniForm/generateFormSpec] TS FK resolve outer error:', e && e.message);
                             }
                         }
 
                         const dataKey = '__ts_' + tsTableName;
-                        data.push({
-                            name: dataKey, value: tsRows, tabularSection: true,
-                            tableName: tsTableName, parentField: tsParentField
-                        });
-
                         const tsName = 'ts_' + tsTableName;
                         const tsCaption = (tsDef.tabularSection && tsDef.tabularSection.caption) || tsDef.name || tsTableName;
-                        tsLayoutItems.push({
-                            type: 'group', caption: tsCaption, orientation: 'vertical',
-                            layout: [{
-                                type: 'table', name: tsName, data: dataKey,
-                                columns: tsColumns,
-                                properties: { editMode: 'cell-immediate', visibleRows: 5 }
-                            }]
-                        });
+                        return {
+                            dataEntry: {
+                                name: dataKey, value: tsRows, tabularSection: true,
+                                tableName: tsTableName, parentField: tsParentField
+                            },
+                            layoutItem: {
+                                type: 'group', caption: tsCaption, orientation: 'vertical',
+                                layout: [{
+                                    type: 'table', name: tsName, data: dataKey,
+                                    columns: tsColumns,
+                                    properties: { editMode: 'cell-immediate', visibleRows: 5 }
+                                }]
+                            }
+                        };
+                    }));
+
+                    const tsLayoutItems = [];
+                    for (const r of tsResults) {
+                        if (!r) continue;
+                        data.push(r.dataEntry);
+                        tsLayoutItems.push(r.layoutItem);
                     }
 
                     if (tsLayoutItems.length > 0) {

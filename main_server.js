@@ -11,38 +11,20 @@ const PORT = process.env.PORT || (isProduction ? 80 : 3000);
 
 // Run createDB.js before starting the server
 const createDBPath = path.join(__dirname, 'drive_root', 'db', 'createDB.js');
-console.log('Initializing database...');
-console.log(`[main_server] PROJECT_ROOT from environment: ${process.env.PROJECT_ROOT || 'NOT SET'}`);
 
-// Ensure createDB exists before spawning
-if (!fs.existsSync(createDBPath)) {
-  console.error(`[main_server] createDB not found at ${createDBPath}`);
-  process.exit(1);
-}
+// 3.6: на бесплатном хостинге с auto-sleep каждый wake = полный schema-sync
+// (spawn createDB.js — второй Node-процесс строит ВСЕ модели и сравнивает схемы),
+// и первые запросы пользователей ждут несколько секунд. SKIP_DB_SYNC=1 пропускает
+// этот цикл целиком — уместно, когда схема не менялась с прошлого запуска (после
+// первого успешного старта на том же деплое). Default (флаг не задан) — прежнее
+// поведение: полная синхронизация при каждом старте.
+const SKIP_DB_SYNC = process.env.SKIP_DB_SYNC === '1';
 
-// Pass PROJECT_ROOT environment variable to child process
-const dbProcess = spawn(process.execPath, [createDBPath], {
-  stdio: 'inherit',
-  env: { ...process.env, PROJECT_ROOT: process.env.PROJECT_ROOT }
-});
-
-console.log(`[main_server] Spawned createDB pid=${dbProcess.pid}`);
-
-dbProcess.on('error', (err) => {
-  console.error('[main_server] Failed to start DB init process:', err && err.message || err);
-  process.exit(1);
-});
-
-dbProcess.on('exit', (code, signal) => {
-  if (code !== 0 || signal) {
-    console.error(`DB initialization error (exit code: ${code}, signal: ${signal})`);
-    process.exit(1);
-  }
-
-  console.log('Database initialized.');
-
+// Продолжение запуска ПОСЛЕ готовности БД — вызывается из exit-handler createDB
+// либо напрямую при SKIP_DB_SYNC.
+function proceedAfterDb() {
   // Load default values cache before starting the server
-  Promise.resolve(globalContext.reloadDefaultValues())
+  return Promise.resolve(globalContext.reloadDefaultValues())
     .then(async () => {
       const { createServer } = require('./drive_root/server');
 
@@ -124,6 +106,43 @@ dbProcess.on('exit', (code, signal) => {
         console.log(`Server running at http://localhost:${PORT} (without default values cache)`);
       });
     });
-});
+}
+
+// Запуск: либо пропускаем schema-sync (SKIP_DB_SYNC), либо прогоняем createDB как раньше.
+if (SKIP_DB_SYNC) {
+  console.log('[main_server] SKIP_DB_SYNC=1 — schema-sync пропущен, старт сервера напрямую');
+  proceedAfterDb();
+} else {
+  console.log('Initializing database...');
+  console.log(`[main_server] PROJECT_ROOT from environment: ${process.env.PROJECT_ROOT || 'NOT SET'}`);
+
+  // Ensure createDB exists before spawning
+  if (!fs.existsSync(createDBPath)) {
+    console.error(`[main_server] createDB not found at ${createDBPath}`);
+    process.exit(1);
+  }
+
+  // Pass PROJECT_ROOT environment variable to child process
+  const dbProcess = spawn(process.execPath, [createDBPath], {
+    stdio: 'inherit',
+    env: { ...process.env, PROJECT_ROOT: process.env.PROJECT_ROOT }
+  });
+
+  console.log(`[main_server] Spawned createDB pid=${dbProcess.pid}`);
+
+  dbProcess.on('error', (err) => {
+    console.error('[main_server] Failed to start DB init process:', err && err.message || err);
+    process.exit(1);
+  });
+
+  dbProcess.on('exit', (code, signal) => {
+    if (code !== 0 || signal) {
+      console.error(`DB initialization error (exit code: ${code}, signal: ${signal})`);
+      process.exit(1);
+    }
+    console.log('Database initialized.');
+    proceedAfterDb();
+  });
+}
 
 module.exports = { server: null };

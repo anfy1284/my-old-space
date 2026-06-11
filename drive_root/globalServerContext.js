@@ -429,28 +429,39 @@ async function loadDefaultValuesFromDB() {
         // Load all records from default_values
         const allDefaults = await DefaultValuesModel.findAll();
 
-        // Group by level and table
+        // 3.5: группируем default'ы по таблице и читаем ОДНИМ запросом
+        // WHERE UID IN (...) на таблицу вместо findOne на каждую запись (N+1
+        // на cold-start, что критично на free-хостинге с auto-sleep).
+        const byTable = new Map(); // tableName -> { modelDef, ids:Set, entries:[{level,defaultValueId,recordId}] }
         for (const defValue of allDefaults) {
             const { level, tableName, defaultValueId, recordId } = defValue;
-
-            // Find model for the table
             const modelDef = Object.values(modelsDB).find(m => m.tableName === tableName);
             if (!modelDef) {
                 console.warn(`[defaultValues] Model for table ${tableName} not found`);
                 continue;
             }
+            if (!byTable.has(tableName)) byTable.set(tableName, { modelDef, ids: new Set(), entries: [] });
+            const g = byTable.get(tableName);
+            g.ids.add(recordId);
+            g.entries.push({ level, defaultValueId, recordId });
+        }
 
-            // Load record from DB
-            const record = await modelDef.findOne({ where: { UID: recordId } });
-            if (!record) {
-                console.warn(`[defaultValues] Record ${tableName}[${recordId}] not found (level=${level}, defaultValueId=${defaultValueId})`);
-                continue;
+        const { Op } = require('sequelize');
+        for (const [tableName, g] of byTable) {
+            const records = await g.modelDef.findAll({ where: { UID: { [Op.in]: Array.from(g.ids) } } });
+            const byUid = new Map();
+            for (const r of records) byUid.set(r.UID, r);
+
+            for (const { level, defaultValueId, recordId } of g.entries) {
+                const record = byUid.get(recordId);
+                if (!record) {
+                    console.warn(`[defaultValues] Record ${tableName}[${recordId}] not found (level=${level}, defaultValueId=${defaultValueId})`);
+                    continue;
+                }
+                if (!cache[level]) cache[level] = {};
+                if (!cache[level][tableName]) cache[level][tableName] = {};
+                cache[level][tableName][defaultValueId] = record;
             }
-
-            // Cache
-            if (!cache[level]) cache[level] = {};
-            if (!cache[level][tableName]) cache[level][tableName] = {};
-            cache[level][tableName][defaultValueId] = record;
         }
 
         console.log(`[defaultValues] Loaded ${allDefaults.length} default records from DB`);
@@ -835,10 +846,16 @@ async function getDynamicTableData(options) {
         }
     }
 
-    // Count total rows
+    // Count total rows (3.3: кэш на короткий TTL по table+identity+filters,
+    // чтобы не гонять COUNT через всю RLS-цепочку на каждый шаг скролла)
     const t2 = Date.now();
     const dbGW = require('./dbGateway');
-    const totalRows = await dbGW.execute({ operation: 'count', table: Model.tableName, where, context: dbContext });
+    const _countKey = _countCacheKey(Model.tableName, (dbContext.sessionID || dbContext.userId), filters);
+    let totalRows = _countCacheGet(_countKey);
+    if (totalRows === undefined) {
+        totalRows = await dbGW.execute({ operation: 'count', table: Model.tableName, where, context: dbContext });
+        _countCacheSet(_countKey, totalRows);
+    }
 
 
     // Calculate range with buffer (limited by server config)
@@ -911,6 +928,38 @@ async function getDynamicTableData(options) {
 const _fkDisplayCache = new Map();
 const _FK_CACHE_MAX = 2000;
 const _FK_CACHE_TTL = 60000; // 60 seconds
+
+// 3.3: краткоживущий кэш COUNT(*) для getDynamicTableData. При скролле длинного
+// журнала клиент шлёт десятки запросов порций с ОДНИМ и тем же фильтром — COUNT
+// каждый раз гонялся через всю RLS-цепочку. Ключ: table::identity::filtersHash.
+// TTL короткий (на время серии скролл-запросов); инвалидация — при любой мутации
+// таблицы через тот же хук invalidateFkCache (вызывается в dbGateway executor).
+const _countCache = new Map(); // key → { val, ts }
+const _COUNT_CACHE_TTL = 5000; // 5с
+const _COUNT_CACHE_MAX = 1000;
+
+function _countCacheKey(table, identity, filters) {
+    return `${table}::${identity || ''}::${JSON.stringify(filters || [])}`;
+}
+function _countCacheGet(key) {
+    const e = _countCache.get(key);
+    if (!e) return undefined;
+    if (Date.now() - e.ts > _COUNT_CACHE_TTL) { _countCache.delete(key); return undefined; }
+    return e.val;
+}
+function _countCacheSet(key, val) {
+    if (_countCache.size >= _COUNT_CACHE_MAX) {
+        const first = _countCache.keys().next().value;
+        _countCache.delete(first);
+    }
+    _countCache.set(key, { val, ts: Date.now() });
+}
+function _countCacheInvalidate(table) {
+    if (!table) { _countCache.clear(); return; }
+    for (const k of _countCache.keys()) {
+        if (k.startsWith(table + '::')) _countCache.delete(k);
+    }
+}
 
 function _fkCacheGet(table, uid) {
     const key = `${table}::${uid}`;
@@ -1161,10 +1210,12 @@ module.exports.commitTableEdits = commitTableEdits;
 module.exports.invalidateFkCache = function(tableName) {
     // Invalidate FK display cache entries for a specific table
     // Called by dbGateway after create/update/delete operations
-    if (!tableName) { _fkDisplayCache.clear(); return; }
+    if (!tableName) { _fkDisplayCache.clear(); _countCache.clear(); return; }
     for (const key of _fkDisplayCache.keys()) {
         if (key.startsWith(tableName + '::')) _fkDisplayCache.delete(key);
     }
+    // 3.3: тот же хук сбрасывает кэш COUNT для изменённой таблицы.
+    _countCacheInvalidate(tableName);
 };
 
 /**
