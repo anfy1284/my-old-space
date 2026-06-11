@@ -55,6 +55,32 @@ try {
 
 const ALLOWED = new Set(appConfig.publicFiles || []);
 
+// 0.1 (оптимизация): кэш резолва путей server.js приложений (appName → путь)
+// строится один раз; модуль грузится обычным require (Node кэширует его сам).
+// Перекомпиляция server.js на КАЖДЫЙ RPC (delete require.cache + require) —
+// десятки мс CPU на больших модулях (uniForm ~62KB), потеря module-level
+// состояния и JIT-прогрева. Hot-reload оставляем только в dev.
+const _appServerPathCache = new Map(); // appName -> resolved path | null
+const HOT_RELOAD = process.env.DEV_HOT_RELOAD === '1'
+	|| (!!process.env.NODE_ENV && process.env.NODE_ENV !== 'production');
+
+function resolveAppServerPath(appName) {
+	if (_appServerPathCache.has(appName)) return _appServerPathCache.get(appName);
+	const appsBasePath = (appsConfig.path || '/apps').replace(/^[/\\]+/, '');
+	// Try project root first (for user apps), then framework
+	const projectRoot = globalRoot.getProjectRoot() || process.cwd();
+	const possiblePaths = [
+		path.join(projectRoot, appsBasePath, appName, 'server.js'),
+		path.join(__dirname, '..', appsBasePath, appName, 'server.js')
+	];
+	let resolved = null;
+	for (const tryPath of possiblePaths) {
+		if (fs.existsSync(tryPath)) { resolved = tryPath; break; }
+	}
+	_appServerPathCache.set(appName, resolved);
+	return resolved;
+}
+
 
 function safeJoin(baseDir, relativePath) {
 	const norm = path.normalize(relativePath).replace(/^[/\\]+/, '');
@@ -77,38 +103,21 @@ function invokeAppMethod(appName, methodName, params, sessionID, callback, req, 
 	// Path to app server.js
 	const appEntry = appsConfig.apps.find(a => a.name === appName);
 	if (!appEntry) return callback(new Error(t('App not found', 'en')));
-	const appsBasePath = (appsConfig.path || '/apps').replace(/^[/\\]+/, '');
-	
-	// Try project root first (for user apps), then framework
-	const projectRoot = globalRoot.getProjectRoot() || process.cwd();
-	const possiblePaths = [
-		path.join(projectRoot, appsBasePath, appName, 'server.js'),
-		path.join(__dirname, '..', appsBasePath, appName, 'server.js')
-	];
-	
-	let appServerPath = null;
-	for (const tryPath of possiblePaths) {
-		if (fs.existsSync(tryPath)) {
-			appServerPath = tryPath;
-			break;
-		}
-	}
-	
+
+	// Резолв пути кэшируется (см. resolveAppServerPath / 0.1)
+	const appServerPath = resolveAppServerPath(appName);
 	if (!appServerPath) {
 		console.error('[invokeAppMethod] server.js not found for app:', appName);
-		console.error('[invokeAppMethod] Tried paths:', possiblePaths);
 		return callback(new Error(t('App server.js not found', 'en')));
 	}
-	
-	console.log('[invokeAppMethod] Loading server.js from:', appServerPath);
 
 	// Метка для perf-лога: какой RPC-метод обрабатывался в этом запросе
 	try { require('../drive_root/perfMetrics').setDetail('rpc', appName + '.' + methodName); } catch (e) { }
 
 	let appModule;
 	try {
-		// Remove from require cache for hot-reload
-		delete require.cache[require.resolve(appServerPath)];
+		// Hot-reload только в dev; в production модуль кэшируется Node'ом (0.1)
+		if (HOT_RELOAD) delete require.cache[require.resolve(appServerPath)];
 		appModule = require(appServerPath);
 	} catch (e) {
 		console.error('[invokeAppMethod] Failed to load server.js:', e);
