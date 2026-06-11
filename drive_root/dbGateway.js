@@ -189,7 +189,13 @@ async function execute(request) {
         throw new Error('[dbGateway] execute requires {operation, table} at minimum');
     }
     const chain = buildChain();
-    return await chain(request);
+    const perfMetrics = require('./perfMetrics');
+    const perfStartNs = perfMetrics.dbEnter();
+    try {
+        return await chain(request);
+    } finally {
+        perfMetrics.dbExit(request.table, request.operation, perfStartNs);
+    }
 }
 
 /**

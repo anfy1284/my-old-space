@@ -101,7 +101,10 @@ function invokeAppMethod(appName, methodName, params, sessionID, callback, req, 
 	}
 	
 	console.log('[invokeAppMethod] Loading server.js from:', appServerPath);
-	
+
+	// Метка для perf-лога: какой RPC-метод обрабатывался в этом запросе
+	try { require('../drive_root/perfMetrics').setDetail('rpc', appName + '.' + methodName); } catch (e) { }
+
 	let appModule;
 	try {
 		// Remove from require cache for hot-reload

@@ -8,6 +8,7 @@ const qs = require('querystring');
 
 // Sessions and clients are now handled via sessionManager
 const { getOrCreateSession } = require('./db/sessionManager');
+const perfMetrics = require('./perfMetrics');
 
 // Universal function to find and run init.js
 function runInitIfExists(dir) {
@@ -106,7 +107,9 @@ async function handleRequest(req, res) {
         }
     }
 
+    const sessionStartNs = process.hrtime.bigint();
     await getOrCreateSession(req, res);
+    perfMetrics.markSince('session', sessionStartNs);
 
     // Handle favicon
     if (req.url === '/favicon.ico' || req.url === '/favicon.svg') {
@@ -470,10 +473,13 @@ async function handleRequest(req, res) {
 }
 
 function createServer(options = {}) {
+    perfMetrics.startMemoryLogger();
     const requestListener = (req, res) => {
-        handleRequest(req, res).catch(e => {
-            res.writeHead(500, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: 'Internal Server Error', details: e.message }));
+        perfMetrics.runWithRequest(req, res, () => {
+            handleRequest(req, res).catch(e => {
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: 'Internal Server Error', details: e.message }));
+            });
         });
     };
 
