@@ -1998,7 +1998,13 @@ class DataForm extends Form {
         // Порядок: мастер-таблицы (с masterFor) первыми, чтобы их фильтры установились
         // до того как активируются деталь-таблицы.
         if (isRoot) {
-            setTimeout(() => { try { this._activateFirstRows(); } catch(e) {} }, 0);
+            // Активируем первые строки СИНХРОННО (не через setTimeout): к этому моменту
+            // вложенные таблицы/табы уже дождались своих промисов внутри renderItem,
+            // поэтому controlsMap полностью заполнен. Это критично, чтобы masterFor-фильтры
+            // деталь-таблиц были выставлены ДО показа окна (DataForm.Draw снимает
+            // visibility:hidden сразу после renderLayout) — иначе на хостинге видно, как
+            // деталь-таблицы перефильтровываются уже на экране (видимая «дорисовка»).
+            try { this._activateFirstRows(); } catch(e) {}
             try { this._setupDefaultButtonHandler(); } catch (e) {}
         }
     }
@@ -2521,6 +2527,21 @@ class DataForm extends Form {
                         } catch (e) {
                             console.error('[DataForm] failed to setup table integration:', e);
                         }
+                        // Дожидаемся первого экрана данных таблицы ДО завершения renderLayout
+                        // (зеркало Tabs._renderAllPromise). Так окно показывается уже с готовыми
+                        // строками, а не дорисовывается по сети после появления. Cap ~2.5с
+                        // защищает от «навсегда невидимого» окна при зависшем запросе —
+                        // по таймауту окно покажется со штатным оверлеем "Loading...".
+                        try {
+                            if (tbl._initialLoadPromise) {
+                                let _to;
+                                await Promise.race([
+                                    tbl._initialLoadPromise,
+                                    new Promise(res => { _to = setTimeout(res, 2500); })
+                                ]);
+                                try { clearTimeout(_to); } catch (e) {}
+                            }
+                        } catch (e) {}
                     } else {
                         const tbl = new Table(contentArea, tblProps);
                         try { if (typeof tbl.setCaption === 'function') tbl.setCaption(caption); } catch (e) {}
@@ -9129,7 +9150,11 @@ class Tabs extends UIObject {
             p.btn.classList.toggle('active', i === idx);
             if (i === idx) {
                 p.pane.style.position = 'relative';
-                p.pane.style.visibility = 'visible';
+                // '' (наследуем), а НЕ 'visible': literal 'visible' у потомка
+                // переопределяет visibility:hidden родительского окна (гейт показа
+                // в DataForm.Draw) → активная вкладка проступает сквозь ещё скрытое
+                // окно во время отрисовки. С '' панель следует за состоянием окна.
+                p.pane.style.visibility = '';
                 p.pane.style.pointerEvents = '';
             } else {
                 p.pane.style.position = 'absolute';
@@ -9175,7 +9200,10 @@ class Tabs extends UIObject {
                 // First tab visible, rest stacked behind as absolute
                 if (idx === 0) {
                     pane.style.position = 'relative';
-                    pane.style.visibility = 'visible';
+                    // '' (наследуем от окна), а НЕ 'visible' — см. _showTab:
+                    // literal 'visible' пробивает visibility:hidden окна и панель
+                    // мелькает во время сборки формы.
+                    pane.style.visibility = '';
                     btn.classList.add('active');
                 } else {
                     pane.style.position = 'absolute';
@@ -9287,7 +9315,11 @@ class DynamicTable extends Table {
 
         try {
             if (el && !this.dataLoaded && !this.isLoading) {
-                try { this.refresh(); } catch (e) {}
+                // Сохраняем промис первичной загрузки, чтобы renderItem (а через него —
+                // renderLayout) мог дождаться первого экрана данных ДО показа окна.
+                // Без этого строки «доезжают» по сети уже после появления окна —
+                // на хостинге это видно как поэтапная дорисовка таблицы.
+                try { this._initialLoadPromise = this.refresh(); } catch (e) {}
             }
         } catch (e) {}
 
