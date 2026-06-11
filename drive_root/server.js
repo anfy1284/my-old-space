@@ -9,6 +9,7 @@ const qs = require('querystring');
 // Sessions and clients are now handled via sessionManager
 const { getOrCreateSession } = require('./db/sessionManager');
 const perfMetrics = require('./perfMetrics');
+const httpCompression = require('./httpCompression');
 
 // Universal function to find and run init.js
 function runInitIfExists(dir) {
@@ -476,6 +477,10 @@ function createServer(options = {}) {
     perfMetrics.startMemoryLogger();
     const requestListener = (req, res) => {
         perfMetrics.runWithRequest(req, res, () => {
+            // 0.4: прозрачное gzip/brotli поверх res. Ставится ПОСЛЕ perfMetrics
+            // (тот уже пропатчил writeHead под Server-Timing — мы зовём его при
+            // фактическом флаше, поэтому заголовок сохраняется).
+            try { httpCompression.install(req, res); } catch (e) { /* сжатие не ломает ответ */ }
             handleRequest(req, res).catch(e => {
                 res.writeHead(500, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify({ error: 'Internal Server Error', details: e.message }));
