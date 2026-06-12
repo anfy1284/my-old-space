@@ -529,6 +529,16 @@ input[type="checkbox"],
 .ui-dynamictable table tbody tr.ui-table-row button.input-field-button[disabled] {
   visibility: hidden !important;
 }
+
+/* Режим непосредственного редактирования (cell-immediate): каждая строка
+   редактируема без активации, поэтому кнопки ("...", "+", выпадашка) остаются
+   видимыми и в неактивных строках. Перебивает правило скрытия выше (специфичность
+   выше за счёт доп. класса .ui-table-immediate). Кнопки при этом не disabled —
+   логика таблицы держит их включёнными в этом режиме. */
+.ui-dynamictable.ui-table-immediate table tbody tr.ui-table-row:not(.active) .input-field-button,
+.ui-dynamictable.ui-table-immediate table tbody tr.ui-table-row:not(.active) button.input-field-button {
+  visibility: visible !important;
+}
 .ui-dynamictable table tbody tr.ui-table-row:focus {
   outline: none;
 }

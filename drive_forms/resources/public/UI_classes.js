@@ -3570,9 +3570,10 @@ class TextBox extends FormInput {
             this.allowNegative = !!this.allowNegative; // when true, allow a leading minus sign
             this.decimalPlaces = this.decimalPlaces ? (this.decimalPlaces | 0) : 0;
         }
-        // Spinner buttons ("−"/"+"): for integer fields, a pair of square buttons in
-        // the same slot as the "..." selector that step the value by ±step. Lets the
-        // user enter small numbers (1, 2, 3…) with the mouse without touching the keyboard.
+        // Spinner button ("+"): for integer fields, a square button in the same slot
+        // as the "..." selector that steps the value up by +step. Lets the user bump
+        // small counts (1, 2, 3…) with the mouse. Decrement is via keyboard only —
+        // a single button is easier to hit than a pair.
         this.spinButtons = !!this.spinButtons;
         this.step = (typeof this.step === 'number' && this.step > 0) ? this.step : 1;
         if (typeof this.minValue === 'undefined') this.minValue = (properties && typeof properties.minValue === 'number') ? properties.minValue : null;
@@ -3899,9 +3900,9 @@ class TextBox extends FormInput {
                 }
             } catch (e) {}
 
-            // Spinner buttons ("−"/"+") for integer fields. Placed in the same slot as
-            // the "..." selector (right of the input). Each click steps the value by
-            // ±step, clamped to min/max, then dispatches input+change so form/cell data
+            // Spinner button ("+") for integer fields. Placed in the same slot as
+            // the "..." selector (right of the input). Each click steps the value up by
+            // +step, clamped to min/max, then dispatches input+change so form/cell data
             // updates through the normal path. Disabled inactive-row state is handled by
             // the table cell logic (button without dataset.role='selection').
             try {
@@ -3918,12 +3919,11 @@ class TextBox extends FormInput {
                         });
                         return b;
                     };
-                    // "−" then "+" — two buttons sitting next to each other.
-                    const minus = mkSpin('−', -this.step, 'spin-down');
-                    const plus  = mkSpin('+',        this.step, 'spin-up');
-                    this.inputContainer.appendChild(minus);
+                    // Только "+" — для быстрого набора количества мышью (легче попадать,
+                    // когда кнопка одна). Уменьшение — с клавиатуры. "−" намеренно убрана.
+                    const plus = mkSpin('+', this.step, 'spin-up');
                     this.inputContainer.appendChild(plus);
-                    this._spinWrap = { minus, plus };
+                    this._spinWrap = { plus };
                 }
             } catch (e) {}
 
@@ -4829,7 +4829,10 @@ class TextBox extends FormInput {
                         try { e.stopPropagation(); } catch (_) {}
                     }
 
-                    if (this.listMode) {
+                    // inTable: в ячейке таблицы список открывается ТОЛЬКО по кнопке
+                    // выпадашки, а не по клику в поле (иначе непосредственное редактирование
+                    // мешает — список выскакивает при любом клике по строке).
+                    if (this.listMode && !this.inTable) {
                         // Prevent the document-level click handler from seeing this
                         // click and immediately closing the newly opened popup.
                         try { e.stopPropagation(); } catch (_) {}
@@ -5007,8 +5010,9 @@ class TextBox extends FormInput {
                         // would clobber the click caret and always land on the first block.
                         try { setTimeout(() => { try { this._syncDateSectionFromCaret(); } catch(_){} }, 0); } catch (_) {}
                     }
-                    // Open list on focus when in listMode — only if triggered by user interaction (click/tab), not programmatic focus
-                    if (this.listMode && this._userInteracted) {
+                    // Open list on focus when in listMode — only if triggered by user interaction (click/tab), not programmatic focus.
+                    // inTable: в ячейке таблицы по фокусу список не открываем — только по кнопке выпадашки.
+                    if (this.listMode && this._userInteracted && !this.inTable) {
                         try { this._openList && this._openList(); } catch (_) {}
                     }
                 } catch (_) {}
@@ -7750,7 +7754,11 @@ class Table extends UIObject {
                 const rows = self.data_getRows(self.dataKey);
                 const newRow = {};
                 if (Array.isArray(self.columns)) {
-                    for (const col of self.columns) { if (col.data) newRow[col.data] = ''; }
+                    // Пред-заполняем значениями по умолчанию из лейаута (col.defaultValue),
+                    // напр. count=1 для числовых колонок ТЧ. Без defaultValue — пустая строка.
+                    for (const col of self.columns) {
+                        if (col.data) newRow[col.data] = (col.defaultValue !== undefined ? col.defaultValue : '');
+                    }
                 }
                 // Получаем UID с сервера — используем тот же алгоритм что и dbGateway
                 try {
@@ -8224,7 +8232,11 @@ class Table extends UIObject {
         const cellItem = Object.assign({}, col);
         cellItem.data = cellKey;
         cellItem.caption = '';
-        cellItem.properties = Object.assign({}, col.properties || {}, { noCaption: true, showBorder: false });
+        // inTable: помечаем контрол как ячейку таблицы. Контрол использует это, чтобы
+        // НЕ открывать выпадающий список автоматически по клику/фокусу (в таблице список
+        // открывается только по кнопке выпадашки). На обычных полях формы (вне таблицы)
+        // флага нет — там список открывается при активации поля, как и раньше.
+        cellItem.properties = Object.assign({}, col.properties || {}, { noCaption: true, showBorder: false, inTable: true });
         // Propagate column-level readOnly into cellItem.properties and mark container
         if (col.readOnly) { cellItem.properties.readOnly = true; cellContainer.dataset.colReadonly = '1'; }
         cellItem.value = this.data_getValue(cellKey, (row && row[col.data]));
@@ -8391,8 +8403,11 @@ class Table extends UIObject {
                             el.addEventListener('change', handler);
                         }
 
-                        // Set initial editable state based on active row, table-level readOnly and column-level readOnly
-                        const isActive = (this._activeRowIndex === rowIndexLocal) && !this.readOnly && !colDef.readOnly;
+                        // Set initial editable state based on active row, table-level readOnly and column-level readOnly.
+                        // В режиме 'cell-immediate' (непосредственное редактирование, как в 1С)
+                        // каждая строка редактируема без предварительной активации — кнопки
+                        // ("...", "+", выпадашка) активны во всех строках, а не только в активной.
+                        const isActive = (this.editMode === 'cell-immediate' || this._activeRowIndex === rowIndexLocal) && !this.readOnly && !colDef.readOnly;
                         // Helper to apply readonly/disabled to typical controls inside cell
                         const applyReadonlyToElement = (node, makeReadOnly) => {
                             try {
@@ -8509,10 +8524,12 @@ class Table extends UIObject {
                     // cell-immediate: activate row (if needed) and then focus the cell
                     const wasInactive = (this._activeRowIndex !== clickedRow);
                     if (wasInactive) this.activateRow(clickedRow);
-                    // If a checkbox cell was clicked while the row was inactive, the checkbox
-                    // was disabled so the native click had no effect. Toggle it now that the
-                    // row is active (activateRow just enabled it via updateAllRowsReadOnly).
-                    if (wasInactive && td) {
+                    // If a checkbox cell was clicked while the row was inactive AND the checkbox
+                    // was disabled (so the native click had no effect), toggle it now that the
+                    // row is active. In 'cell-immediate' the checkbox stays enabled even in
+                    // inactive rows, so the native/capture path already toggled it and set
+                    // __checkboxHandled — skip the manual toggle to avoid a double-toggle.
+                    if (wasInactive && td && !ev.__checkboxHandled) {
                         try {
                             const nativeCb = td.querySelector('input[type="checkbox"]');
                             if (nativeCb && !nativeCb.disabled) {
@@ -8692,7 +8709,8 @@ class Table extends UIObject {
             for (let r = 0; r < rows.length; r++) {
                 const tr = rows[r];
                 // Используем _dataIndex чтобы правильно определить активную строку при активных клиентских фильтрах.
-                const isActive = (tr._dataIndex === this._activeRowIndex) && !this.readOnly;
+                // В 'cell-immediate' все строки остаются редактируемыми независимо от активной.
+                const isActive = (this.editMode === 'cell-immediate' || tr._dataIndex === this._activeRowIndex) && !this.readOnly;
                 const interactives = tr.querySelectorAll('input,textarea,select,button');
                 for (let i = 0; i < interactives.length; i++) {
                     const el = interactives[i];
@@ -8901,6 +8919,10 @@ class Table extends UIObject {
         if (!this.element) {
             const wrapper = document.createElement('div');
             wrapper.classList.add('ui-dynamictable');
+            // В режиме непосредственного редактирования каждая строка редактируема —
+            // помечаем таблицу, чтобы CSS не прятал кнопки ("...", "+", выпадашка)
+            // в неактивных строках.
+            if (this.editMode === 'cell-immediate') wrapper.classList.add('ui-table-immediate');
             wrapper.style.position = 'relative';
             wrapper.style.width = '100%';
             wrapper.style.height = '100%';
@@ -9712,7 +9734,7 @@ class DynamicTable extends Table {
         for (let i = from; i <= to; i++) {
             const tr = this._rowElements[i];
             if (!tr || !tr._dtFilled) continue;
-            const isActive = (this._activeRowIndex === i) && !this.readOnly;
+            const isActive = (this.editMode === 'cell-immediate' || this._activeRowIndex === i) && !this.readOnly;
             const interactives = tr.querySelectorAll('input,textarea,select,button');
             for (let j = 0; j < interactives.length; j++) {
                 const el = interactives[j];
