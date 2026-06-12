@@ -2,451 +2,541 @@
     "User not authorized": {
         "en": "User not authorized",
         "ru": "Пользователь не авторизован",
-        "de": "Benutzer nicht autorisiert"
+        "de": "Benutzer nicht autorisiert",
+        "pl": "Użytkownik nieautoryzowany"
     },
     "Session not found": {
         "en": "Session not found",
         "ru": "Сессия не найдена",
-        "de": "Sitzung nicht gefunden"
+        "de": "Sitzung nicht gefunden",
+        "pl": "Nie znaleziono sesji"
     },
     "Database models not available": {
         "en": "Database models not available",
         "ru": "Модели базы данных недоступны",
-        "de": "Datenbankmodelle nicht verfügbar"
+        "de": "Datenbankmodelle nicht verfügbar",
+        "pl": "Modele bazy danych niedostępne"
     },
     "Alert": {
         "en": "Alert",
         "ru": "Предупреждение",
-        "de": "Hinweis"
+        "de": "Hinweis",
+        "pl": "Uwaga"
     },
     "OK": {
         "en": "OK",
         "ru": "OK",
-        "de": "OK"
+        "de": "OK",
+        "pl": "OK"
     },
     "Confirm": {
         "en": "Confirm",
         "ru": "Подтверждение",
-        "de": "Bestätigung"
+        "de": "Bestätigung",
+        "pl": "Potwierdzenie"
     },
     "Yes": {
         "en": "Yes",
         "ru": "Да",
-        "de": "Ja"
+        "de": "Ja",
+        "pl": "Tak"
     },
     "No": {
         "en": "No",
         "ru": "Нет",
-        "de": "Nein"
+        "de": "Nein",
+        "pl": "Nie"
     },
     "Loading...": {
         "en": "Loading...",
         "ru": "Загрузка...",
-        "de": "Wird geladen..."
+        "de": "Wird geladen...",
+        "pl": "Ładowanie..."
     },
     "No table specified!": {
         "en": "No table specified!",
         "ru": "Не указана таблица!",
-        "de": "Keine Tabelle angegeben!"
+        "de": "Keine Tabelle angegeben!",
+        "pl": "Nie podano tabeli!"
     },
     "No database table specified!": {
         "en": "No database table specified!",
         "ru": "Не указана таблица базы данных!",
-        "de": "Keine Datenbanktabelle angegeben!"
+        "de": "Keine Datenbanktabelle angegeben!",
+        "pl": "Nie podano tabeli bazy danych!"
     },
     "Please select a record": {
         "en": "Please select a record",
         "ru": "Выберите запись",
-        "de": "Bitte einen Datensatz auswählen"
+        "de": "Bitte einen Datensatz auswählen",
+        "pl": "Wybierz rekord"
     },
     "Please select a record to delete": {
         "en": "Please select a record to delete",
         "ru": "Выберите запись для удаления",
-        "de": "Bitte einen Datensatz zum Löschen auswählen"
+        "de": "Bitte einen Datensatz zum Löschen auswählen",
+        "pl": "Wybierz rekord do usunięcia"
     },
     "Are you sure you want to delete this record?": {
         "en": "Are you sure you want to delete this record?",
         "ru": "Вы действительно хотите удалить эту запись?",
-        "de": "Möchten Sie diesen Datensatz wirklich löschen?"
+        "de": "Möchten Sie diesen Datensatz wirklich löschen?",
+        "pl": "Czy na pewno chcesz usunąć ten rekord?"
     },
     "Delete error: ": {
         "en": "Delete error: ",
         "ru": "Ошибка удаления: ",
-        "de": "Löschfehler: "
+        "de": "Löschfehler: ",
+        "pl": "Błąd usuwania: "
     },
     "unknown error": {
         "en": "unknown error",
         "ru": "неизвестная ошибка",
-        "de": "unbekannter Fehler"
+        "de": "unbekannter Fehler",
+        "pl": "nieznany błąd"
     },
     "Data has been modified. Save changes?": {
         "en": "Data has been modified. Save changes?",
         "ru": "Данные были изменены. Сохранить изменения?",
-        "de": "Daten wurden geändert. Änderungen speichern?"
+        "de": "Daten wurden geändert. Änderungen speichern?",
+        "pl": "Dane zostały zmienione. Zapisać zmiany?"
     },
     "Layout load error: ": {
         "en": "Layout load error: ",
         "ru": "Ошибка загрузки макета: ",
-        "de": "Layoutladefehler: "
+        "de": "Layoutladefehler: ",
+        "pl": "Błąd ładowania układu: "
     },
     "runScript: uid not specified": {
         "en": "runScript: uid not specified",
         "ru": "runScript: не указан uid",
-        "de": "runScript: uid nicht angegeben"
+        "de": "runScript: uid nicht angegeben",
+        "pl": "runScript: nie podano uid"
     },
     "runScript: fn not specified": {
         "en": "runScript: fn not specified",
         "ru": "runScript: не указан fn",
-        "de": "runScript: fn nicht angegeben"
+        "de": "runScript: fn nicht angegeben",
+        "pl": "runScript: nie podano fn"
     },
     "File not found or access denied": {
         "en": "File not found or access denied",
         "ru": "Файл не найден или нет доступа",
-        "de": "Datei nicht gefunden oder kein Zugriff"
+        "de": "Datei nicht gefunden oder kein Zugriff",
+        "pl": "Nie znaleziono pliku lub brak dostępu"
     },
     "runScript: function \"": {
         "en": "runScript: function \"",
         "ru": "runScript: функция \"",
-        "de": "runScript: Funktion \""
+        "de": "runScript: Funktion \"",
+        "pl": "runScript: funkcja \""
     },
     "\" not found in script": {
         "en": "\" not found in script",
         "ru": "\" не найдена в скрипте",
-        "de": "\" nicht im Skript gefunden"
+        "de": "\" nicht im Skript gefunden",
+        "pl": "\" nie została znaleziona w skrypcie"
     },
     "Script execution error: ": {
         "en": "Script execution error: ",
         "ru": "Ошибка выполнения скрипта: ",
-        "de": "Skriptausführungsfehler: "
+        "de": "Skriptausführungsfehler: ",
+        "pl": "Błąd wykonania skryptu: "
     },
     "Unknown error": {
         "en": "Unknown error",
         "ru": "Неизвестная ошибка",
-        "de": "Unbekannter Fehler"
+        "de": "Unbekannter Fehler",
+        "pl": "Nieznany błąd"
     },
     "Saved, but some rows were not written:\n": {
         "en": "Saved, but some rows were not written:\n",
         "ru": "Сохранено, но часть строк не записана:\n",
-        "de": "Gespeichert, aber einige Zeilen wurden nicht geschrieben:\n"
+        "de": "Gespeichert, aber einige Zeilen wurden nicht geschrieben:\n",
+        "pl": "Zapisano, ale niektóre wiersze nie zostały zapisane:\n"
     },
     "Save error: ": {
         "en": "Save error: ",
         "ru": "Ошибка сохранения: ",
-        "de": "Speicherfehler: "
+        "de": "Speicherfehler: ",
+        "pl": "Błąd zapisu: "
     },
     "Data refresh error: ": {
         "en": "Data refresh error: ",
         "ru": "Ошибка обновления данных: ",
-        "de": "Datenaktualisierungsfehler: "
+        "de": "Datenaktualisierungsfehler: ",
+        "pl": "Błąd odświeżania danych: "
     },
     "Select": {
         "en": "Select",
         "ru": "Выбрать",
-        "de": "Auswählen"
+        "de": "Auswählen",
+        "pl": "Wybierz"
     },
     "Cancel": {
         "en": "Cancel",
         "ru": "Отмена",
-        "de": "Abbrechen"
+        "de": "Abbrechen",
+        "pl": "Anuluj"
     },
     "Discard unsaved changes?": {
         "en": "Discard unsaved changes?",
         "ru": "Отменить несохранённые изменения?",
-        "de": "Ungespeicherte Änderungen verwerfen?"
+        "de": "Ungespeicherte Änderungen verwerfen?",
+        "pl": "Odrzucić niezapisane zmiany?"
     },
     "Save": {
         "en": "Save",
         "ru": "Сохранить",
-        "de": "Speichern"
+        "de": "Speichern",
+        "pl": "Zapisz"
     },
     "Open": {
         "en": "Open",
         "ru": "Открыть",
-        "de": "Öffnen"
+        "de": "Öffnen",
+        "pl": "Otwórz"
     },
     "Add": {
         "en": "Add",
         "ru": "Добавить",
-        "de": "Hinzufügen"
+        "de": "Hinzufügen",
+        "pl": "Dodaj"
     },
     "Delete": {
         "en": "Delete",
         "ru": "Удалить",
-        "de": "Löschen"
+        "de": "Löschen",
+        "pl": "Usuń"
     },
     "Settings": {
         "en": "Settings",
         "ru": "Настройки",
-        "de": "Einstellungen"
+        "de": "Einstellungen",
+        "pl": "Ustawienia"
     },
     "Enable / disable filter": {
         "en": "Enable / disable filter",
         "ru": "Включить / выключить фильтр",
-        "de": "Filter ein-/ausschalten"
+        "de": "Filter ein-/ausschalten",
+        "pl": "Włącz / wyłącz filtr"
     },
     "Remove filter": {
         "en": "Remove filter",
         "ru": "Убрать фильтр",
-        "de": "Filter entfernen"
+        "de": "Filter entfernen",
+        "pl": "Usuń filtr"
     },
     "Select date": {
         "en": "Select date",
         "ru": "Выбрать дату",
-        "de": "Datum auswählen"
+        "de": "Datum auswählen",
+        "pl": "Wybierz datę"
     },
     "Open record (F2)": {
         "en": "Open record (F2)",
         "ru": "Открыть запись (F2)",
-        "de": "Datensatz öffnen (F2)"
+        "de": "Datensatz öffnen (F2)",
+        "pl": "Otwórz rekord (F2)"
     },
     "Date selection": {
         "en": "Date selection",
         "ru": "Выбор даты",
-        "de": "Datumsauswahl"
+        "de": "Datumsauswahl",
+        "pl": "Wybór daty"
     },
     "January": {
         "en": "January",
         "ru": "Январь",
-        "de": "Januar"
+        "de": "Januar",
+        "pl": "Styczeń"
     },
     "February": {
         "en": "February",
         "ru": "Февраль",
-        "de": "Februar"
+        "de": "Februar",
+        "pl": "Luty"
     },
     "March": {
         "en": "March",
         "ru": "Март",
-        "de": "März"
+        "de": "März",
+        "pl": "Marzec"
     },
     "April": {
         "en": "April",
         "ru": "Апрель",
-        "de": "April"
+        "de": "April",
+        "pl": "Kwiecień"
     },
     "May": {
         "en": "May",
         "ru": "Май",
-        "de": "Mai"
+        "de": "Mai",
+        "pl": "Maj"
     },
     "June": {
         "en": "June",
         "ru": "Июнь",
-        "de": "Juni"
+        "de": "Juni",
+        "pl": "Czerwiec"
     },
     "July": {
         "en": "July",
         "ru": "Июль",
-        "de": "Juli"
+        "de": "Juli",
+        "pl": "Lipiec"
     },
     "August": {
         "en": "August",
         "ru": "Август",
-        "de": "August"
+        "de": "August",
+        "pl": "Sierpień"
     },
     "September": {
         "en": "September",
         "ru": "Сентябрь",
-        "de": "September"
+        "de": "September",
+        "pl": "Wrzesień"
     },
     "October": {
         "en": "October",
         "ru": "Октябрь",
-        "de": "Oktober"
+        "de": "Oktober",
+        "pl": "Październik"
     },
     "November": {
         "en": "November",
         "ru": "Ноябрь",
-        "de": "November"
+        "de": "November",
+        "pl": "Listopad"
     },
     "December": {
         "en": "December",
         "ru": "Декабрь",
-        "de": "Dezember"
+        "de": "Dezember",
+        "pl": "Grudzień"
     },
     "Mo": {
         "en": "Mo",
         "ru": "Пн",
-        "de": "Mo"
+        "de": "Mo",
+        "pl": "Pn"
     },
     "Tu": {
         "en": "Tu",
         "ru": "Вт",
-        "de": "Di"
+        "de": "Di",
+        "pl": "Wt"
     },
     "We": {
         "en": "We",
         "ru": "Ср",
-        "de": "Mi"
+        "de": "Mi",
+        "pl": "Śr"
     },
     "Th": {
         "en": "Th",
         "ru": "Чт",
-        "de": "Do"
+        "de": "Do",
+        "pl": "Cz"
     },
     "Fr": {
         "en": "Fr",
         "ru": "Пт",
-        "de": "Fr"
+        "de": "Fr",
+        "pl": "Pt"
     },
     "Sa": {
         "en": "Sa",
         "ru": "Сб",
-        "de": "Sa"
+        "de": "Sa",
+        "pl": "So"
     },
     "Su": {
         "en": "Su",
         "ru": "Вс",
-        "de": "So"
+        "de": "So",
+        "pl": "Nd"
     },
     "Today": {
         "en": "Today",
         "ru": "Сегодня",
-        "de": "Heute"
+        "de": "Heute",
+        "pl": "Dziś"
     },
     "Enter search text": {
         "en": "Enter search text",
         "ru": "Введите текст для поиска",
-        "de": "Suchtext eingeben"
+        "de": "Suchtext eingeben",
+        "pl": "Wpisz tekst do wyszukania"
     },
     "table": {
         "en": "table",
         "ru": "таблица",
-        "de": "Tabelle"
+        "de": "Tabelle",
+        "pl": "tabela"
     },
     "Filters": {
         "en": "Filters",
         "ru": "Фильтры",
-        "de": "Filter"
+        "de": "Filter",
+        "pl": "Filtry"
     },
     "Fields": {
         "en": "Fields",
         "ru": "Поля",
-        "de": "Felder"
+        "de": "Felder",
+        "pl": "Pola"
     },
     "On": {
         "en": "On",
         "ru": "Вкл",
-        "de": "An"
+        "de": "An",
+        "pl": "Wł"
     },
     "Field": {
         "en": "Field",
         "ru": "Поле",
-        "de": "Feld"
+        "de": "Feld",
+        "pl": "Pole"
     },
     "Condition": {
         "en": "Condition",
         "ru": "Условие",
-        "de": "Bedingung"
+        "de": "Bedingung",
+        "pl": "Warunek"
     },
     "Value": {
         "en": "Value",
         "ru": "Значение",
-        "de": "Wert"
+        "de": "Wert",
+        "pl": "Wartość"
     },
     "Type": {
         "en": "Type",
         "ru": "Тип",
-        "de": "Typ"
+        "de": "Typ",
+        "pl": "Typ"
     },
     "Visibility": {
         "en": "Visibility",
         "ru": "Видимость",
-        "de": "Sichtbarkeit"
+        "de": "Sichtbarkeit",
+        "pl": "Widoczność"
     },
     "Equals": {
         "en": "Equals",
         "ru": "Равно",
-        "de": "Gleich"
+        "de": "Gleich",
+        "pl": "Równa się"
     },
     "Not equals": {
         "en": "Not equals",
         "ru": "Не равно",
-        "de": "Ungleich"
+        "de": "Ungleich",
+        "pl": "Różne od"
     },
     "Greater than": {
         "en": "Greater than",
         "ru": "Больше",
-        "de": "Größer als"
+        "de": "Größer als",
+        "pl": "Większe niż"
     },
     "Greater than or equal": {
         "en": "Greater than or equal",
         "ru": "Больше или равно",
-        "de": "Größer oder gleich"
+        "de": "Größer oder gleich",
+        "pl": "Większe lub równe"
     },
     "Less than": {
         "en": "Less than",
         "ru": "Меньше",
-        "de": "Kleiner als"
+        "de": "Kleiner als",
+        "pl": "Mniejsze niż"
     },
     "Less than or equal": {
         "en": "Less than or equal",
         "ru": "Меньше или равно",
-        "de": "Kleiner oder gleich"
+        "de": "Kleiner oder gleich",
+        "pl": "Mniejsze lub równe"
     },
     "Contains": {
         "en": "Contains",
         "ru": "Содержит",
-        "de": "Enthält"
+        "de": "Enthält",
+        "pl": "Zawiera"
     },
     "Starts with": {
         "en": "Starts with",
         "ru": "Начинается с",
-        "de": "Beginnt mit"
+        "de": "Beginnt mit",
+        "pl": "Zaczyna się od"
     },
     "Ends with": {
         "en": "Ends with",
         "ru": "Заканчивается на",
-        "de": "Endet mit"
+        "de": "Endet mit",
+        "pl": "Kończy się na"
     },
     "Is empty": {
         "en": "Is empty",
         "ru": "Не задано",
-        "de": "Leer"
+        "de": "Leer",
+        "pl": "Jest puste"
     },
     "Is not empty": {
         "en": "Is not empty",
         "ru": "Задано",
-        "de": "Nicht leer"
+        "de": "Nicht leer",
+        "pl": "Nie jest puste"
     },
     "Server (SQL)": {
         "en": "Server (SQL)",
         "ru": "Серверный (SQL)",
-        "de": "Server (SQL)"
+        "de": "Server (SQL)",
+        "pl": "Serwerowy (SQL)"
     },
     "Client-side": {
         "en": "Client-side",
         "ru": "Клиентский",
-        "de": "Clientseitig"
+        "de": "Clientseitig",
+        "pl": "Po stronie klienta"
     },
     "Visible (editable)": {
         "en": "Visible (editable)",
         "ru": "Видимый (редактируемый)",
-        "de": "Sichtbar (bearbeitbar)"
+        "de": "Sichtbar (bearbeitbar)",
+        "pl": "Widoczne (edytowalne)"
     },
     "Visible (read-only)": {
         "en": "Visible (read-only)",
         "ru": "Видимый (только чтение)",
-        "de": "Sichtbar (nur lesen)"
+        "de": "Sichtbar (nur lesen)",
+        "pl": "Widoczne (tylko do odczytu)"
     },
     "Hidden": {
         "en": "Hidden",
         "ru": "Скрытый",
-        "de": "Versteckt"
+        "de": "Versteckt",
+        "pl": "Ukryte"
     },
     "+ Add filter": {
         "en": "+ Add filter",
         "ru": "+ Добавить фильтр",
-        "de": "+ Filter hinzufügen"
+        "de": "+ Filter hinzufügen",
+        "pl": "+ Dodaj filtr"
     },
     "Apply": {
         "en": "Apply",
         "ru": "Применить",
-        "de": "Anwenden"
+        "de": "Anwenden",
+        "pl": "Zastosuj"
     },
     "Clear all": {
         "en": "Clear all",
         "ru": "Очистить всё",
-        "de": "Alles löschen"
+        "de": "Alles löschen",
+        "pl": "Wyczyść wszystko"
     }
 }

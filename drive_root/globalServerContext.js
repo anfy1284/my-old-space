@@ -1310,11 +1310,21 @@ async function getLookupList(options) {
     visibleRows = Math.max(0, Math.min(visibleRows || 20, 1000));
     firstRow = Math.max(0, firstRow || 0);
 
-    // Кэш: COUNT + страница строк по (таблица, identity, окно). RLS зависит от
-    // пользователя — identity обязателен в ключе.
+    // Кэш: COUNT + страница строк по (таблица, identity, ЯЗЫК, окно). RLS зависит от
+    // пользователя — identity обязателен в ключе. Результат содержит УЖЕ ПЕРЕВЕДЁННЫЕ
+    // display-значения (translationMiddleware переводит справочники по языку сессии),
+    // поэтому ЯЗЫК тоже обязан входить в ключ — иначе при смене языка в той же сессии
+    // вернётся закэшированный список на старом языке (баг: статусы/типы на чужом языке).
     const _lkTable = tableName || Model.tableName;
     const _lkIdentity = sessionID || userId || '';
-    const _lkKey = `${_lkTable}::${_lkIdentity}::${firstRow}::${visibleRows}`;
+    let _lkLang = '';
+    if (sessionID) {
+        try {
+            const _sctx = await require('../drive_forms/globalServerContext').getSessionContext(sessionID);
+            _lkLang = (_sctx && _sctx.language) || '';
+        } catch (e) { /* язык не критичен для ключа — продолжаем без него */ }
+    }
+    const _lkKey = `${_lkTable}::${_lkIdentity}::${_lkLang}::${firstRow}::${visibleRows}`;
     const _lkCached = _lookupCacheGet(_lkKey);
     if (_lkCached !== undefined) return _lkCached;
 

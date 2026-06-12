@@ -2,71 +2,85 @@
     "Create": {
         "en": "Create",
         "ru": "Создать",
-        "de": "Erstellen"
+        "de": "Erstellen",
+        "pl": "Utwórz"
     },
     "App not found": {
         "en": "App not found",
         "ru": "Приложение не найдено",
-        "de": "Anwendung nicht gefunden"
+        "de": "Anwendung nicht gefunden",
+        "pl": "Nie znaleziono aplikacji"
     },
     "App server.js not found": {
         "en": "App server.js not found",
         "ru": "Серверный файл приложения не найден",
-        "de": "Server-Datei der Anwendung nicht gefunden"
+        "de": "Server-Datei der Anwendung nicht gefunden",
+        "pl": "Nie znaleziono pliku server.js aplikacji"
     },
     "Failed to load app server.js:": {
         "en": "Failed to load app server.js:",
         "ru": "Ошибка загрузки серверного файла приложения:",
-        "de": "Fehler beim Laden der Server-Datei:"
+        "de": "Fehler beim Laden der Server-Datei:",
+        "pl": "Błąd ładowania pliku server.js aplikacji:"
     },
     "Method not found in app": {
         "en": "Method not found in app",
         "ru": "Метод не найден в приложении",
-        "de": "Methode in der Anwendung nicht gefunden"
+        "de": "Methode in der Anwendung nicht gefunden",
+        "pl": "Nie znaleziono metody w aplikacji"
     },
     "Missing app or method": {
         "en": "Missing app or method",
         "ru": "Не указано приложение или метод",
-        "de": "Anwendung oder Methode fehlt"
+        "de": "Anwendung oder Methode fehlt",
+        "pl": "Brak aplikacji lub metody"
     },
     "Invalid JSON": {
         "en": "Invalid JSON",
         "ru": "Некорректный формат JSON",
-        "de": "Ungültiges JSON-Format"
+        "de": "Ungültiges JSON-Format",
+        "pl": "Nieprawidłowy format JSON"
     },
     "Not Found": {
         "en": "Not Found",
         "ru": "Не найдено",
-        "de": "Nicht gefunden"
+        "de": "Nicht gefunden",
+        "pl": "Nie znaleziono"
     },
     "Error reading file": {
         "en": "Error reading file",
         "ru": "Ошибка чтения файла",
-        "de": "Fehler beim Lesen der Datei"
+        "de": "Fehler beim Lesen der Datei",
+        "pl": "Błąd odczytu pliku"
     },
     "Upload error:": {
         "en": "Upload error:",
         "ru": "Ошибка загрузки файла:",
-        "de": "Upload-Fehler:"
+        "de": "Upload-Fehler:",
+        "pl": "Błąd przesyłania pliku:"
     },
     "Internal Server Error": {
         "en": "Internal Server Error",
         "ru": "Внутренняя ошибка сервера",
-        "de": "Interner Serverfehler"
+        "de": "Interner Serverfehler",
+        "pl": "Wewnętrzny błąd serwera"
     },
     "Forbidden": {
         "en": "Forbidden",
         "ru": "Доступ запрещён",
-        "de": "Zugriff verweigert"
+        "de": "Zugriff verweigert",
+        "pl": "Brak dostępu"
     },
     "number_field": {
         "en": "Number",
         "ru": "Номер",
-        "de": "Nummer"
+        "de": "Nummer",
+        "pl": "Numer"
     },
     "name_field": {
         "en": "Name",
         "ru": "Наименование",
-        "de": "Bezeichnung"
+        "de": "Bezeichnung",
+        "pl": "Nazwa"
     }
 }

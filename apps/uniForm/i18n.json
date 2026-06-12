@@ -2,36 +2,43 @@
     "save_button": {
         "en": "Save",
         "ru": "Сохранить",
-        "de": "Speichern"
+        "de": "Speichern",
+        "pl": "Zapisz"
     },
     "cancel_button": {
         "en": "Cancel",
         "ru": "Отмена",
-        "de": "Abbrechen"
+        "de": "Abbrechen",
+        "pl": "Anuluj"
     },
     "missing_datasetId": {
         "en": "Missing dataset ID",
         "ru": "Не указан идентификатор набора данных",
-        "de": "Datensatz-ID fehlt"
+        "de": "Datensatz-ID fehlt",
+        "pl": "Brak identyfikatora zbioru danych"
     },
     "no_table_context": {
         "en": "No table context found in dataset",
         "ru": "Контекст таблицы не найден в наборе данных",
-        "de": "Kein Tabellenkontext im Datensatz gefunden"
+        "de": "Kein Tabellenkontext im Datensatz gefunden",
+        "pl": "Nie znaleziono kontekstu tabeli w zbiorze danych"
     },
     "row_field_required": {
         "en": "Row {{row}} of section «{{section}}»: field «{{field}}» is not filled — row skipped",
         "ru": "Строка {{row}} секции «{{section}}»: поле «{{field}}» не заполнено — строка пропущена",
-        "de": "Zeile {{row}} der Sektion «{{section}}»: Feld «{{field}}» ist nicht ausgefüllt — Zeile übersprungen"
+        "de": "Zeile {{row}} der Sektion «{{section}}»: Feld «{{field}}» ist nicht ausgefüllt — Zeile übersprungen",
+        "pl": "Wiersz {{row}} sekcji «{{section}}»: pole «{{field}}» nie jest wypełnione — wiersz pominięty"
     },
     "row_field_fk_mismatch": {
         "en": "Row {{row}} of section «{{section}}»: field «{{field}}» references a record not belonging to the current object — row rejected",
         "ru": "Строка {{row}} секции «{{section}}»: поле «{{field}}» ссылается на запись, не принадлежащую текущему объекту — строка отклонена",
-        "de": "Zeile {{row}} der Sektion «{{section}}»: Feld «{{field}}» referenziert einen Datensatz, der nicht zum aktuellen Objekt gehört — Zeile abgelehnt"
+        "de": "Zeile {{row}} der Sektion «{{section}}»: Feld «{{field}}» referenziert einen Datensatz, der nicht zum aktuellen Objekt gehört — Zeile abgelehnt",
+        "pl": "Wiersz {{row}} sekcji «{{section}}»: pole «{{field}}» odwołuje się do rekordu nienależącego do bieżącego obiektu — wiersz odrzucony"
     },
     "row_save_error": {
         "en": "Row {{row}} of section «{{section}}»: save error — {{error}}",
         "ru": "Строка {{row}} секции «{{section}}»: ошибка сохранения — {{error}}",
-        "de": "Zeile {{row}} der Sektion «{{section}}»: Speicherfehler — {{error}}"
+        "de": "Zeile {{row}} der Sektion «{{section}}»: Speicherfehler — {{error}}",
+        "pl": "Wiersz {{row}} sekcji «{{section}}»: błąd zapisu — {{error}}"
     }
 }

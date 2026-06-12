@@ -2,31 +2,37 @@
     "Username and password required": {
         "en": "Username and password required",
         "ru": "Необходимо указать имя пользователя и пароль",
-        "de": "Benutzername und Passwort erforderlich"
+        "de": "Benutzername und Passwort erforderlich",
+        "pl": "Wymagane są nazwa użytkownika i hasło"
     },
     "User not found": {
         "en": "User not found",
         "ru": "Пользователь не найден",
-        "de": "Benutzer nicht gefunden"
+        "de": "Benutzer nicht gefunden",
+        "pl": "Nie znaleziono użytkownika"
     },
     "Invalid password": {
         "en": "Invalid password",
         "ru": "Неверный пароль",
-        "de": "Falsches Passwort"
+        "de": "Falsches Passwort",
+        "pl": "Nieprawidłowe hasło"
     },
     "User already exists": {
         "en": "User already exists",
         "ru": "Пользователь уже существует",
-        "de": "Benutzer existiert bereits"
+        "de": "Benutzer existiert bereits",
+        "pl": "Użytkownik już istnieje"
     },
     "Cannot login as guest with password": {
         "en": "Cannot login as guest with password",
         "ru": "Гостевой вход с паролем недопустим",
-        "de": "Gastanmeldung mit Passwort nicht möglich"
+        "de": "Gastanmeldung mit Passwort nicht möglich",
+        "pl": "Logowanie jako gość z hasłem jest niemożliwe"
     },
     "sessionID required": {
         "en": "Session ID required",
         "ru": "Идентификатор сессии обязателен",
-        "de": "Sitzungs-ID erforderlich"
+        "de": "Sitzungs-ID erforderlich",
+        "pl": "Wymagany jest identyfikator sesji"
     }
 }
