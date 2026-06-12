@@ -203,9 +203,19 @@ function registerDynamicTableMethods(appName, config = {}) {
 
             // Ожидаемые варианты от глобальной функции: { rows, fields, totalRows } или { data, fields, total }
             const rows = raw && (raw.rows || raw.data || raw.items || raw.result) || [];
-            const fields = raw && (raw.fields || fieldConfig) || fieldConfig;
+            let fields = raw && (raw.fields || fieldConfig) || fieldConfig;
             const totalRows = raw && (raw.totalRows || raw.total || rows.length) || rows.length;
 
+            // UID — системный первичный ключ. Как видимая колонка списка он бесполезен
+            // (идентичность строки берётся из данных row.UID, а не из колонки), поэтому
+            // прячем его из автогенерируемых динамических таблиц. Делается в единой точке
+            // прохода всех колонок — чтобы покрыть и raw.fields (модельные), и fieldConfig.
+            if (Array.isArray(fields)) {
+                fields = fields.filter(f => {
+                    const n = (typeof f === 'string') ? f : (f && (f.name || f.field || f.id || f.key));
+                    return n !== 'UID';
+                });
+            }
             const columns = normalizeColumnsFromFields(fields, rows);
             await translateColumnsI18n(columns, sessionID);
             try { console.log(`[${appName}/getDynamicTableData] normalized columns=`, columns.map(c => ({ data: c.data, caption: c.caption }))); } catch(e) {}

@@ -58,6 +58,11 @@
             "name": "Deutsch",
             "code": "de",
             "UID": "000000000-lang-0003"
+        },
+        {
+            "name": "Polski",
+            "code": "pl",
+            "UID": "000000000-lang-0004"
         }
     ]
 }

@@ -25,6 +25,13 @@ async function applySettings(ev, ctx) {
         return;
     }
     form.setModified(false);
+    // Язык интерфейса сменился — клиентские бандлы переводятся на сервере под язык
+    // сессии, поэтому новый язык виден только после перезагрузки страницы (простой
+    // и надёжный путь — без точечного ре-рендера всех открытых окон).
+    if (result && result.languageChanged) {
+        window.location.reload();
+        return;
+    }
     showAlert(__t('Settings saved'));
 }
 

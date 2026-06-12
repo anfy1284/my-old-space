@@ -85,6 +85,11 @@ async function saveSettings(params, sessionID) {
         const fieldMap = {};
         settingsFields.forEach(f => { fieldMap[f.name] = f; });
 
+        // Сменился ли язык интерфейса — клиент по этому флагу перезагрузит страницу,
+        // чтобы новый язык применился сразу (все клиентские бандлы отдаются уже
+        // переведёнными под язык сессии — без перезагрузки старый текст остаётся).
+        let languageChanged = false;
+
         for (const [fieldName, value] of Object.entries(params)) {
             const field = fieldMap[fieldName];
             if (!field) { console.warn('[UserSettings] Unknown field:', fieldName); continue; }
@@ -115,11 +120,20 @@ async function saveSettings(params, sessionID) {
                 preparedValue = String(value);
             }
 
+            // Детект смены языка: сравниваем со старым значением ДО upsert.
+            if (fieldName === 'Language') {
+                const existing = await modelsDB[modelName].findOne({ where: { userId: user.UID, settingsFieldId: field.UID } });
+                const oldVal = existing ? existing.value : null;
+                if (String(oldVal == null ? '' : oldVal) !== String(preparedValue == null ? '' : preparedValue)) {
+                    languageChanged = true;
+                }
+            }
+
             await modelsDB[modelName].upsert({ userId: user.UID, settingsFieldId: field.UID, value: preparedValue });
         }
 
         invalidateSessionContext(sessionID);
-        return { success: true };
+        return { success: true, languageChanged };
     } catch (e) {
         console.error('[UserSettings] saveSettings error:', e);
         return { error: e.message };
@@ -342,7 +356,7 @@ module.exports = function factory(modelsDB, Utilities) {
         if (Array.isArray(autofillRows)) {
             await saveAutofill(autofillRows, ctx.sessionID);
         }
-        return { ok: true };
+        return { ok: true, languageChanged: !!result.languageChanged };
     }
 
     return { onLoadData, onSave };

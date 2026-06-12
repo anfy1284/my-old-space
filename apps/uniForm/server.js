@@ -887,7 +887,9 @@ async function generateFormSpec(tableName, params, sessionID) {
             return item;
         }));
 
-        const controls = fields.map(f => {
+        // UID — системный первичный ключ; в автогенерируемой форме записи его как
+        // редактируемое поле не показываем (значение остаётся в data для pre-gen/save).
+        const controls = fields.filter(f => f.name !== 'UID').map(f => {
             const ctrlType = mapInputTypeToControl(f.inputType || 'textbox');
             const ctrl = { type: ctrlType, name: f.name, data: f.name, caption: f.caption || f.name };
             if (f.properties) ctrl.properties = f.properties;
@@ -933,7 +935,9 @@ async function generateFormSpec(tableName, params, sessionID) {
                 { type: 'commandBar' },
                 // alignFields: captions and controls render as a 2-column grid so labels
                 // and fields line up (same polish as the hand-built booking form).
-                { type: 'group', caption: tableName, orientation: 'vertical', alignFields: true, layout: controls }
+                // noBorder + no caption: the record isn't wrapped in a visible frame with a
+                // raw table-name legend — the window title already names the record.
+                { type: 'group', orientation: 'vertical', alignFields: true, noBorder: true, layout: controls }
             ];
 
             // Автоматические табличные части
