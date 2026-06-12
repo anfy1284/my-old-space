@@ -230,7 +230,11 @@ try {
                         };
                     }
 
-                    try { appForm.Draw(); } catch(e) { console.error(e); }
+                    // await: дожидаемся полной отрисовки (loadLayout + renderLayout +
+                    // загрузка данных с сервера). Без await onOpen резолвится мгновенно,
+                    // createInstance/MySpace.open «считают» окно открытым, и бегущий
+                    // прогрессбар гаснет раньше, чем форма реально нарисована.
+                    try { await appForm.Draw(); } catch(e) { console.error(e); }
                 },
 
                 onAction(action, params) {
@@ -254,7 +258,10 @@ try {
             // Привязываем instance к форме для форвардинга action
             appForm.instance = instance;
 
-            if (params && (params.dbTable || params.tableName || params.table)) instance.onOpen(params);
+            // await: createInstance должен резолвиться только когда форма реально
+            // отрисована — тогда MySpace.open держит бегущий прогрессбар до конца
+            // открытия, а не гасит его на пустом объекте instance.
+            if (params && (params.dbTable || params.tableName || params.table)) await instance.onOpen(params);
             return instance;
         };
 
