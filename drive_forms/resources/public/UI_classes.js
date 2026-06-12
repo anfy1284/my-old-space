@@ -506,6 +506,11 @@ if (typeof window !== 'undefined') {
                 // получает отклик, пока createInstance тянет данные с сервера.
                 const _busyToken = this.showBusy('');
                 try {
+                    // Дать браузеру кадр НА ОТРИСОВКУ индикатора до тяжёлой синхронной
+                    // работы createInstance. Без этого при быстром/кэшированном открытии
+                    // paint между showBusy и появлением окна не происходит — индикатор не
+                    // виден. Двойной rAF гарантирует, что кадр с плашкой уже нарисован.
+                    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
                     return await this._openInternal(name, params, options, desc);
                 } finally {
                     this.hideBusy(_busyToken);

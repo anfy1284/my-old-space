@@ -701,9 +701,9 @@ input[type="checkbox"],
    (pointer-events:none). Появляется при открытии окон и генерации счёта. */
 .mos-busy {
     position: fixed;
-    top: 6px;
+    top: 50%;
     left: 50%;
-    transform: translateX(-50%);
+    transform: translate(-50%, -50%); /* центр экрана по обеим осям */
     z-index: 100000; /* поверх окон; pointer-events:none, диалоги не перекрывает */
     display: none; /* flex когда активна (через JS) */
     flex-direction: column;
