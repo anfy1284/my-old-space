@@ -12,6 +12,9 @@ if (!global._dynamicTableSseClients) {
     global._dynamicTableSseClients = new Map(); // appName -> tableName -> Set of {res, userId, clientId}
 }
 
+// 4.1: окно серверного коалесцирования SSE-событий одной таблицы (мс).
+const SSE_COALESCE_MS = process.env.SSE_COALESCE_MS ? Number(process.env.SSE_COALESCE_MS) : 250;
+
 function normalizeColumnsFromFields(fields, rows) {
     if (!fields) {
         // Infer fields from first row keys
@@ -48,6 +51,41 @@ function registerDynamicTableMethods(appName, config = {}) {
         global._dynamicTableSseClients.set(appName, new Map());
     }
     const appSseClients = global._dynamicTableSseClients.get(appName);
+
+    // 4.1: фактическая рассылка одного (возможно коалесцированного) события —
+    // table-scoped подписчикам данной таблицы и session-scoped клиентам.
+    function broadcastTableChange(tableName, messageObj) {
+        const message = JSON.stringify(messageObj);
+
+        const tableClients = appSseClients.get(tableName);
+        if (tableClients) {
+            const deadClients = [];
+            tableClients.forEach(client => {
+                try { client.res.write(`data: ${message}\n\n`); }
+                catch (error) { deadClients.push(client); }
+            });
+            deadClients.forEach(client => tableClients.delete(client));
+        }
+
+        // Broadcast to session-scoped SSE clients (one EventSource per session/окно).
+        // Клиент сам фильтрует по своему app::tableName (см. UI_classes.connectSSE) —
+        // неродственные таблицы окна на это событие не реагируют.
+        try {
+            if (global._sessionSseClients) {
+                for (const [sid, set] of global._sessionSseClients.entries()) {
+                    const dead = [];
+                    set.forEach(client => {
+                        try { client.res.write(`data: ${message}\n\n`); }
+                        catch (e) { dead.push(client); }
+                    });
+                    dead.forEach(c => set.delete(c));
+                    if (set.size === 0) global._sessionSseClients.delete(sid);
+                }
+            }
+        } catch (e) {
+            console.error(`[${appName}/notifyTableChange] session broadcast error:`, e && e.message);
+        }
+    }
 
     return {
         /**
@@ -274,10 +312,10 @@ function registerDynamicTableMethods(appName, config = {}) {
                         appSseClients.set(tableName, new Set());
                     }
                     const tableClients = appSseClients.get(tableName);
-                    const clientInfo = { res, userId: user.id, clientId };
+                    const clientInfo = { res, userId: user.UID, clientId };
                     tableClients.add(clientInfo);
 
-                    console.log(`[${appName}/subscribeToTable] client connected table=${tableName} clientId=${clientId} user=${user.id} totalClients=${tableClients.size}`);
+                    console.log(`[${appName}/subscribeToTable] client connected table=${tableName} clientId=${clientId} user=${user.UID} totalClients=${tableClients.size}`);
                     res.write(`data: ${JSON.stringify({ type: 'connected', tableName, clientId })}\n\n`);
 
                     req.on('close', () => {
@@ -314,12 +352,6 @@ function registerDynamicTableMethods(appName, config = {}) {
          * Уведомление об изменении данных таблицы
          */
         notifyTableChange(tableName, action, rowId, rowData = null) {
-            if (!appSseClients.has(tableName)) {
-                // still notify session-scoped SSE clients if present
-                // (fall through to session clients below)
-            }
-
-            const tableClients = appSseClients.get(tableName);
             const messageObj = {
                 type: 'dataChanged',
                 app: appName,
@@ -328,43 +360,28 @@ function registerDynamicTableMethods(appName, config = {}) {
                 rowId,
                 rowData
             };
-            const message = JSON.stringify(messageObj);
 
-            const deadClients = [];
-            if (tableClients) {
-                tableClients.forEach(client => {
-                    try {
-                        client.res.write(`data: ${message}\n\n`);
-                    } catch (error) {
-                        console.error(`[${appName}/notifyTableChange] Error sending to client:`, error.message);
-                        deadClients.push(client);
-                    }
-                });
-                deadClients.forEach(client => tableClients.delete(client));
-            }
-
-            // Broadcast to session-scoped SSE clients (one EventSource per session)
-            try {
-                if (global._sessionSseClients) {
-                    // Iterate over all sessions and send event to each connected session client
-                    for (const [sessionID, set] of global._sessionSseClients.entries()) {
-                        const sessionMsg = JSON.stringify(messageObj);
-                        const dead = [];
-                        set.forEach(client => {
-                            try {
-                                client.res.write(`data: ${sessionMsg}\n\n`);
-                            } catch (e) {
-                                console.error(`[${appName}/notifyTableChange] Error sending to session client:`, e.message);
-                                dead.push(client);
-                            }
-                        });
-                        dead.forEach(c => set.delete(c));
-                        if (set.size === 0) global._sessionSseClients.delete(sessionID);
-                    }
-                }
-            } catch (e) {
-                console.error(`[${appName}/notifyTableChange] Error broadcasting to session SSE clients:`, e.message);
-            }
+            // 4.1: серверное коалесцирование. Пачка изменений одной таблицы за окно
+            // SSE_COALESCE_MS (например, commit нескольких правок ячеек) схлопывается
+            // в ОДНО событие: единичное изменение уходит как есть (с rowData),
+            // несколько — как { action: 'bulk' } (клиент делает один refresh).
+            // Снимает лавину «N сохранений → N событий → N refresh у каждого клиента».
+            if (!global._sseCoalesce) global._sseCoalesce = new Map();
+            const coalKey = appName + '::' + tableName;
+            let entry = global._sseCoalesce.get(coalKey);
+            if (!entry) { entry = { events: [], timer: null }; global._sseCoalesce.set(coalKey, entry); }
+            entry.events.push(messageObj);
+            if (entry.timer) return; // флаш уже запланирован — добавили событие в пачку
+            entry.timer = setTimeout(() => {
+                const ev = global._sseCoalesce.get(coalKey);
+                global._sseCoalesce.delete(coalKey);
+                if (!ev || !ev.events.length) return;
+                const outObj = (ev.events.length === 1)
+                    ? ev.events[0]
+                    : { type: 'dataChanged', app: appName, tableName, action: 'bulk', coalesced: ev.events.length, rowId: null, rowData: null };
+                try { broadcastTableChange(tableName, outObj); }
+                catch (e) { console.error(`[${appName}/notifyTableChange] broadcast error:`, e && e.message); }
+            }, SSE_COALESCE_MS);
         },
 
         /**

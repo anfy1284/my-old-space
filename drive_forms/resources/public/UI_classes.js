@@ -10029,25 +10029,26 @@ class DynamicTable extends Table {
                     ses.onmessage = (event) => {
                         try {
                             const d = JSON.parse(event.data);
-                            if (d && d.type === 'dataChanged') {
-                                // Only react if message matches this table
-                                if (d.app === this.appName && d.tableName === this.tableName) {
-                                    try {
-                                        const subs = window._dynamicTableSubscribers.get(sessionSharedKey);
-                                        if (subs) subs.forEach(sub => {
-                                            try { sub.dataCache = {}; } catch(e){}
-                                            // Debounce SSE refresh to avoid rapid cascading refreshes
-                                            try {
-                                                if (sub._sseRefreshTimer) clearTimeout(sub._sseRefreshTimer);
-                                                sub._sseRefreshTimer = setTimeout(() => {
-                                                    sub._sseRefreshTimer = null;
-                                                    if (typeof sub.refresh === 'function' && !sub._sseDestroyed) sub.refresh();
-                                                }, 300);
-                                            } catch(e){}
-                                        });
-                                    } catch(e){}
-                                }
-                            }
+                            if (!d || d.type !== 'dataChanged') return;
+                            // 4.1: фильтр ПО КАЖДОМУ подписчику. Сессионный EventSource —
+                            // один на окно и несёт события ВСЕХ таблиц; реагировать должна
+                            // только та подписка, чьи app/tableName совпали с событием.
+                            // (Раньше фильтр шёл по this.* создателя ES → неродственные
+                            // таблицы окна рефрешились, а события не-создателя терялись.)
+                            const subs = window._dynamicTableSubscribers.get(sessionSharedKey);
+                            if (!subs) return;
+                            subs.forEach(sub => {
+                                try {
+                                    if (!sub || sub.appName !== d.app || sub.tableName !== d.tableName) return;
+                                    sub.dataCache = {};
+                                    // Debounce SSE refresh to avoid rapid cascading refreshes
+                                    if (sub._sseRefreshTimer) clearTimeout(sub._sseRefreshTimer);
+                                    sub._sseRefreshTimer = setTimeout(() => {
+                                        sub._sseRefreshTimer = null;
+                                        if (typeof sub.refresh === 'function' && !sub._sseDestroyed) sub.refresh();
+                                    }, 300);
+                                } catch(e){}
+                            });
                         } catch (e) { console.error('[DynamicTable] session SSE parse error', e); }
                     };
 
@@ -10109,6 +10110,9 @@ class DynamicTable extends Table {
         } catch (e) {}
 
         this.eventSource = es;
+        // perTableSharedKey — ключ этого shared ES в реестрах; раньше обработчики
+        // ниже ссылались на необъявленный `sharedKey` (ReferenceError → молча в catch).
+        const sharedKey = perTableSharedKey;
 
         es.onopen = () => {
             console.log('[DynamicTable] SSE connected for', this.appName, this.tableName);
@@ -10117,25 +10121,22 @@ class DynamicTable extends Table {
         es.onmessage = (event) => {
             try {
                 const d = JSON.parse(event.data);
-                if (d && d.type === 'dataChanged') {
-                    // Notify all subscribers for this table
+                if (!d || d.type !== 'dataChanged') return;
+                const subs = (typeof window !== 'undefined' && window._dynamicTableSubscribers) ? window._dynamicTableSubscribers.get(sharedKey) : null;
+                if (!subs || subs.size === 0) return;
+                subs.forEach(sub => {
                     try {
-                        const subs = (typeof window !== 'undefined' && window._dynamicTableSubscribers) ? window._dynamicTableSubscribers.get(sharedKey) : null;
-                        if (subs && subs.size > 0) {
-                            subs.forEach(sub => {
-                                try { sub.dataCache = {}; } catch (e) {}
-                                // Debounce SSE refresh
-                                try {
-                                    if (sub._sseRefreshTimer) clearTimeout(sub._sseRefreshTimer);
-                                    sub._sseRefreshTimer = setTimeout(() => {
-                                        sub._sseRefreshTimer = null;
-                                        if (typeof sub.refresh === 'function' && !sub._sseDestroyed) sub.refresh();
-                                    }, 300);
-                                } catch (e) {}
-                            });
-                        }
+                        // 4.1: реагирует только подписка, чьи app/tableName совпали с событием
+                        if (!sub || sub.appName !== d.app || sub.tableName !== d.tableName) return;
+                        sub.dataCache = {};
+                        // Debounce SSE refresh
+                        if (sub._sseRefreshTimer) clearTimeout(sub._sseRefreshTimer);
+                        sub._sseRefreshTimer = setTimeout(() => {
+                            sub._sseRefreshTimer = null;
+                            if (typeof sub.refresh === 'function' && !sub._sseDestroyed) sub.refresh();
+                        }, 300);
                     } catch (e) {}
-                }
+                });
             } catch (e) {
                 console.error('[DynamicTable] SSE parse error', e);
             }
