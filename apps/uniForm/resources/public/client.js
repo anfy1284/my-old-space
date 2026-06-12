@@ -267,6 +267,16 @@ try {
 
         try { app.register(); } catch(e) { console.error('[uniForm] Failed to register app descriptor', e); }
 
+        // Таблицы-исключения для дедупликации окон. По умолчанию MySpace._openInternal
+        // держит одну форму списка на таблицу и одну форму записи на запись (UID); таблицы
+        // из этой карты разрешают несколько окон (entityConfig.allowMultipleListForms /
+        // allowMultipleRecordForms). До загрузки карты действует безопасный дефолт (дедуп вкл).
+        try {
+            callServerMethod(APP_NAME, 'getMultiInstanceTables', {})
+                .then(map => { if (map && typeof map === 'object') window.MySpaceMultiInstanceTables = map; })
+                .catch(() => {});
+        } catch (e) {}
+
         console.log('[uniForm] Client descriptor registered');
     })();
 } catch (error) {

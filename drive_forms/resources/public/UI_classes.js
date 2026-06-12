@@ -548,10 +548,33 @@ if (typeof window !== 'undefined') {
             },
 
             async _openInternal(name, params, options, desc) {
-                // Singleton-by-key: find existing instance by appName+mode+dbTable
+                // Determine a dedup/singleton key for this open (if any).
+                //  • Explicit options.singleton → key by appName+mode+table (legacy behaviour).
+                //  • Generic form app (uniForm) → DEFAULT dedup: one LIST window per table,
+                //    one RECORD window per record (UID). Tables opt out via entityConfig
+                //    (allowMultipleListForms / allowMultipleRecordForms), shipped to the client
+                //    as window.MySpaceMultiInstanceTables. Selection forms (selectMode) and new
+                //    records (no UID) are never deduped — each picker / new card is distinct.
+                let singletonKey = null;
                 if (options && options.singleton) {
                     const p = params || {};
-                    const singletonKey = name + ':' + (p.mode || '') + ':' + (p.dbTable || p.tableName || '');
+                    singletonKey = name + ':' + (p.mode || '') + ':' + (p.dbTable || p.tableName || '');
+                } else if (name === 'uniForm') {
+                    const p = params || {};
+                    const table = p.dbTable || p.tableName || p.table || '';
+                    if (table) {
+                        const recId = p.recordID || p.recordId || p.id || '';
+                        const isList = p.mode === 'list' || (!p.mode && p.dbTable && !recId);
+                        const ex = ((typeof window !== 'undefined' && window.MySpaceMultiInstanceTables) || {})[table] || {};
+                        if (isList && !p.selectMode && !ex.list) {
+                            singletonKey = 'uniForm:list:' + table;
+                        } else if (!isList && recId && !ex.record) {
+                            singletonKey = 'uniForm:record:' + table + ':' + recId;
+                        }
+                    }
+                }
+
+                if (singletonKey) {
                     for (const k in instances) {
                         const inst = instances[k];
                         if (inst && inst._singletonKey === singletonKey) {
@@ -588,11 +611,8 @@ if (typeof window !== 'undefined') {
                 const id = genId(name);
                 inst.id = id;
                 inst.appName = name;
-                // Store singleton key so future calls can find this instance
-                if (options && options.singleton) {
-                    const p = params || {};
-                    inst._singletonKey = name + ':' + (p.mode || '') + ':' + (p.dbTable || p.tableName || '');
-                }
+                // Store dedup/singleton key so future opens can find this instance.
+                if (singletonKey) inst._singletonKey = singletonKey;
                 instances[id] = inst;
                 // Apply app icon from menu registry (covers standalone apps that don't use loadLayout)
                 try {
@@ -1742,21 +1762,32 @@ class Form extends UIObject {
 
         if (!this.element || !this.contentArea) return;
 
-        // Temporarily unset width on contentArea to measure intrinsic width if possible
-        const prevWidth = this.contentArea.style.width || '';
+        // Temporarily unset width AND height so the content collapses to its intrinsic size
+        // before measuring. Critical for height: if the form was pre-sized tall (e.g. uniForm
+        // opens record forms at 600px before Draw), contentArea.scrollHeight would otherwise
+        // report the inflated container height, not the real content height — and the window
+        // would never shrink. Resetting the form element height too prevents a flex/explicit
+        // height from clamping the contentArea during measurement.
+        const prevWidth   = this.contentArea.style.width  || '';
+        const prevCHeight = this.contentArea.style.height || '';
+        const prevEHeight = this.element.style.height     || '';
         try {
-            this.contentArea.style.width = 'auto';
+            this.element.style.height     = 'auto';
+            this.contentArea.style.width  = 'auto';
+            this.contentArea.style.height = 'auto';
         } catch (e) {
             // ignore
         }
 
-        // Measure content size
-        const contentWidth = Math.max(this.contentArea.scrollWidth || 0, this.contentArea.clientWidth || 0);
-        const contentHeight = this.contentArea.scrollHeight || 0;
+        // Measure content size (now at intrinsic dimensions)
+        const contentWidth  = Math.max(this.contentArea.scrollWidth  || 0, this.contentArea.clientWidth  || 0);
+        const contentHeight = Math.max(this.contentArea.scrollHeight || 0, this.contentArea.offsetHeight || 0);
 
-        // Restore previous width style
+        // Restore previous styles (final size is applied below via setWidth/setHeight)
         try {
-            this.contentArea.style.width = prevWidth;
+            this.contentArea.style.width  = prevWidth;
+            this.contentArea.style.height = prevCHeight;
+            this.element.style.height     = prevEHeight;
         } catch (e) {
             // ignore
         }
@@ -1917,20 +1948,21 @@ Form.prototype.doAction = function(action, params) {
                     const tableName = this.dbTable || (params && params.tableName) || '';
                     const self = this;
                     if (typeof window.showConfirm === 'function') {
-                        window.showConfirm(__t('Are you sure you want to delete this record?'), async (res) => {
-                            if (res === 'yes') {
-                                try {
-                                    const result = await callServerMethod('uniForm', 'applyChanges', { 
-                                        datasetId: { table: tableName, id: row.UID }, 
-                                        changes: { _deleted: true } 
-                                    });
-                                    if (result && result.ok) {
-                                        if (self.table && typeof self.table.refresh === 'function') self.table.refresh();
-                                    } else {
-                                        if (typeof showAlert === 'function') showAlert(__t('Delete error: ') + (result.error || __t('unknown error')));
-                                    }
-                                } catch(e) { console.error(e); }
-                            }
+                        // showConfirm(message, onOk, onCancel): onOk вызывается БЕЗ аргументов
+                        // при подтверждении. Раньше тут стоял `if (res === 'yes')` — res всегда
+                        // undefined, поэтому удаление молча не выполнялось.
+                        window.showConfirm(__t('Are you sure you want to delete this record?'), async () => {
+                            try {
+                                const result = await callServerMethod('uniForm', 'deleteRecord', {
+                                    tableName: tableName,
+                                    recordId:  row.UID
+                                });
+                                if (result && result.ok) {
+                                    if (self.table && typeof self.table.refresh === 'function') self.table.refresh();
+                                } else {
+                                    if (typeof showAlert === 'function') showAlert(__t('Delete error: ') + ((result && result.error) || __t('unknown error')));
+                                }
+                            } catch(e) { console.error(e); }
                         });
                     }
                 } catch (e) { console.error('[Form] recordDelete error:', e); }
@@ -3205,6 +3237,15 @@ class DataForm extends Form {
         try {
             if (this._windowState === 'maximized' && !this.isMaximized) {
                 this.maximize();
+            } else if (this._windowState === 'centered' && !this.isMaximized) {
+                // Auto-generated record form: centre on screen and size the window to its
+                // content — the same mechanism the login / change-password forms use.
+                // Anchor MUST be set before setSizeToContent (it only re-centres when an
+                // anchor is already present).
+                this.setAnchorToWindow('center');
+                if (typeof this.setSizeToContent === 'function') {
+                    this.setSizeToContent({ minWidth: 420, padH: 12 });
+                }
             }
         } catch (e) {}
 
@@ -8971,8 +9012,8 @@ class Table extends UIObject {
                 const toolbarButtons = [
                     { action: 'select',       caption: __t('Select'),   icon: '/apps/general_icons/resources/public/16x16/select.png',   selectModeOnly: true },
                     { action: 'cancel',       caption: __t('Cancel'),   icon: '/apps/general_icons/resources/public/16x16/cancel.png',   selectModeOnly: true },
-                    { action: 'recordAdd',    caption: __t('Add'),      icon: '/apps/general_icons/resources/public/16x16/add.png',      hideInSelectMode: true },
-                    { action: 'recordDelete', caption: __t('Delete'),   icon: '/apps/general_icons/resources/public/16x16/delete.png',   hideInSelectMode: true },
+                    { action: 'recordAdd',    caption: __t('Add'),      icon: '/apps/general_icons/resources/public/16x16/add.png' },
+                    { action: 'recordDelete', caption: __t('Delete'),   icon: '/apps/general_icons/resources/public/16x16/delete.png' },
                     { action: 'recordOpen',   caption: __t('Open'),     icon: '/apps/general_icons/resources/public/16x16/open.png' },
                     { action: 'listSettings', caption: __t('Settings'), icon: '/apps/general_icons/resources/public/16x16/settings.png' }
                 ];

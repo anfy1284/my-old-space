@@ -197,7 +197,11 @@ async function getLayoutWithData(params, sessionID) {
                     layout: clLayout, data: listData, datasetId,
                     clientScript: customLayout.clientScript || null,
                     formIcon: customLayout.listIcon || customLayout.formIcon || getDefaultIconForTable(tableName, 'list'),
-                    appCaption: resolvedCaption || null,
+                    // Заголовок никогда не должен остаться родовым «uniForm». Если у таблицы
+                    // нет зарегистрированной подписи — берём перевод по ключу = имя таблицы
+                    // (tForSession вернёт само имя, если перевода нет). Тот же резолв в режиме
+                    // записи и в дефолтном списке — форма выбора и форма списка совпадают.
+                    appCaption: resolvedCaption || await tForSession(tableName, sessionID),
                     windowState: customLayout.windowState || 'maximized'
                 };
             }
@@ -221,7 +225,9 @@ async function getLayoutWithData(params, sessionID) {
             const formIcon = getDefaultIconForTable(tableName, 'list');
             const layoutMemory2 = require('../../drive_root/layoutMemory');
             const rawCaption = layoutMemory2.getTableCaption(tableName);
-            const appCaption = rawCaption ? await resolveAppCaption(rawCaption, sessionID) : null;
+            // Нет зарегистрированной подписи → перевод по ключу = имя таблицы (i18n.json),
+            // tForSession вернёт само имя при отсутствии перевода. Никогда не «uniForm».
+            const appCaption = (rawCaption ? await resolveAppCaption(rawCaption, sessionID) : null) || await tForSession(tableName, sessionID);
             return { layout, data: [], datasetId, formIcon, appCaption, windowState: 'maximized' };
         }
 
@@ -483,6 +489,14 @@ async function applyChanges(payload, sessionID) {
                 }
             }
         }
+
+        // Уведомляем подписанные формы списка/выбора об изменении — они обновятся через SSE
+        // (broadcastTableChange → session-клиенты → DynamicTable.refresh). Покрывает обновление
+        // списка после добавления и после закрытия формы записи, изменившей запись.
+        try {
+            const changeAction = (recordId && !dsObj.isNew) ? 'update' : 'create';
+            dynamicTableMethods.notifyTableChange(tableName, changeAction, parentUID);
+        } catch (e) {}
 
         return saveWarnings.length > 0
             ? { ok: true, recordId: parentUID, warnings: saveWarnings }
@@ -1183,19 +1197,29 @@ async function generateFormSpec(tableName, params, sessionID) {
 
         // Заголовок окна записи = подпись в ЕДИНСТВЕННОМ числе (recordCaption) + представление
         // записи (поле name). Для новой записи (name пуст) — только подпись.
-        // Fallback на appCaption (множественное) если recordCaption не задан.
+        // Fallback на appCaption (множественное), затем на имя таблицы — заголовок никогда
+        // не должен остаться родовым «uniForm».
         let resolvedCaption = await resolveAppCaption(recordCaption || appCaption, sessionID);
+        // Тот же фолбэк, что и в режиме списка: перевод по ключу = имя таблицы (i18n.json),
+        // иначе само имя. Заголовок формы записи совпадает с заголовком формы списка.
+        if (!resolvedCaption) resolvedCaption = await tForSession(tableName, sessionID);
         const presentation = (record && record.name != null) ? String(record.name).trim() : '';
         if (presentation) {
-            resolvedCaption = resolvedCaption ? (resolvedCaption + ' ' + presentation) : presentation;
+            resolvedCaption = resolvedCaption + ' ' + presentation;
         }
+
+        // Авто-генерируемая форма записи (без кастомного лейаута и без явного windowState)
+        // открывается по центру экрана с подгонкой размера под контент — это делает
+        // DataForm.Draw по windowState:'centered'.
+        let finalWindowState = windowState;
+        if (!finalWindowState && !customLayoutObj) finalWindowState = 'centered';
 
         // Translate all { i18n: 'key' } objects in layout before sending to client
         if (Array.isArray(layout)) {
             await translateLayoutI18n(layout, sessionID);
         }
 
-        return { data, layout, datasetId, clientScript, formIcon, appCaption: resolvedCaption, windowState, fkLookups: await fkLookupsPromise };
+        return { data, layout, datasetId, clientScript, formIcon, appCaption: resolvedCaption, windowState: finalWindowState, fkLookups: await fkLookupsPromise };
     } catch (e) {
         console.error('[uniForm/generateFormSpec] failed:', e && e.message || e);
         return { data: [], layout: [] };
@@ -1273,10 +1297,128 @@ async function quickSearch({ tableName, searchText, limit, displayField: request
     return { items, displayField };
 }
 
+// ── cascadeDeleteChildren ───────────────────────────────────────────────────────────────────
+// Каскадное удаление по ОТНОШЕНИЮ ВЛАДЕНИЯ (tabularSection.parentTable/parentField), а НЕ по
+// произвольным FK — иначе удаление клиента снесло бы его брони. Удаляет дочерние строки всех
+// табличных частей, у которых parentTable = удаляемая таблица, где parentField ∈ parentIds.
+// Учитывает межсекционные FK (booking_room_services.bookingRoomId → booking_rooms): таблицы,
+// ссылающиеся на «соседей», удаляются ПЕРВЫМИ. Рекурсивно спускается в более глубокие ТЧ.
+async function cascadeDeleteChildren(tableName, parentIds, sessionID, visited) {
+    if (!Array.isArray(parentIds) || parentIds.length === 0) return;
+    visited = visited || new Set();
+
+    let allModels = [];
+    try {
+        const gCtx = require('../../drive_root/globalServerContext');
+        allModels = (gCtx.collectAllModelDefs().models) || [];
+    } catch (e) { return; }
+
+    const childDefs = allModels.filter(d =>
+        d.tabularSection && d.tabularSection.parentTable === tableName && d.tabularSection.parentField
+    );
+    if (childDefs.length === 0) return;
+
+    // Порядок: дочерняя таблица, ссылающаяся на другую дочернюю (сосед), удаляется раньше.
+    const childTableNames = new Set(childDefs.map(d => d.tableName));
+    const hasSiblingFKDeps = (sectName) => {
+        const md = allModels.find(m => m.tableName === sectName);
+        if (!md || !md.fields) return false;
+        return Object.values(md.fields).some(f =>
+            f.references && childTableNames.has(f.references.model) && f.references.model !== sectName
+        );
+    };
+    childDefs.sort((a, b) => (hasSiblingFKDeps(b.tableName) ? 1 : 0) - (hasSiblingFKDeps(a.tableName) ? 1 : 0));
+
+    const cdGW = require('../../drive_root/dbGateway');
+    for (const cd of childDefs) {
+        const childTable = cd.tableName;
+        const pf = cd.tabularSection.parentField;
+        const key = childTable + '::' + pf;
+        if (visited.has(key)) continue;
+        visited.add(key);
+
+        // UID дочерних строк нужны для рекурсии в более глубокие ТЧ.
+        let childIds = [];
+        try {
+            const rows = await cdGW.execute({
+                operation: 'read', table: childTable, where: { [pf]: parentIds },
+                options: { attributes: ['UID'], raw: true }, context: { appName: 'uniForm', sessionID }
+            });
+            childIds = (rows || []).map(r => r.UID).filter(Boolean);
+        } catch (e) { /* нет доступа/строк — пропускаем */ }
+
+        if (childIds.length) await cascadeDeleteChildren(childTable, childIds, sessionID, visited);
+
+        try {
+            await cdGW.execute({
+                operation: 'delete', table: childTable, where: { [pf]: parentIds },
+                context: { appName: 'uniForm', sessionID }
+            });
+            try { dynamicTableMethods.notifyTableChange(childTable, 'delete', null); } catch (e) {}
+        } catch (e) {
+            console.error('[uniForm] cascade delete error for', childTable, ':', e && e.message || e);
+        }
+    }
+}
+
+// ── deleteRecord ────────────────────────────────────────────────────────────────────────────
+// Удаление записи из формы списка (кнопка «Удалить»). Раньше клиент слал в applyChanges
+// datasetId объектом { table, id } + changes:{_deleted:true}; applyChanges ждёт строковый
+// datasetId (резолв через dataApp.getDataset) и НЕ умеет удалять — запись молча не удалялась.
+// Теперь удаление — отдельная операция через dbGateway (RLS соблюдается).
+async function deleteRecord(params, sessionID) {
+    try {
+        const tableName = params && (params.tableName || params.table || params.dbTable);
+        const recordId  = params && (params.recordId || params.recordID || params.id);
+        if (!tableName) return { ok: false, error: await tForSession('no_table_context', sessionID) };
+        if (!recordId)  return { ok: false, error: await tForSession('missing_recordId', sessionID) };
+
+        const modelName = globalServerContext.getModelNameForTable(tableName) || tableName;
+        const Model = globalServerContext.modelsDB[modelName];
+        if (!Model) return { ok: false, error: 'Model not found for table: ' + tableName + ' (model: ' + modelName + ')' };
+
+        const delDbGW = require('../../drive_root/dbGateway');
+        // Каскад: сначала дочерние строки (табличные части), потом сама запись — иначе FK.
+        await cascadeDeleteChildren(tableName, [recordId], sessionID);
+        await delDbGW.execute({ operation: 'delete', table: tableName, where: { UID: recordId }, context: { appName: 'uniForm', sessionID } });
+        // Обновляем подписанные формы списка/выбора через SSE.
+        try { dynamicTableMethods.notifyTableChange(tableName, 'delete', recordId); } catch (e) {}
+        return { ok: true, recordId };
+    } catch (e) {
+        console.error('[uniForm] deleteRecord error:', e);
+        return { ok: false, error: String(e) };
+    }
+}
+
+// ── getMultiInstanceTables ──────────────────────────────────────────────────────────────────
+// Таблицы-исключения для дедупликации окон (см. MySpace._openInternal): по умолчанию одна
+// форма списка на таблицу и одна форма записи на запись (UID). Таблица может разрешить
+// несколько окон через entityConfig в db.json: allowMultipleListForms / allowMultipleRecordForms.
+// Клиент (uniForm/client.js, autoStart) забирает карту в window.MySpaceMultiInstanceTables.
+function getMultiInstanceTables() {
+    const map = {};
+    try {
+        const gCtx = require('../../drive_root/globalServerContext');
+        const { models } = gCtx.collectAllModelDefs();
+        for (const def of (models || [])) {
+            const ec = def && def.entityConfig;
+            if (!ec) continue;
+            const list = !!ec.allowMultipleListForms;
+            const record = !!ec.allowMultipleRecordForms;
+            if (list || record) map[def.tableName || def.name] = { list, record };
+        }
+    } catch (e) {
+        console.error('[uniForm] getMultiInstanceTables error:', e && e.message || e);
+    }
+    return map;
+}
+
 module.exports = {
     getData,
     getLayoutWithData,
     applyChanges,
+    deleteRecord,
+    getMultiInstanceTables,
     generateFormSpec,
     registerBeforeSaveTSRow,
     quickSearch,

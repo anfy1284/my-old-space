@@ -17,6 +17,12 @@
         "de": "Datensatz-ID fehlt",
         "pl": "Brak identyfikatora zbioru danych"
     },
+    "missing_recordId": {
+        "en": "No record specified for deletion",
+        "ru": "Не указана запись для удаления",
+        "de": "Kein Datensatz zum Löschen angegeben",
+        "pl": "Nie wskazano rekordu do usunięcia"
+    },
     "no_table_context": {
         "en": "No table context found in dataset",
         "ru": "Контекст таблицы не найден в наборе данных",
