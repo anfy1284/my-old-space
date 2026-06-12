@@ -56,6 +56,19 @@ const _tableRecordCaptions = new Map();
 // Иконка записи (формы) хранится в _tableIcons (formIcon); иконка списка — здесь (listIcon).
 const _tableListIcons = new Map();
 
+// 5.2 — кэш ПЕРЕВЕДЁННОГО лейаута по ключу `storageKey|language`.
+// getLayoutForUser при наличии sessionID делал на КАЖДОЕ открытие формы
+// JSON.parse(JSON.stringify(result)) (глубокий клон) + рекурсивный перевод
+// всех { i18n: key } captions. Результат детерминирован по (matchedKey, language),
+// поэтому кэшируется. Возврат по ссылке безопасен: все потребители uniForm
+// (apps/uniForm/server.js) обращаются с результатом как с read-only — поля events/
+// clientScript/иконки/captions только читаются, а .layout перед мутацией повторно
+// клонируется (строки 164, 739) → закэшированный объект не мутируется (анти-паттерн №19
+// не нарушается). Кэш ограничен по смыслу (число лейаутов × число языков),
+// инвалидируется целиком в saveLayout. Выключатель: LAYOUT_TRANSLATE_CACHE_DISABLE=1.
+const _translatedCache = new Map();
+const _TRANSLATE_CACHE_DISABLED = process.env.LAYOUT_TRANSLATE_CACHE_DISABLE === '1';
+
 
 
 /**
@@ -102,6 +115,9 @@ async function saveLayout({ appName, mode, tableName, roles, layout, events, cli
     }
     // Register prefix so hot-path can skip tables with no layouts at all
     _registeredPrefixes.add(makePrefix(appName, effectiveMode, tableName));
+    // 5.2 — лейаут пересохранён → переведённые клоны для его ключей устарели.
+    // saveLayout вызывается на старте (и редко в рантайме), поэтому чистим целиком.
+    _translatedCache.clear();
     // Auto-register table-level icon записи (formIcon) и списка (listIcon)
     if (formIcon) _tableIcons.set(tableName, formIcon);
     if (listIcon) _tableListIcons.set(tableName, listIcon);
@@ -157,29 +173,43 @@ async function getLayoutForUser(appName, tableName, userRole, sessionID, mode) {
     if (!_registeredPrefixes.has(makePrefix(appName, effectiveMode, tableName))) return null;
 
     let result = null;
+    let matchedKey = null;
 
     // 1. Exact role match (in-memory Map → instant)
     if (userRole) {
-        const stored = memoryStore.getSync(NAMESPACE, makeKey(appName, effectiveMode, tableName, userRole));
-        if (stored) result = stored.layout !== undefined ? stored : { layout: stored, events: null, clientScript: null, formIcon: null, appCaption: null };
+        const k = makeKey(appName, effectiveMode, tableName, userRole);
+        const stored = memoryStore.getSync(NAMESPACE, k);
+        if (stored) {
+            result = stored.layout !== undefined ? stored : { layout: stored, events: null, clientScript: null, formIcon: null, appCaption: null };
+            matchedKey = k;
+        }
     }
 
     // 2. Wildcard match (any role)
     if (!result) {
-        const fallback = memoryStore.getSync(NAMESPACE, makeKey(appName, effectiveMode, tableName, '*'));
+        const k = makeKey(appName, effectiveMode, tableName, '*');
+        const fallback = memoryStore.getSync(NAMESPACE, k);
         if (!fallback) return null;
         result = fallback.layout !== undefined ? fallback : { layout: fallback, events: null, clientScript: null, formIcon: null, appCaption: null };
+        matchedKey = k;
     }
 
     // 3. Translate { i18n: 'key' } captions when sessionID is provided
     if (result && sessionID) {
         try {
             const formsCtx = require('../drive_forms/globalServerContext');
-            const i18n = require('./i18n');
             const { language } = await formsCtx.getSessionContext(sessionID);
+            // 5.2 — переведённый результат детерминирован по (matchedKey, language) → кэш.
+            const cacheKey = matchedKey + '|' + (language || '');
+            if (!_TRANSLATE_CACHE_DISABLED) {
+                const hit = _translatedCache.get(cacheKey);
+                if (hit) return hit;
+            }
+            const i18n = require('./i18n');
             // Deep-clone to avoid mutating the cached original (anti-pattern: mutable memory_store object)
             const cloned = JSON.parse(JSON.stringify(result));
             translateLayoutCaptions(cloned.layout, (key) => i18n.t(key, language));
+            if (!_TRANSLATE_CACHE_DISABLED) _translatedCache.set(cacheKey, cloned);
             return cloned;
         } catch (e) {
             console.error('[layoutMemory.getLayoutForUser] i18n translation error:', e && e.message || e);
