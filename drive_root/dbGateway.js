@@ -34,6 +34,7 @@ function use(level, fn) {
         throw new Error('[dbGateway] Middleware must be a function');
     }
     middlewareRegistry[level].push(fn);
+    _cachedChain = null; // 5.1: состав middleware изменился — пересоберём цепочку лениво
     console.log(`[dbGateway] Registered middleware at level "${level}" (total: ${middlewareRegistry[level].length})`);
 }
 
@@ -153,6 +154,11 @@ async function executor(request) {
  * Собирает цепочку middleware и executor в единый pipeline.
  * Порядок: app[0], app[1], ..., forms[0], forms[1], ..., root[0], root[1], ..., executor
  */
+// 5.1: цепочка middleware пересобиралась на КАЖДЫЙ execute() (замыкания на каждую
+// DB-операцию, а их десятки на отрисовку формы). Состав middleware меняется только
+// в use()/clearMiddleware() → кэшируем и инвалидируем там.
+let _cachedChain = null;
+
 function buildChain() {
     const allMiddleware = [
         ...middlewareRegistry.app,
@@ -188,7 +194,7 @@ async function execute(request) {
     if (!request || !request.operation || !request.table) {
         throw new Error('[dbGateway] execute requires {operation, table} at minimum');
     }
-    const chain = buildChain();
+    const chain = _cachedChain || (_cachedChain = buildChain());
     const perfMetrics = require('./perfMetrics');
     const perfStartNs = perfMetrics.dbEnter();
     try {
@@ -207,6 +213,7 @@ function clearMiddleware(level) {
     } else {
         for (const l of LEVELS) middlewareRegistry[l] = [];
     }
+    _cachedChain = null; // 5.1
 }
 
 // ── Entity Hooks root-level middleware ───────────────────────────────────────

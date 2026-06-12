@@ -91,9 +91,11 @@ function translateJsMarkers(text, language) {
  */
 async function serveFileFromPath(filePath, role, language) {
     // mtime файла — ключ инвалидации: правка файла больше не требует рестарта.
+    // 5.6: async-I/O вместо statSync/readFileSync — не блокируем event loop на
+    // медленном диске (особенно крупный UI_classes.js). Функция уже async.
     let mtimeMs;
     try {
-        mtimeMs = fs.statSync(filePath).mtimeMs;
+        mtimeMs = (await fs.promises.stat(filePath)).mtimeMs;
     } catch (e) {
         mtimeMs = 0;
     }
@@ -104,7 +106,7 @@ async function serveFileFromPath(filePath, role, language) {
     if (ext !== 'js') {
         const base = _minCache.get(filePath);
         if (base && base.mtimeMs === mtimeMs) return base.text;
-        const raw = fs.readFileSync(filePath, 'utf8');
+        const raw = await fs.promises.readFile(filePath, 'utf8');
         _minCache.set(filePath, { mtimeMs, text: raw });
         return raw;
     }
@@ -117,7 +119,7 @@ async function serveFileFromPath(filePath, role, language) {
     // Уровень 1 — базовый текст (минифицированный или сырой), один на файл.
     let base = _minCache.get(filePath);
     if (!base || base.mtimeMs !== mtimeMs) {
-        const raw = fs.readFileSync(filePath, 'utf8');
+        const raw = await fs.promises.readFile(filePath, 'utf8');
         const text = MINIFY_JS ? await optimizeJS(raw) : raw;
         base = { mtimeMs, text };
         _minCache.set(filePath, base);

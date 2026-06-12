@@ -121,8 +121,10 @@ function t(key, langCode = 'en') {
  */
 function tf(key, langCode = 'en', vars = {}) {
     let str = t(key, langCode);
+    // 5.7: split/join вместо `new RegExp` на каждую подстановку — без компиляции
+    // регулярки и без экранирования спецсимволов в имени переменной.
     for (const [k, v] of Object.entries(vars)) {
-        str = str.replace(new RegExp(`\\{\\{${k}\\}\\}`, 'g'), String(v));
+        str = str.split(`{{${k}}}`).join(String(v));
     }
     return str;
 }

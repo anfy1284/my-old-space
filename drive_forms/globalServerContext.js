@@ -152,6 +152,15 @@ async function getUserAccessRole(user) {
 const _SESSION_CTX_NS = 'session_context';
 const _SYSTEM_SESSION_ID = '__SYS_INTERNAL__';
 
+// 5.8: кэш UID статичного поля настройки 'Language' (undefined — ещё не искали).
+let _languageFieldUID;
+async function _resolveLanguageFieldUID(mdb) {
+    if (_languageFieldUID !== undefined) return _languageFieldUID;
+    const langField = await mdb.UserSettingsFields.findOne({ where: { name: 'Language' } });
+    _languageFieldUID = langField ? langField.UID : null;
+    return _languageFieldUID;
+}
+
 /**
  * Returns unified session context for the current user.
  * Cached per sessionID; invalidate via invalidateSessionContext() on settings change.
@@ -186,10 +195,12 @@ async function getSessionContext(sessionID) {
     try {
         const mdb = global.modelsDB;
         if (mdb && mdb.UserSettingsFields && mdb.UserSettingsStringValues && mdb.Languages) {
-            const langField = await mdb.UserSettingsFields.findOne({ where: { name: 'Language' } });
-            if (langField) {
+            // 5.8: UID поля настройки 'Language' статичен — кэшируем, чтобы не делать
+            // findOne на КАЖДЫЙ cache-miss контекста сессии (был 1 из 3 запросов).
+            const langFieldUID = await _resolveLanguageFieldUID(mdb);
+            if (langFieldUID) {
                 const val = await mdb.UserSettingsStringValues.findOne({
-                    where: { userId: user.UID, settingsFieldId: langField.UID }
+                    where: { userId: user.UID, settingsFieldId: langFieldUID }
                 });
                 if (val && val.value) {
                     const langRecord = await mdb.Languages.findByPk(val.value);

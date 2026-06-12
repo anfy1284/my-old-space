@@ -104,6 +104,30 @@ let _resolvedAppsBasePath = 'apps';
     } catch (e) { /* оставляем 'apps' */ }
 })();
 
+// 5.5: favicon читается в буфер ОДИН раз при старте (+ предвычисленные ETag/Cache-
+// Control-заголовки по mtime+size), а не stat+readFile на КАЖДЫЙ запрос.
+let _faviconCache = null;
+(function loadFaviconOnce() {
+    try {
+        const faviconPath = path.join(__dirname, 'resources', 'public', 'favicon.svg');
+        const st = fs.statSync(faviconPath);
+        if (st && st.isFile()) {
+            _faviconCache = { data: fs.readFileSync(faviconPath), headers: httpCache.fileHeaders(st, 'image/svg+xml') };
+        }
+    } catch (e) { _faviconCache = null; }
+})();
+
+// 5.4: кэш резолва пути app-server.js для /api/apps/:appName (Map appName → path|null).
+// require() и так кэширует модуль; убираем fs.existsSync на каждый такой запрос.
+const _apiAppServerPathCache = new Map();
+function resolveApiAppServerPath(appName) {
+    if (_apiAppServerPathCache.has(appName)) return _apiAppServerPathCache.get(appName);
+    const p = path.join(__dirname, '..', 'apps', appName, 'server.js');
+    const resolved = fs.existsSync(p) ? p : null;
+    _apiAppServerPathCache.set(appName, resolved);
+    return resolved;
+}
+
 // Check access to protected resources (stub)
 function checkProtectedAccess(sessionId, filePath) {
     // TODO: Implement real access check by sessionId and filePath
@@ -129,8 +153,8 @@ async function handleRequest(req, res) {
         const parts = req.url.split('/'); // ['', 'api', 'apps', 'appName', ...]
         if (parts.length >= 4) {
             const appName = parts[3];
-            const appServerPath = path.join(__dirname, '..', 'apps', appName, 'server.js');
-            if (fs.existsSync(appServerPath)) {
+            const appServerPath = resolveApiAppServerPath(appName); // 5.4: кэш, без existsSync на каждый запрос
+            if (appServerPath) {
                 try {
                     const appModule = require(appServerPath);
                     if (typeof appModule.handleDirectRequest === 'function') {
@@ -151,23 +175,12 @@ async function handleRequest(req, res) {
     }
     perfMetrics.markSince('session', sessionStartNs);
 
-    // Handle favicon
+    // Handle favicon (5.5: из буфера, без stat/readFile на каждый запрос)
     if (req.url === '/favicon.ico' || req.url === '/favicon.svg') {
-        const faviconPath = path.join(__dirname, 'resources', 'public', 'favicon.svg');
-        let favStat = null;
-        try { favStat = fs.statSync(faviconPath); } catch (e) { favStat = null; }
-        if (favStat && favStat.isFile()) {
-            const headers = httpCache.fileHeaders(favStat, 'image/svg+xml');
-            if (httpCache.maybe304(req, res, headers)) return;
-            fs.readFile(faviconPath, (err, data) => {
-                if (err) {
-                    res.writeHead(404);
-                    res.end();
-                    return;
-                }
-                res.writeHead(200, headers);
-                res.end(data);
-            });
+        if (_faviconCache) {
+            if (httpCache.maybe304(req, res, _faviconCache.headers)) return;
+            res.writeHead(200, _faviconCache.headers);
+            res.end(_faviconCache.data);
         } else {
             res.writeHead(204);
             res.end();

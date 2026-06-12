@@ -250,12 +250,14 @@ function collectAllModelDefs() {
 
 // Global variable with models
 let modelsDB = {};
+let _tableNameLookup = null; // 5.3: кэш tableName/modelName(lower) → modelName
 
 function initModelsDB() {
     console.log('[globalModels] initModelsDB called, projectRoot:', projectRoot);
     const { models: allDefs, associations: allAssoc } = collectAllModelDefs();
     console.log(`[globalModels] Collected ${allDefs.length} model definitions`);
     modelsDB = generateModelsFromDefs(allDefs);
+    _tableNameLookup = null; // 5.3: инвалидация кэша tableName→modelName при переинициализации
     console.log(`[globalModels] Generated models:`, Object.keys(modelsDB));
     
     // Clear cached model definitions
@@ -659,27 +661,33 @@ module.exports.getProjectRoot = function () {
 /**
  * Find a model name by its table name (or by model name), case-insensitive.
  * Returns the model name (as present in modelsDB) or null if not found.
+ *
+ * 5.3: раньше — линейный перебор всех моделей с `.toLowerCase()` на КАЖДЫЙ вызов
+ * (а это горячий путь — резолв модели на многих DB-операциях). Теперь строится один
+ * раз Map `tableNameLower → modelName` (и `modelNameLower → modelName`), инвалидируется
+ * в initModelsDB. Точное совпадение по имени модели — сразу, без Map.
  */
+function _buildTableNameLookup() {
+    const map = new Map();
+    for (const m of Object.keys(modelsDB)) {
+        try {
+            const model = modelsDB[m];
+            if (!model) continue;
+            map.set(m.toLowerCase(), m);
+            const tname = (model.tableName || '').toString().toLowerCase();
+            if (tname) map.set(tname, m); // tableName имеет приоритет — ставится после
+        } catch (e) { continue; }
+    }
+    return map;
+}
+
 module.exports.getModelNameForTable = function (tableName) {
     if (!tableName) return null;
     // Exact match by model name
     if (modelsDB[tableName]) return tableName;
 
-    // Search by tableName property in models
-    const lower = tableName.toLowerCase();
-    for (const m of Object.keys(modelsDB)) {
-        try {
-            const model = modelsDB[m];
-            if (!model) continue;
-            const tname = (model.tableName || '').toString().toLowerCase();
-            if (tname === lower) return m;
-            if (m.toLowerCase() === lower) return m;
-        } catch (e) {
-            continue;
-        }
-    }
-
-    return null;
+    if (!_tableNameLookup) _tableNameLookup = _buildTableNameLookup();
+    return _tableNameLookup.get(tableName.toLowerCase()) || null;
 };
 
 // --- Dynamic Table Support Functions ---
