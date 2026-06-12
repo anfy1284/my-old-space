@@ -435,7 +435,64 @@ if (typeof window !== 'undefined') {
 
         function genId(name) { return name + '-' + Date.now() + '-' + (++_idCounter); }
 
+        // --- Non-blocking global busy indicator (Win95 «running» progress bar) ---
+        // Показывает бегущий прогрессбар при длительных асинхронных операциях
+        // (открытие окна, генерация счёта), не блокируя интерфейс. Ref-counted:
+        // несколько одновременных операций ведут общий стек токенов.
+        let _busyEl = null;
+        let _busyLabelEl = null;
+        const _busyTokens = []; // [{ id, label }]
+        let _busyIdSeq = 0;
+
+        function _ensureBusyEl() {
+            if (_busyEl && document.body.contains(_busyEl)) return _busyEl;
+            const el = document.createElement('div');
+            el.className = 'mos-busy';
+            const label = document.createElement('div');
+            label.className = 'mos-busy-label';
+            const bar = document.createElement('div');
+            bar.className = 'mos-busy-bar';
+            const fill = document.createElement('div');
+            fill.className = 'mos-busy-bar-fill';
+            bar.appendChild(fill);
+            el.appendChild(label);
+            el.appendChild(bar);
+            document.body.appendChild(el);
+            _busyEl = el;
+            _busyLabelEl = label;
+            return el;
+        }
+
+        function _renderBusy() {
+            if (!_busyTokens.length) {
+                if (_busyEl) _busyEl.style.display = 'none';
+                return;
+            }
+            _ensureBusyEl();
+            const top = _busyTokens[_busyTokens.length - 1];
+            let txt = top.label;
+            if (!txt) { try { txt = __t('Loading...'); } catch (e) { txt = 'Loading...'; } }
+            _busyLabelEl.textContent = txt;
+            _busyEl.style.display = 'flex';
+        }
+
         return {
+
+            // Показать бегущий индикатор. Возвращает токен для последующего hideBusy.
+            showBusy(label) {
+                const id = ++_busyIdSeq;
+                _busyTokens.push({ id, label: label || '' });
+                try { _renderBusy(); } catch (e) {}
+                return id;
+            },
+
+            // Скрыть индикатор по токену (исчезает когда снят последний токен).
+            hideBusy(id) {
+                const i = _busyTokens.findIndex(t => t.id === id);
+                if (i !== -1) _busyTokens.splice(i, 1);
+                try { _renderBusy(); } catch (e) {}
+            },
+
             register(name, descriptor) {
                 apps[name] = descriptor;
                 try { if (descriptor && typeof descriptor.init === 'function') descriptor.init(); } catch (e) { console.error('MySpace.register.init error', e); }
@@ -445,6 +502,17 @@ if (typeof window !== 'undefined') {
                 const desc = apps[name];
                 if (!desc) throw new Error('MySpace: app not registered: ' + name);
 
+                // Бегущий прогрессбар на время открытия окна — пользователь сразу
+                // получает отклик, пока createInstance тянет данные с сервера.
+                const _busyToken = this.showBusy('');
+                try {
+                    return await this._openInternal(name, params, options, desc);
+                } finally {
+                    this.hideBusy(_busyToken);
+                }
+            },
+
+            async _openInternal(name, params, options, desc) {
                 // Singleton-by-key: find existing instance by appName+mode+dbTable
                 if (options && options.singleton) {
                     const p = params || {};
