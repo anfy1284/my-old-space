@@ -238,7 +238,7 @@ async function getLayoutWithData(params, sessionID) {
                     });
                     const spec = await generateFormSpec(resolvedParams.tableName, resolvedParams, sessionID);
                     return { layout: spec.layout, data: spec.data, datasetId: spec.datasetId,
-                             clientScript: spec.clientScript || null, formIcon: spec.formIcon || null, appCaption: spec.appCaption || null, windowState: spec.windowState || null };
+                             clientScript: spec.clientScript || null, formIcon: spec.formIcon || null, appCaption: spec.appCaption || null, windowState: spec.windowState || null, fkLookups: spec.fkLookups || null };
                 }
             } catch (e) {
                 console.error('[uniForm/getLayoutWithData] datasetId refresh error:', e && e.message || e);
@@ -255,7 +255,7 @@ async function getLayoutWithData(params, sessionID) {
                     table: params.tableName,
                     id: params.recordID || params.recordId || params.id
                 });
-                return { layout: spec.layout, data: spec.data, datasetId, clientScript: spec.clientScript || null, formIcon: spec.formIcon || null, appCaption: spec.appCaption || null, windowState: spec.windowState || null };
+                return { layout: spec.layout, data: spec.data, datasetId, clientScript: spec.clientScript || null, formIcon: spec.formIcon || null, appCaption: spec.appCaption || null, windowState: spec.windowState || null, fkLookups: spec.fkLookups || null };
             } catch (e) {
                 console.error('[uniForm/getLayoutWithData] generateFormSpec error:', e && e.message || e);
             }
@@ -694,6 +694,80 @@ function applyAutofillFromLayout(data, layout, defaultsMap) {
     walk(Array.isArray(layout) ? layout : [layout]);
 }
 
+// ── Серверный префетч FK-lookup'ов лейаута ───────────────────────────────────────────────────
+// Клиентский рендер для каждого recordSelector в AUTO-режиме (без явных флагов
+// showSelectionButton/showListButton) делает RPC getLookupList — на форме с N FK-таблиц
+// это N ПОСЛЕДОВАТЕЛЬНЫХ round-trip'ов, пока окно ещё скрыто. Сервер собирает те же
+// lookup'ы параллельно (БД рядом) и кладёт их в ответ getLayoutWithData полем fkLookups;
+// клиент засеивает ими _fkLookupCache, и рендер обходится без единого доп. запроса.
+
+// Сбор уникальных selection.table из лейаута — зеркало клиентской логики renderItem:
+// readOnly → кнопок нет (lookup не нужен); явные флаги → нужен только при showListButton;
+// без флагов (AUTO) → нужен всегда. Обходятся и поля (layout), и колонки таблиц (columns),
+// и вкладки (tabs). Динамические ссылки ('{tableName}') пропускаются.
+function collectSelectionTables(layout) {
+    const tables = new Set();
+    const considerProps = (props) => {
+        if (!props || props.readOnly) return;
+        const sel = props.selection;
+        const table = sel && sel.table;
+        if (!table || typeof table !== 'string' || table.includes('{')) return;
+        const hasSelFlag  = Object.prototype.hasOwnProperty.call(props, 'showSelectionButton');
+        const hasListFlag = Object.prototype.hasOwnProperty.call(props, 'showListButton');
+        if (hasSelFlag || hasListFlag) {
+            if (props.showListButton) tables.add(table);
+        } else {
+            tables.add(table);
+        }
+    };
+    const walk = (items) => {
+        if (!Array.isArray(items)) return;
+        for (const item of items) {
+            if (!item || typeof item !== 'object') continue;
+            considerProps(item.properties);
+            if (Array.isArray(item.columns)) {
+                for (const col of item.columns) {
+                    if (col && typeof col === 'object') considerProps(col.properties);
+                }
+            }
+            if (item.layout) walk(item.layout);
+            if (Array.isArray(item.tabs)) {
+                for (const tab of item.tabs) { if (tab && tab.layout) walk(tab.layout); }
+            }
+        }
+    };
+    walk(Array.isArray(layout) ? layout : [layout]);
+    return [...tables];
+}
+
+// Параллельный префетч: те же параметры, что у клиентского _fetchFkLookup
+// (firstRow 0, visibleRows 50), тот же формат результата { totalRows, items }.
+// Ошибка по таблице — не фатальна: таблица просто не попадает в ответ, клиент
+// сходит за ней сам (fallback-путь _fetchFkLookup сохранён).
+async function buildFkLookups(layout, sessionID) {
+    try {
+        const tables = collectSelectionTables(layout);
+        if (tables.length === 0) return null;
+        const globalCtx = require('../../drive_root/globalServerContext');
+        const result = {};
+        await Promise.all(tables.map(async (table) => {
+            try {
+                const modelName = globalCtx.getModelNameForTable(table);
+                if (!modelName) return;
+                const raw = await globalCtx.getLookupList({ modelName, tableName: table, firstRow: 0, visibleRows: 50, sessionID });
+                const rows = (raw && raw.data) || [];
+                result[table] = {
+                    totalRows: (raw && typeof raw.totalRows === 'number') ? raw.totalRows : rows.length,
+                    items: rows.map(r => ({ value: r.UID, caption: r.display }))
+                };
+            } catch (e) { /* таблица недоступна — клиент сходит сам */ }
+        }));
+        return Object.keys(result).length > 0 ? result : null;
+    } catch (e) {
+        return null;
+    }
+}
+
 // ── generateFormSpec ──────────────────────────────────────────────────────────────────────────
 async function generateFormSpec(tableName, params, sessionID) {
     try {
@@ -749,7 +823,8 @@ async function generateFormSpec(tableName, params, sessionID) {
                         table: tableName,
                         id: params && (params.recordID || params.recordId || params.id)
                     });
-                    return { layout, data, datasetId, clientScript, formIcon, appCaption: await resolveAppCaption(appCaption, sessionID), windowState };
+                    const fkLookups = await buildFkLookups(layout, sessionID);
+                    return { layout, data, datasetId, clientScript, formIcon, appCaption: await resolveAppCaption(appCaption, sessionID), windowState, fkLookups };
                 }
             } catch (e) {
                 console.error('[uniForm/generateFormSpec] onLoadData dispatch error:', e && e.message || e);
@@ -1004,6 +1079,10 @@ async function generateFormSpec(tableName, params, sessionID) {
             }
         }
 
+        // Префетч FK-lookup'ов стартует здесь (лейаут финален) и идёт ПАРАЛЛЕЛЬНО
+        // с загрузкой tabularFilter-таблиц; await — перед самым return.
+        const fkLookupsPromise = buildFkLookups(layout, sessionID);
+
         // tabularFilter: декларативная загрузка данных для table-элементов
         try {
             const collectTableItems = (items) => {
@@ -1017,9 +1096,14 @@ async function generateFormSpec(tableName, params, sessionID) {
                 }
                 return result;
             };
-            const tableItemsWithFilter = collectTableItems(layout);
-            for (const item of tableItemsWithFilter) {
-                if (data.find(d => d.name === item.data)) continue;
+            // Таблицы tabularFilter независимы → грузим ПАРАЛЛЕЛЬНО (как 3.4 для
+            // авто-ТЧ): booking (4 ТЧ) больше не ждёт каждую по очереди. Внутри
+            // таблицы FK-таблицы тоже резолвятся параллельно. Дедуп-проверка по
+            // data — ДО параллельной фазы (data в ней не меняется), push результатов
+            // — после, в исходном порядке.
+            const tableItemsWithFilter = collectTableItems(layout)
+                .filter(item => !data.find(d => d.name === item.data));
+            const tfEntries = await Promise.all(tableItemsWithFilter.map(async (item) => {
                 const targetTable = item.data;
                 const rawFilter = item.properties.tabularFilter;
                 const resolvedFilter = {};
@@ -1049,12 +1133,12 @@ async function generateFormSpec(tableName, params, sessionID) {
                     try {
                         const tfFields = await buildTableFieldsFromModel(targetTable);
                         const tfFkFields = Array.isArray(tfFields) ? tfFields.filter(f => f.foreignKey && f.foreignKey.table) : [];
-                        for (const fkField of tfFkFields) {
+                        await Promise.all(tfFkFields.map(async (fkField) => {
                             const fkTable = fkField.foreignKey.table;
                             const fkIdField = fkField.foreignKey.field || 'UID';
                             const fkDispField = fkField.foreignKey.displayField || 'name';
                             const fkValues = [...new Set(rows.map(r => r[fkField.name]).filter(v => v != null && v !== ''))];
-                            if (fkValues.length === 0) continue;
+                            if (fkValues.length === 0) return;
                             try {
                                 const fkDbGW = require('../../drive_root/dbGateway');
                                 const lookupRows = await fkDbGW.execute({
@@ -1072,13 +1156,14 @@ async function generateFormSpec(tableName, params, sessionID) {
                             } catch (e) {
                                 console.warn('[uniForm/generateFormSpec] tabularFilter FK resolve error:', fkField.name, e && e.message);
                             }
-                        }
+                        }));
                     } catch (e) {
                         console.warn('[uniForm/generateFormSpec] tabularFilter FK resolve outer error:', e && e.message);
                     }
                 }
-                data.push({ name: item.data, value: rows, tabularSection: true, tableName: targetTable });
-            }
+                return { name: item.data, value: rows, tabularSection: true, tableName: targetTable };
+            }));
+            for (const entry of tfEntries) data.push(entry);
         } catch (e) {
             console.error('[uniForm/generateFormSpec] tabularFilter scan error:', e && e.message || e);
         }
@@ -1106,7 +1191,7 @@ async function generateFormSpec(tableName, params, sessionID) {
             await translateLayoutI18n(layout, sessionID);
         }
 
-        return { data, layout, datasetId, clientScript, formIcon, appCaption: resolvedCaption, windowState };
+        return { data, layout, datasetId, clientScript, formIcon, appCaption: resolvedCaption, windowState, fkLookups: await fkLookupsPromise };
     } catch (e) {
         console.error('[uniForm/generateFormSpec] failed:', e && e.message || e);
         return { data: [], layout: [] };

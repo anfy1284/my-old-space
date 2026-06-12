@@ -2920,6 +2920,21 @@ class DataForm extends Form {
                         if (rec && rec.name) this._dataMap[rec.name] = rec;
                     }
                 }
+                // Серверный префетч FK-lookup'ов: засеиваем кэш _fetchFkLookup из ответа,
+                // чтобы рендер selector-полей не делал ни одного RPC getLookupList
+                // (раньше — по последовательному запросу на каждую FK-таблицу лейаута,
+                // пока окно ещё скрыто). Кэш хранит промисы — кладём resolved.
+                try {
+                    if (both.fkLookups && typeof both.fkLookups === 'object') {
+                        if (!this._fkLookupCache) this._fkLookupCache = {};
+                        for (const t in both.fkLookups) {
+                            const lk = both.fkLookups[t];
+                            if (lk && typeof lk.totalRows === 'number' && Array.isArray(lk.items)) {
+                                this._fkLookupCache[t] = Promise.resolve({ totalRows: lk.totalRows, items: lk.items });
+                            }
+                        }
+                    }
+                } catch (e) {}
                 this.showLoading = false;
                 return;
             }

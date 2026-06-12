@@ -975,6 +975,37 @@ function _countCacheInvalidate(table) {
     }
 }
 
+// Краткоживущий кэш результатов getLookupList (COUNT + первые N строк через RLS).
+// Открытие формы запрашивает lookup для КАЖДОЙ FK-таблицы лейаута (clients, hotels,
+// rooms, …) — повторные открытия и параллельные формы переиспользуют результат.
+// Ключ включает identity (sessionID/userId): RLS-фильтр у разных пользователей разный.
+// Инвалидация — тот же хук invalidateFkCache (зовётся в dbGateway на каждую мутацию).
+const _lookupCache = new Map(); // key → { val, ts }
+const _LOOKUP_CACHE_TTL = 30000; // 30с
+const _LOOKUP_CACHE_MAX = 500;
+
+function _lookupCacheGet(key) {
+    const e = _lookupCache.get(key);
+    if (!e) return undefined;
+    if (Date.now() - e.ts > _LOOKUP_CACHE_TTL) { _lookupCache.delete(key); return undefined; }
+    // Глубокая копия: закэшированный оригинал нельзя отдавать по ссылке —
+    // вызывающие могут мутировать структуру (анти-паттерн «мутация кэша»).
+    return JSON.parse(JSON.stringify(e.val));
+}
+function _lookupCacheSet(key, val) {
+    if (_lookupCache.size >= _LOOKUP_CACHE_MAX) {
+        const first = _lookupCache.keys().next().value;
+        _lookupCache.delete(first);
+    }
+    _lookupCache.set(key, { val: JSON.parse(JSON.stringify(val)), ts: Date.now() });
+}
+function _lookupCacheInvalidate(table) {
+    if (!table) { _lookupCache.clear(); return; }
+    for (const k of _lookupCache.keys()) {
+        if (k.startsWith(table + '::')) _lookupCache.delete(k);
+    }
+}
+
 function _fkCacheGet(table, uid) {
     const key = `${table}::${uid}`;
     const entry = _fkDisplayCache.get(key);
@@ -1230,6 +1261,8 @@ module.exports.invalidateFkCache = function(tableName) {
     }
     // 3.3: тот же хук сбрасывает кэш COUNT для изменённой таблицы.
     _countCacheInvalidate(tableName);
+    // Кэш lookup-списков (открытие форм) сбрасывается той же мутацией.
+    _lookupCacheInvalidate(tableName);
 };
 
 /**
@@ -1268,6 +1301,14 @@ async function getLookupList(options) {
     visibleRows = Math.max(0, Math.min(visibleRows || 20, 1000));
     firstRow = Math.max(0, firstRow || 0);
 
+    // Кэш: COUNT + страница строк по (таблица, identity, окно). RLS зависит от
+    // пользователя — identity обязателен в ключе.
+    const _lkTable = tableName || Model.tableName;
+    const _lkIdentity = sessionID || userId || '';
+    const _lkKey = `${_lkTable}::${_lkIdentity}::${firstRow}::${visibleRows}`;
+    const _lkCached = _lookupCacheGet(_lkKey);
+    if (_lkCached !== undefined) return _lkCached;
+
     const lookupDbGW = require('./dbGateway');
     const totalRows = await lookupDbGW.execute({ operation: 'count', table: tableName || Model.tableName, context: dbContext });
 
@@ -1289,12 +1330,14 @@ async function getLookupList(options) {
     // Normalize to simple objects with id and display
 const data = rows.map(r => ({ UID: r[keyField], display: r[displayField] }));
 
-      return {
-          totalRows,
-          fields: [ { name: 'UID' }, { name: displayField } ],
+    const _lkResult = {
+        totalRows,
+        fields: [ { name: 'UID' }, { name: displayField } ],
         data,
         range: { from: firstRow, to: firstRow + data.length - 1 }
     };
+    _lookupCacheSet(_lkKey, _lkResult);
+    return _lkResult;
 }
 
 module.exports.getLookupList = getLookupList;
