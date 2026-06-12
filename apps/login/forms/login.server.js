@@ -76,15 +76,31 @@ module.exports = function (modelsDB, Utilities) {
         const hashedPassword = await Utilities.hashPassword(newPassword);
         await user.update({ password_hash: hashedPassword, mustChangePassword: false });
 
+        // Сбрасываем кэш пользователя сессии — иначе серверный гейт mustChangePassword
+        // (в /server-call и /app/call) продолжит блокировать доступ по устаревшей копии.
+        try { await globalCtx.invalidateSessionUser(sessionID); } catch (e) {}
+
         return { success: true };
     }
 
     // Информация для точки входа: авторизован ли пользователь и его роль.
     // По ней autoStart-точка решает, показывать ли форму входа (только для неавторизованных).
     async function getBootInfo(params, ctx) {
+        const authenticated = !!(ctx && ctx.user);
+        // mustChangePassword читаем из БД по UID сессии — ctx.user может не содержать
+        // всех полей. По нему boot решает, показать ли принудительную смену пароля
+        // после перезагрузки страницы (иначе вход в обход смены).
+        let mustChangePassword = false;
+        if (authenticated) {
+            try {
+                const u = await modelsDB.Users.findByPk(ctx.user.UID, { raw: true });
+                mustChangePassword = !!(u && u.mustChangePassword);
+            } catch (e) { /* недоступно — считаем, что смена не требуется */ }
+        }
         return {
-            authenticated: !!(ctx && ctx.user),
-            role: (ctx && ctx.role) || null
+            authenticated,
+            role: (ctx && ctx.role) || null,
+            mustChangePassword
         };
     }
 

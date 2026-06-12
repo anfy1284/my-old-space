@@ -18,11 +18,13 @@ try {
         // DataForm.Draw() сам вызывает loadLayout() → renderLayout(); loadLayout берёт
         // лейаут из form.getLayoutWithData(). Переопределяем этот метод, чтобы отдать
         // серверный лейаут нашего приложения (getFormSpec) и передать режим (form._mode).
-        async function buildForm(mode) {
+        async function buildForm(mode, forced) {
             var isCp = (mode === 'changePassword');
             var form = new DataForm('login');
             form._mode = mode;
-            form._forcedChange = false; // ручная смена по умолчанию; принудительную ставит login.client.js
+            // Принудительную смену задаёт вызывающий: после входа (login.client.js) или
+            // boot при mustChangePassword. По умолчанию — ручная смена (forced=false).
+            form._forcedChange = isCp && !!forced;
 
             form.getLayoutWithData = async function () {
                 var spec;
@@ -37,13 +39,27 @@ try {
             };
 
             form.setWidth(320);
-            form.setHeight(isCp ? 320 : 300);
-            form.setAnchorToWindow('center');
             if (typeof form.setResizable === 'function') form.setResizable(false); else form.resizable = false;
             await form.Draw(document.body); // loadLayout() + renderLayout() выполняются внутри Draw
 
             // __t резолвится статически только для строк-литералов — поэтому без тернарника внутри.
             form.setTitle(isCp ? __t('cp_app_title') : __t('login_app_title'));
+
+            // При принудительной смене старый пароль не нужен — скрываем поле.
+            // Окно делаем модальным: оверлей блокирует клики по десктопу, чтобы нельзя
+            // было пользоваться системой в обход смены пароля (серверный гейт — основная
+            // защита, модальность — UI-блок поверх него).
+            if (isCp && forced) {
+                try { if (form.controlsMap && form.controlsMap.oldPassword) form.controlsMap.oldPassword.setHidden(true); } catch (e) {}
+                try { if (typeof form.setModal === 'function') form.setModal(true); } catch (e) {}
+            }
+
+            // Якорь центрирования ставим ДО подгонки размера: setSizeToContent
+            // перецентрирует окно только если anchorToWindow уже задан.
+            form.setAnchorToWindow('center');
+            // Подгоняем высоту окна под контент — иначе под кнопкой остаётся пустое место
+            // (фиксированная высота не учитывала реальное число полей). Ширину держим 320.
+            if (typeof form.setSizeToContent === 'function') form.setSizeToContent({ minWidth: 320, padH: 12 });
             return form;
         }
 
@@ -52,7 +68,7 @@ try {
         app.createInstance = async function (params) {
             var instanceId = this.generateInstanceId();
             var mode = (params && params.mode) || 'login';
-            var form = await buildForm(mode);
+            var form = await buildForm(mode, params && params.forced);
             return {
                 id: instanceId,
                 appName: 'login',
@@ -61,7 +77,7 @@ try {
                     var m = (openParams && openParams.mode) || 'login';
                     // Окно закрыли — пересоздаём в нужном режиме.
                     if (!this.form || !this.form.element || !document.contains(this.form.element)) {
-                        this.form = await buildForm(m);
+                        this.form = await buildForm(m, openParams && openParams.forced);
                     } else if (typeof this.form.activate === 'function') {
                         try { this.form.activate(); } catch (e) {}
                     }
@@ -77,6 +93,11 @@ try {
             var boot = await callServer('login.actions', 'getBootInfo', {});
             if (!boot || !boot.authenticated) {
                 await window.MySpace.open('login', { mode: 'login' });
+            } else if (boot.mustChangePassword) {
+                // Сессия уже привязана к пользователю, но пароль ещё не сменён. После
+                // перезагрузки страницы принудительно показываем форму смены пароля —
+                // иначе пользователь попадёт в систему в обход обязательной смены.
+                await window.MySpace.open('login', { mode: 'changePassword', forced: true });
             }
         } catch (e) {
             console.error('[login] boot check failed:', e);

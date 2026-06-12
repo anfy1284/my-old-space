@@ -383,6 +383,14 @@ async function getUserBySessionID(sessionID) {
     return plain;
 }
 
+// Сбрасывает кэш пользователя для сессии (L1 + L2). Звать после изменения полей
+// пользователя, влияющих на доступ (роль, mustChangePassword), иначе getUserBySessionID
+// продолжит отдавать устаревшую копию (напр. mustChangePassword:true после смены пароля).
+async function invalidateSessionUser(sessionID) {
+    if (!sessionID) return;
+    try { await _memoryStore.del(_SESSION_USER_NS, sessionID); } catch (e) {}
+}
+
 // Process default values
 // Adds _level to each record and checks id uniqueness within the level
 function processDefaultValues(data, level) {
@@ -522,6 +530,7 @@ Object.defineProperty(module.exports, 'modelsDB', {
 module.exports.getServerTime = getServerTime;
 module.exports.helloFromGlobal = helloFromGlobal;
 module.exports.getUserBySessionID = getUserBySessionID;
+module.exports.invalidateSessionUser = invalidateSessionUser;
 module.exports.initModelsDB = initModelsDB;
 module.exports.getContentType = getContentType;
 module.exports.processDefaultValues = processDefaultValues;

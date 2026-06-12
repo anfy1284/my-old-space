@@ -141,6 +141,23 @@ function invokeAppMethod(appName, methodName, params, sessionID, callback, req, 
 	}
 }
 
+// Гейт обязательной смены пароля: true, если у пользователя сессии стоит
+// mustChangePassword. Пока флаг стоит, все app-вызовы (/call, /upload) блокируются —
+// приложение логина свои методы зовёт через /server-call ('login.actions'), а не сюда,
+// поэтому форма смены пароля не страдает. Цель — не дать работать в системе в обход
+// смены пароля после перезагрузки страницы (сессия уже привязана).
+async function isPasswordChangePending(sessionID) {
+	try {
+		const user = await globalRoot.getUserBySessionID(sessionID);
+		return !!(user && user.mustChangePassword);
+	} catch (e) { return false; }
+}
+
+function denyPasswordChange(res) {
+	res.writeHead(403, { 'Content-Type': 'application/json' });
+	res.end(JSON.stringify({ error: 'PASSWORD_CHANGE_REQUIRED' }));
+}
+
 function handleRequest(req, res, appDir, appAlias) {
 	// Processing resources and API endpoints
 	log.debug('[drive_forms/handleRequest] Request:', req.method, req.url, 'appAlias:', appAlias);
@@ -379,15 +396,18 @@ function handleRequest(req, res, appDir, appAlias) {
 					const match = req.headers.cookie.match(/(?:^|; )sessionID=([^;]+)/i);
 					if (match) sessionID = decodeURIComponent(match[1]);
 				}
-				invokeAppMethod(app, method, req.body, sessionID, async (err, result) => {
-					if (err) {
-						res.writeHead(500, { 'Content-Type': 'application/json' });
-						res.end(JSON.stringify({ error: await formsGlobal.tForSession(err.message, sessionID) }));
-					} else {
-						res.writeHead(200, { 'Content-Type': 'application/json' });
-						res.end(JSON.stringify({ result }));
-					}
-				}, req, res);
+				isPasswordChangePending(sessionID).then(pending => {
+					if (pending) { denyPasswordChange(res); return; }
+					invokeAppMethod(app, method, req.body, sessionID, async (err, result) => {
+						if (err) {
+							res.writeHead(500, { 'Content-Type': 'application/json' });
+							res.end(JSON.stringify({ error: await formsGlobal.tForSession(err.message, sessionID) }));
+						} else {
+							res.writeHead(200, { 'Content-Type': 'application/json' });
+							res.end(JSON.stringify({ result }));
+						}
+					}, req, res);
+				});
 			});
 			return;
 		}
@@ -419,15 +439,18 @@ function handleRequest(req, res, appDir, appAlias) {
 				}
 				log.debug('[drive_forms/call] Cookie header:', req.headers.cookie);
 				log.debug('[drive_forms/call] Extracted sessionID:', sessionID);
-				invokeAppMethod(app, method, params || {}, sessionID, async (err, result) => {
-					if (err) {
-						res.writeHead(500, { 'Content-Type': 'application/json' });
-						res.end(JSON.stringify({ error: await formsGlobal.tForSession(err.message, sessionID) }));
-					} else {
-						res.writeHead(200, { 'Content-Type': 'application/json' });
-						res.end(JSON.stringify({ result }));
-					}
-				}, req, res);
+				isPasswordChangePending(sessionID).then(pending => {
+					if (pending) { denyPasswordChange(res); return; }
+					invokeAppMethod(app, method, params || {}, sessionID, async (err, result) => {
+						if (err) {
+							res.writeHead(500, { 'Content-Type': 'application/json' });
+							res.end(JSON.stringify({ error: await formsGlobal.tForSession(err.message, sessionID) }));
+						} else {
+							res.writeHead(200, { 'Content-Type': 'application/json' });
+							res.end(JSON.stringify({ result }));
+						}
+					}, req, res);
+				});
 			});
 			return;
 		}

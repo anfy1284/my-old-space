@@ -15,8 +15,18 @@ class UIObject {
     // Setters / Getters for geometry & depth
     setHidden(hidden) {
         this.hidden = hidden;
-        if (this.element) {
-            this.element.style.display = hidden ? 'none' : '';
+        // Прячем КОРНЕВОЙ элемент в раскладке. У input-контролов (TextBox и т.п.)
+        // в лейаут вставляется обёртка containerElement (рамка с полем и кнопками),
+        // а this.element — это внутренний <input>. Если спрятать только <input>,
+        // пустая обёртка останется в потоке (в grid — займёт ячейку и сдвинет соседей).
+        const root = this.containerElement || this.element;
+        if (root) {
+            root.style.display = hidden ? 'none' : '';
+        }
+        // Подпись в aligned-grid (см. _renderAlignedFields) — отдельный элемент,
+        // прячем/показываем его вместе с контролом, чтобы не оставлять пустую ячейку.
+        if (this._alignedLabel) {
+            this._alignedLabel.style.display = hidden ? 'none' : '';
         }
     }
     getHidden() { return this.hidden; }
@@ -2181,6 +2191,17 @@ class DataForm extends Form {
             // Column 2: the control itself, rendered WITHOUT its own inline caption.
             const childNoCaption = Object.assign({}, child, { caption: '' });
             await this.renderItem(childNoCaption, container);
+            // Связываем ярлык с контролом: setHidden()/setVisible() на контроле должны
+            // прятать и его подпись, иначе скрытый контрол (display:none) оставляет в
+            // grid осиротевшую ячейку-подпись и ломает выравнивание соседних строк.
+            try {
+                const key = child.name || child.data;
+                const ctrl = key && this.controlsMap ? this.controlsMap[key] : null;
+                if (ctrl) {
+                    ctrl._alignedLabel = lab;
+                    if (ctrl.hidden) lab.style.display = 'none';
+                }
+            } catch (e) {}
         }
     }
 

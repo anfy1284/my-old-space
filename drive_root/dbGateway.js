@@ -88,11 +88,15 @@ async function executor(request) {
         case 'create': {
             if (!data) throw new Error('[dbGateway] create requires data');
 
-            // Очистка пустых строк только для внешних ключей (чтобы избежать ошибок FK в Postgres)
+            // Пустая строка → null для:
+            //  - внешних ключей (иначе Postgres падает на FK-ограничении);
+            //  - nullable-полей с валидаторами (напр. email с isEmail): для такого поля
+            //    "" — это «нет значения», но Sequelize пропускает валидаторы только при
+            //    null, а на "" гоняет isEmail и роняет сохранение. Нормализуем в null.
             if (Model && Model.rawAttributes) {
                 Object.keys(data).forEach(k => {
                     const attr = Model.rawAttributes[k];
-                    if (data[k] === "" && attr && attr.references) {
+                    if (data[k] === "" && attr && (attr.references || (attr.allowNull && attr.validate))) {
                         data[k] = null;
                     }
                 });
@@ -121,11 +125,12 @@ async function executor(request) {
             if (!data) throw new Error('[dbGateway] update requires data');
             if (!where) throw new Error('[dbGateway] update requires where');
 
-            // Очистка пустых строк только для внешних ключей (чтобы избежать ошибок FK в Postgres)
+            // Пустая строка → null для FK и для nullable-полей с валидаторами
+            // (см. подробный комментарий в ветке 'create').
             if (Model && Model.rawAttributes) {
                 Object.keys(data).forEach(k => {
                     const attr = Model.rawAttributes[k];
-                    if (data[k] === "" && attr && attr.references) {
+                    if (data[k] === "" && attr && (attr.references || (attr.allowNull && attr.validate))) {
                         data[k] = null;
                     }
                 });

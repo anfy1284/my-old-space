@@ -467,6 +467,17 @@ async function handleRequest(req, res) {
                 const user = await require('./globalServerContext').getUserBySessionID(sessionID);
                 const userRole = user ? await formsCtx.getUserAccessRole(user) : 'public';
 
+                // Гейт обязательной смены пароля: пока mustChangePassword, сессия НЕ
+                // допускается ни к каким серверным скриптам, кроме приложения логина
+                // ('login.actions' — форма смены пароля и boot). Иначе после перезагрузки
+                // страницы пользователь, чья сессия уже привязана, мог бы работать в системе
+                // в обход обязательной смены пароля.
+                if (user && user.mustChangePassword && uid !== 'login.actions') {
+                    res.writeHead(403, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ error: 'PASSWORD_CHANGE_REQUIRED' }));
+                    return;
+                }
+
                 const entry = serverScriptStore.getServerScript(uid, userRole);
                 if (!entry) {
                     res.writeHead(403, { 'Content-Type': 'application/json' });

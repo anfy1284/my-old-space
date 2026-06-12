@@ -1,4 +1,4 @@
-# ИНСТРУКЦИИ ДЛЯ AI АССИСТЕНТА (v3.9)
+# ИНСТРУКЦИИ ДЛЯ AI АССИСТЕНТА (v4.0)
 
 Этот документ — **правила работы**. Техническую структуру классов, методов и протоколов см. в [АРХИТЕКТУРА_ПРОЕКТА.md](АРХИТЕКТУРА_ПРОЕКТА.md).
 
@@ -215,6 +215,16 @@
 - ❌ **Путь выбора значения в TextBox-селекторе, не зовущий `onChange`.** Клик по строке выпадашки (`_openList`) обязан зеркалить путь «...» (`handleSelection`): `setText` + `this.onChange(value, caption)` + событие `change`. Иначе `events: { onChange }` (объектный колбэк через `_wireItemEvents`, т.к. `onChange` НЕ в `DOM_MAP`) не сработает с выпадашки — напр. перезагрузка настроек организации по селектору.
 - ❌ **Форс `showSelectionButton: true` в автогенерируемых лейаутах.** «Красота» (выпадашка для малого выбора + `alignFields`) должна работать во ВСЕХ автоформах (`uniForm/buildTableFieldsFromModel`, `UserSettings`/`organizationSettings` `buildLayout`, login), а не только в ручном booking-лейауте. Для FK-полей задавай только `{ selection }` (без флага кнопки → AUTO), а группу полей помечай `alignFields: true`. Исключение — колонки с динамической таблицей-ссылкой (`selection.table: '{tableName}'`): авто-подсчёт по литералу `{tableName}` невозможен, оставляй `showSelectionButton`.
 - ❌ **Стейл-ссылка на default-кнопку после ре-рендера.** Концепция default-кнопки (`"default": true` → Enter «нажимает» её, напр. login «Sign in»): `DataForm._defaultButton` + `_setupDefaultButtonHandler` (keydown на `this.element`, bubble-фаза, игнор `textarea`/модификаторов). Обязательно сбрасывай `this._defaultButton = null` в начале каждого корневого `renderLayout` — иначе ре-рендер в лейаут без default-кнопки (login → смена пароля) оставит Enter привязанным к detached-кнопке. Снимай слушатель в `DataForm.destroy()`.
+- ❌ **`setHidden`, прячущий только `this.element` у input-контрола.** В лейаут вставляется обёртка `containerElement` (рамка с полем/кнопками), а `this.element` — внутренний `<input>`. Прятать нужно `this.containerElement || this.element`, иначе пустая рамка остаётся в потоке (в grid занимает ячейку и сдвигает соседей). *(В этом диалоге так разъехалась форма смены пароля.)*
+- ❌ **Скрытие поля в `alignFields`-группе без скрытия его подписи.** Подпись — отдельный `<label>` в соседней grid-колонке (`_renderAlignedFields`). Контрол хранит `_alignedLabel`, `setHidden`/`setVisible` прячут и его — иначе осиротевшая ячейка-подпись ломает выравнивание.
+- ❌ **`setAnchorToWindow('center')` ПОСЛЕ `setSizeToContent`.** `setAnchorToWindow` сразу не репозиционирует (ставит флаг + resize-listener); центрирует `updatePositionOnResize`, который `setSizeToContent` зовёт ТОЛЬКО при уже заданном якоре. Порядок: anchor → size. Иначе окно встаёт в 0,0 (левый верхний угол).
+- ❌ **Захардкоженная высота окна формы (`setHeight(320)`) под переменное число полей** → пустота под кнопкой. Используй `setSizeToContent({ minWidth, padH })` после рендера; при ре-рендере контента (смена режима) — вызывай повторно.
+- ❌ **Блокировать обязательное действие (смена пароля и т.п.) только формой/модальностью на клиенте, когда сессия уже аутентифицирована.** Refresh → десктоп грузится в обход. Гейт ОБЯЗАН быть серверным в RPC-чокпойнтах: `/server-call` (кроме `login.actions`), `/app/call`+`/upload` (полностью); `/loadApps` не гейтить. Форма/`setModal` — лишь UI поверх. *(В этом диалоге пользователь на refresh залогинивался мимо смены пароля.)*
+- ❌ **Менять поле пользователя, влияющее на доступ (роль, `mustChangePassword`), напрямую через Sequelize и забыть `invalidateSessionUser(sessionID)`.** `getUserBySessionID` кэширует пользователя в `memory_store` (ns `session_users`) — гейт/RLS продолжат работать по устаревшей копии.
+- ❌ **Nullable-поле с валидатором (`isEmail`) + пустая строка `""`.** Sequelize пропускает валидаторы только для `null`; на `""` гоняет `isEmail` и роняет save. dbGateway нормализует `""→null` для FK И nullable-полей с `validate` — не дублируй заплаткой в приложении.
+- ❌ **В `cell-immediate` полагаться на активацию строки для редактируемости полей/кнопок.** Все строки редактируемы (3 точки `isActive` учитывают `editMode`); кнопки видны во всех строках (класс `ui-table-immediate` + CSS-перебивка); в ячейке выпадашка открывается только кнопкой (флаг `inTable` подавляет авто-открытие по клику/фокусу), а не кликом в поле. На обычных полях формы — как раньше (по активации).
+- ❌ **Дефолт нового ряда ТЧ прикладным кодом.** `Table.doToolbarAction('recordAdd')` берёт `col.defaultValue` из колонки лейаута — ставь `"defaultValue": 1` там.
+- ❌ **Целочисленный спиннер с двумя кнопками.** Спиннер `integer` теперь только «+» (быстрый ввод мышью); «−» убран, уменьшение — клавиатурой.
 ---
 
 ## 5. ЧЕКЛИСТ САМОПРОВЕРКИ
@@ -299,6 +309,11 @@
 76. Новый путь выбора значения в TextBox-селекторе зовёт `this.onChange(value, caption)` + диспатчит `change` (а не только `input`)?
 77. Default-кнопка (`"default": true`): `this._defaultButton` сбрасывается в начале корневого `renderLayout`, слушатель снимается в `DataForm.destroy()`?
 78. Автогенерируемые лейауты (uniForm/настройки/login): FK-поля без форса `showSelectionButton` (→ AUTO-выпадашка), группа полей с `alignFields: true`?
+79. Скрываю контрол через `setHidden`? Прячется ли его КОРНЕВОЙ элемент (`containerElement || element`), а в `alignFields`-группе — и связанная подпись (`_alignedLabel`)?
+80. Центрирование окна: `setAnchorToWindow('center')` вызван ДО `setSizeToContent`? Высота окна — по контенту (`setSizeToContent`), а не захардкожена?
+81. Обязательное действие (смена пароля и т.п.) при уже аутентифицированной сессии: гейт стоит на СЕРВЕРЕ (`/server-call` кроме `login.actions`; `/app/call`+`/upload`), а не только в UI? После смены влияющего на доступ поля — вызван `invalidateSessionUser(sessionID)`?
+82. Nullable-поле с валидатором (`isEmail`): пустые `""` нормализуются в `null` (dbGateway: `references || (allowNull && validate)`), без прикладных заплаток?
+83. ТЧ в `cell-immediate`: дефолт новой строки задан через `col.defaultValue` в лейауте? Числовая колонка — `integer` (спиннер «+»)? Выпадашка в ячейке открывается кнопкой, а не кликом (флаг `inTable` прокинут `renderCellElement`)?
 
 ---
 

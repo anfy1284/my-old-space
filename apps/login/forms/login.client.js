@@ -37,10 +37,20 @@ async function _renderMode(form, mode, forced) {
     // __t резолвится статически только для строк-литералов — поэтому без тернарника внутри.
     form.setTitle(mode === 'changePassword' ? __t('cp_app_title') : __t('login_app_title'));
 
-    // При принудительной смене старый пароль не нужен — скрываем поле.
+    // При принудительной смене старый пароль не нужен — скрываем поле, а окно делаем
+    // модальным (оверлей блокирует десктоп до завершения смены пароля).
     if (mode === 'changePassword' && forced) {
         try { if (form.controlsMap.oldPassword) form.controlsMap.oldPassword.setHidden(true); } catch (e) {}
+        try { if (typeof form.setModal === 'function') form.setModal(true); } catch (e) {}
     }
+
+    // Контент сменился (другое число полей) — подгоняем высоту окна под него и центрируем,
+    // чтобы не оставалось пустого места под кнопкой.
+    try {
+        // Якорь — ДО подгонки размера: setSizeToContent центрирует только при заданном anchor.
+        if (typeof form.setAnchorToWindow === 'function') form.setAnchorToWindow('center');
+        if (typeof form.setSizeToContent === 'function') form.setSizeToContent({ minWidth: 320, padH: 12 });
+    } catch (e) {}
 }
 
 async function onLogin(ev, ctx) {
