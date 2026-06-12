@@ -439,10 +439,16 @@ if (typeof window !== 'undefined') {
         // Показывает бегущий прогрессбар при длительных асинхронных операциях
         // (открытие окна, генерация счёта), не блокируя интерфейс. Ref-counted:
         // несколько одновременных операций ведут общий стек токенов.
+        // ОТЛОЖЕННЫЙ ПОКАЗ: бар появляется только если операция длится дольше
+        // BUSY_SHOW_DELAY. Быстрые формы (настройки и т.п.) завершаются раньше —
+        // бар не показывается вовсе, открытие ощущается мгновенным.
         let _busyEl = null;
         let _busyLabelEl = null;
         const _busyTokens = []; // [{ id, label }]
         let _busyIdSeq = 0;
+        let _busyTimer = null;    // отложенный показ (id setTimeout)
+        let _busyVisible = false; // плашка реально отображается
+        const BUSY_SHOW_DELAY = 180; // мс
 
         function _ensureBusyEl() {
             if (_busyEl && document.body.contains(_busyEl)) return _busyEl;
@@ -463,26 +469,36 @@ if (typeof window !== 'undefined') {
             return el;
         }
 
-        function _renderBusy() {
-            if (!_busyTokens.length) {
-                if (_busyEl) _busyEl.style.display = 'none';
-                return;
-            }
-            _ensureBusyEl();
+        function _busyTopLabel() {
+            if (!_busyTokens.length) return '';
             const top = _busyTokens[_busyTokens.length - 1];
             let txt = top.label;
             if (!txt) { try { txt = __t('Loading...'); } catch (e) { txt = 'Loading...'; } }
-            _busyLabelEl.textContent = txt;
+            return txt;
+        }
+
+        function _busyShowNow() {
+            _busyTimer = null;
+            if (!_busyTokens.length) return;
+            _ensureBusyEl();
+            _busyLabelEl.textContent = _busyTopLabel();
             _busyEl.style.display = 'flex';
+            _busyVisible = true;
         }
 
         return {
 
-            // Показать бегущий индикатор. Возвращает токен для последующего hideBusy.
+            // Показать бегущий индикатор (с отложенным появлением). Возвращает токен.
             showBusy(label) {
                 const id = ++_busyIdSeq;
                 _busyTokens.push({ id, label: label || '' });
-                try { _renderBusy(); } catch (e) {}
+                if (_busyVisible) {
+                    // уже виден — просто обновить подпись на самую свежую операцию
+                    try { _busyLabelEl.textContent = _busyTopLabel(); } catch (e) {}
+                } else if (_busyTimer === null) {
+                    // запланировать показ; быстрые операции до него не доживут
+                    _busyTimer = setTimeout(_busyShowNow, BUSY_SHOW_DELAY);
+                }
                 return id;
             },
 
@@ -490,7 +506,13 @@ if (typeof window !== 'undefined') {
             hideBusy(id) {
                 const i = _busyTokens.findIndex(t => t.id === id);
                 if (i !== -1) _busyTokens.splice(i, 1);
-                try { _renderBusy(); } catch (e) {}
+                if (_busyTokens.length) {
+                    if (_busyVisible) { try { _busyLabelEl.textContent = _busyTopLabel(); } catch (e) {} }
+                    return;
+                }
+                // токенов не осталось — отменить отложенный показ и спрятать
+                if (_busyTimer !== null) { clearTimeout(_busyTimer); _busyTimer = null; }
+                if (_busyVisible) { _busyVisible = false; if (_busyEl) _busyEl.style.display = 'none'; }
             },
 
             register(name, descriptor) {
@@ -504,13 +526,11 @@ if (typeof window !== 'undefined') {
 
                 // Бегущий прогрессбар на время открытия окна — пользователь сразу
                 // получает отклик, пока createInstance тянет данные с сервера.
+                // Индикатор с ОТЛОЖЕННЫМ показом: для быстрых форм (настройки и т.п.)
+                // бар не успеет появиться — открытие ощущается мгновенным. Только если
+                // createInstance затянется дольше BUSY_SHOW_DELAY, покажется прогрессбар.
                 const _busyToken = this.showBusy('');
                 try {
-                    // Дать браузеру кадр НА ОТРИСОВКУ индикатора до тяжёлой синхронной
-                    // работы createInstance. Без этого при быстром/кэшированном открытии
-                    // paint между showBusy и появлением окна не происходит — индикатор не
-                    // виден. Двойной rAF гарантирует, что кадр с плашкой уже нарисован.
-                    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
                     return await this._openInternal(name, params, options, desc);
                 } finally {
                     this.hideBusy(_busyToken);
