@@ -15,7 +15,13 @@ let projectRoot = null;
 
 // Store for edit sessions: Map<editSessionId, { userId, tableName, changes }>
 // changes is Map<rowId, Map<fieldName, newValue>>
-const editSessions = new Map();
+// 1.2: раньше new Map() без очистки — getDynamicTableData создаёт edit-сессию на
+// КАЖДЫЙ запрос данных (в т.ч. на каждый шаг скролла), удаление только при commit →
+// утечка. BoundedTTLMap (TTL 60 мин, max 5000) ограничивает рост; протухшие
+// несохранённые edit-сессии подчищает общий sweeper memory_store. API set/get/delete
+// совместим с Map — остальной код не меняется.
+const { BoundedTTLMap } = require('./memory_store');
+const editSessions = new BoundedTTLMap({ ttl: 60 * 60 * 1000, max: 5000 });
 
 // Cache for model definitions (avoid re-reading files on each request)
 // Store in global to survive require.cache deletion during hot-reload

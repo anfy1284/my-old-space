@@ -34,7 +34,12 @@ const User = sequelize.define(userDef.name, Object.fromEntries(
 ), { ...userDef.options, tableName: userDef.tableName });
 
 // Session cache: Map<sessionId, { userId, isGuest, sessionId }>
-const sessionCache = new Map();
+// 1.4: раньше new Map() рос бессрочно (запись на каждую виденную сессию, включая
+// мусорные от прежней гонки 0.7). BoundedTTLMap (TTL 24ч, max 5000) ограничивает
+// рост; протухшее подчищает общий sweeper memory_store. API set/get/has/delete
+// совместим с Map.
+const { BoundedTTLMap } = require('../memory_store');
+const sessionCache = new BoundedTTLMap({ ttl: 24 * 60 * 60 * 1000, max: 5000 });
 
 function parseCookies(cookieHeader) {
   const cookies = {};

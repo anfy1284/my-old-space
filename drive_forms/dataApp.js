@@ -19,20 +19,17 @@ function generateId() {
 function storeDataset(payload, namespace = 'datasets') {
   try {
     const id = generateId();
-    try {
-      if (memoryStore && memoryStore._MEM) {
-        if (!memoryStore._MEM.has(namespace)) memoryStore._MEM.set(namespace, new Map());
-        memoryStore._MEM.get(namespace).set(id, { value: JSON.parse(JSON.stringify(payload)), created: Date.now(), modified: Date.now() });
-      }
-    } catch (err) {
-      if (memoryStore && memoryStore._MEM) {
-        if (!memoryStore._MEM.has(namespace)) memoryStore._MEM.set(namespace, new Map());
-        memoryStore._MEM.get(namespace).set(id, { value: payload, created: Date.now(), modified: Date.now() });
-      }
-    }
-
+    // 1.1: пишем через memory_store.set с { clone: true } — синхронная часть set()
+    // кладёт глубокую копию в _MEM сразу (getSync видит её тут же), а namespace
+    // 'datasets' сконфигурирован с TTL+max → датасеты больше не копятся бессрочно.
     if (memoryStore && memoryStore.set) {
-      try { memoryStore.set(namespace, id, payload).catch(() => {}); } catch (_) {}
+      try { memoryStore.set(namespace, id, payload, { clone: true }).catch(() => {}); } catch (_) {}
+    } else if (memoryStore && memoryStore._MEM) {
+      // fallback на случай отсутствия set
+      try {
+        if (!memoryStore._MEM.has(namespace)) memoryStore._MEM.set(namespace, new Map());
+        memoryStore._MEM.get(namespace).set(id, { value: JSON.parse(JSON.stringify(payload)), created: Date.now(), modified: Date.now(), expires: 0 });
+      } catch (err) {}
     }
 
     return id;
