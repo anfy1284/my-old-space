@@ -205,7 +205,15 @@ async function getLayoutWithData(params, sessionID) {
                     windowState: customLayout.windowState || 'maximized'
                 };
             }
-            // Дефолтный лейаут списка: DynamicTable
+            // Дефолтный лейаут списка: DynamicTable.
+            // Сортировка по умолчанию: берётся из реестра layoutMemory (если приложение
+            // зарегистрировало её через registerListSort), иначе — по name по возрастанию.
+            let _initialSort = [{ field: 'name', order: 'asc' }];
+            try {
+                const layoutMemoryLS = require('../../drive_root/layoutMemory');
+                const regSort = layoutMemoryLS.getListSort(tableName);
+                if (Array.isArray(regSort) && regSort.length) _initialSort = regSort;
+            } catch (e) {}
             const layout = [{
                 type: 'table',
                 caption: tableName,
@@ -217,7 +225,7 @@ async function getLayoutWithData(params, sessionID) {
                     visibleRows: 10,
                     editable: true,
                     showToolbar: true,
-                    initialSort: [{ field: 'name', order: 'asc' }]
+                    initialSort: _initialSort
                 }
             }];
             const payload = { layout, data: [], params: params || {} };
@@ -423,14 +431,19 @@ async function applyChanges(payload, sessionID) {
                             const rowData = Object.assign({}, row);
                             rowData[parentField] = parentUID;
 
-                            // Приведение пустых строк к null для числовых полей
+                            // Числовые поля: стёртое значение ("") всегда → 0 (пользователь
+                            // очистил поле); отсутствующее (undefined) → defaultValue из схемы
+                            // или null. Postgres не принимает "" для числовых типов.
                             for (const [fn, fd] of Object.entries(sectFields)) {
-                                if (rowData[fn] === '' || rowData[fn] === undefined) {
-                                    const t = (fd.type || '').toUpperCase();
-                                    if (t === 'INTEGER' || t === 'FLOAT' || t === 'DECIMAL' || t === 'DOUBLE' || t === 'NUMBER' || t === 'REAL') {
-                                        rowData[fn] = fd.defaultValue != null ? fd.defaultValue : null;
-                                    }
-                                }
+                                const t = (fd.type || '').toUpperCase();
+                                const isNum = (t === 'INTEGER' || t === 'BIGINT' || t === 'FLOAT' || t === 'DECIMAL' || t === 'DOUBLE' || t === 'NUMBER' || t === 'REAL' || t === 'SMALLINT');
+                                if (!isNum) continue;
+                                const v = rowData[fn];
+                                // Стёртое значение ("" или null) → 0 (пользователь очистил поле).
+                                if (v === '' || v === null) rowData[fn] = 0;
+                                // Отсутствующее (undefined) → defaultValue из схемы, иначе 0 для
+                                // notNull-полей / null для nullable.
+                                else if (v === undefined) rowData[fn] = fd.defaultValue != null ? fd.defaultValue : (fd.allowNull === false ? 0 : null);
                             }
 
                             // Серверная валидация безопасности: межсекционные FK
@@ -503,7 +516,7 @@ async function applyChanges(payload, sessionID) {
             : { ok: true, recordId: parentUID };
     } catch (e) {
         console.error('[uniForm] applyChanges error:', e);
-        return { ok: false, error: String(e) };
+        return { ok: false, error: (e && e.message) ? e.message : String(e) };
     }
 }
 
@@ -645,6 +658,10 @@ async function dispatchServerEvent(eventName, payload, { tableName, sessionID })
         }
     } catch(e) {
         console.error(`[uniForm] event "${eventName}" dispatch error:`, e && e.message || e);
+        // Пробрасываем ошибку: серверное событие (onBeforeSave) — это точка валидации,
+        // которая ДОЛЖНА уметь отменить сохранение (напр. контроль дат брони). applyChanges
+        // ловит исключение и возвращает { ok:false, error } — клиент показывает сообщение.
+        throw e;
     }
 }
 

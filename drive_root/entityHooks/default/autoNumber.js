@@ -29,10 +29,20 @@ module.exports = async function autoNumber(request, params, context) {
         throw new Error('[default.autoNumber] "field" param is required');
     }
 
-    // Если поле уже заполнено — пользователь ввёл номер вручную, не трогаем
-    const currentValue = request.data && request.data[field];
-    if (currentValue !== null && currentValue !== undefined && currentValue !== '') {
-        return;
+    // Определяем заполненность поля и тип операции.
+    //  create: пустое/отсутствующее поле → присвоить номер; заполненное (ручной ввод) → не трогать.
+    //  update: трогаем ТОЛЬКО если поле явно передано и очищено (пользователь стёр номер) —
+    //          тогда присваиваем новый, как при создании. Если поле не пришло в changes
+    //          или содержит значение — оставляем как есть (обычное редактирование не
+    //          перенумеровывает запись).
+    const op = request.operation;
+    const hasField = !!(request.data && Object.prototype.hasOwnProperty.call(request.data, field));
+    const currentValue = hasField ? request.data[field] : undefined;
+    const isEmpty = currentValue === null || currentValue === undefined || currentValue === '';
+    if (op === 'update') {
+        if (!hasField || !isEmpty) return;
+    } else {
+        if (!isEmpty) return;
     }
 
     const { modelsDB, dbGateway } = context;

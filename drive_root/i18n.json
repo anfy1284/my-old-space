@@ -538,5 +538,11 @@
         "ru": "Очистить всё",
         "de": "Alles löschen",
         "pl": "Wyczyść wszystko"
+    },
+    "number_not_unique": {
+        "en": "Number \"{{number}}\" already exists. The number must be unique.",
+        "ru": "Номер «{{number}}» уже существует. Номер должен быть уникальным.",
+        "de": "Die Nummer „{{number}}“ existiert bereits. Die Nummer muss eindeutig sein.",
+        "pl": "Numer „{{number}}” już istnieje. Numer musi być unikalny."
     }
 }

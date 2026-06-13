@@ -126,4 +126,30 @@ function invalidateCache() {
     _valueCache.clear();
 }
 
-module.exports = { install, invalidateCache };
+/**
+ * Translatable field names for a table, or null if none.
+ * @param {string} tableName
+ * @returns {string[]|null}
+ */
+function getTranslatableFields(tableName) {
+    return _getFieldsCache().get(tableName) || null;
+}
+
+/**
+ * Translation lookup Map for (tableName, language): key `${recordId}|${fieldName}` → value.
+ * Reuses the same per-(table,language) cache as the read middleware. Returns null if the
+ * table has no translatable fields.
+ * @param {string} tableName
+ * @param {string} language
+ * @param {object} [modelsDB] — defaults to globalServerContext.modelsDB
+ * @returns {Promise<Map|null>}
+ */
+async function getTranslationLookup(tableName, language, modelsDB) {
+    const fields = getTranslatableFields(tableName);
+    if (!fields || !fields.length) return null;
+    const mdb = modelsDB || require('./globalServerContext').modelsDB;
+    if (!mdb) return null;
+    return await _getLookup(tableName, fields, language, mdb);
+}
+
+module.exports = { install, invalidateCache, getTranslatableFields, getTranslationLookup };

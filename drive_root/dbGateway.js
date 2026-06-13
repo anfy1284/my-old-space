@@ -13,6 +13,47 @@
 
 const LEVELS = ['app', 'forms', 'root'];
 
+// Числовые типы Sequelize — для них пустая строка трактуется как 0 (см. sanitizeData).
+const _NUMERIC_TYPE_KEYS = new Set([
+    'INTEGER', 'BIGINT', 'FLOAT', 'DOUBLE', 'DOUBLE PRECISION',
+    'DECIMAL', 'REAL', 'NUMBER', 'SMALLINT', 'TINYINT', 'MEDIUMINT'
+]);
+
+function _isNumericAttr(attr) {
+    const k = attr && attr.type && (attr.type.key
+        || (attr.type.constructor && attr.type.constructor.key));
+    return !!k && _NUMERIC_TYPE_KEYS.has(String(k).toUpperCase());
+}
+
+/**
+ * Нормализация значений перед записью (create/update). Мутирует data in-place.
+ *  - Пустая строка "" → null для внешних ключей (Postgres падает на FK-ограничении)
+ *    и для nullable-полей с валидаторами (напр. email с isEmail: Sequelize пропускает
+ *    валидаторы только при null, а на "" гоняет isEmail и роняет сохранение).
+ *  - Пустая строка "" → 0 для числовых полей (INTEGER/FLOAT/…): стёртое пользователем
+ *    числовое поле всегда воспринимается как 0 (Postgres не принимает "" для чисел).
+ *  - null → 0 для НЕ-nullable числовых полей: очищенное числовое поле часто приходит
+ *    как null (а не ""), а notNull-колонка (напр. booking_guests.count) на null падает
+ *    с "notNull Violation". Nullable числовые поля null сохраняют (там null осмыслен).
+ */
+function sanitizeData(Model, data) {
+    if (!Model || !Model.rawAttributes || !data) return;
+    Object.keys(data).forEach(k => {
+        const attr = Model.rawAttributes[k];
+        if (!attr) return;
+        const v = data[k];
+        if (v === '') {
+            if (attr.references || (attr.allowNull && attr.validate)) {
+                data[k] = null;
+            } else if (_isNumericAttr(attr)) {
+                data[k] = 0;
+            }
+        } else if (v === null && attr.allowNull === false && _isNumericAttr(attr)) {
+            data[k] = 0;
+        }
+    });
+}
+
 // Хранилище middleware по уровням
 // Каждый уровень — массив функций (request, next) => result
 const middlewareRegistry = {
@@ -88,19 +129,8 @@ async function executor(request) {
         case 'create': {
             if (!data) throw new Error('[dbGateway] create requires data');
 
-            // Пустая строка → null для:
-            //  - внешних ключей (иначе Postgres падает на FK-ограничении);
-            //  - nullable-полей с валидаторами (напр. email с isEmail): для такого поля
-            //    "" — это «нет значения», но Sequelize пропускает валидаторы только при
-            //    null, а на "" гоняет isEmail и роняет сохранение. Нормализуем в null.
-            if (Model && Model.rawAttributes) {
-                Object.keys(data).forEach(k => {
-                    const attr = Model.rawAttributes[k];
-                    if (data[k] === "" && attr && (attr.references || (attr.allowNull && attr.validate))) {
-                        data[k] = null;
-                    }
-                });
-            }
+            // Нормализация пустых строк: "" → null (FK/валидаторы) либо "" → 0 (числа).
+            sanitizeData(Model, data);
 
             if (!data.UID) {
                 try {
@@ -125,16 +155,8 @@ async function executor(request) {
             if (!data) throw new Error('[dbGateway] update requires data');
             if (!where) throw new Error('[dbGateway] update requires where');
 
-            // Пустая строка → null для FK и для nullable-полей с валидаторами
-            // (см. подробный комментарий в ветке 'create').
-            if (Model && Model.rawAttributes) {
-                Object.keys(data).forEach(k => {
-                    const attr = Model.rawAttributes[k];
-                    if (data[k] === "" && attr && (attr.references || (attr.allowNull && attr.validate))) {
-                        data[k] = null;
-                    }
-                });
-            }
+            // Нормализация пустых строк (см. ветку 'create' и sanitizeData).
+            sanitizeData(Model, data);
 
             const updateResult = await Model.update(data, { where, ...options });
             // Invalidate FK display cache for this table

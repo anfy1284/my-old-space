@@ -807,6 +807,16 @@ async function getDynamicTableData(options) {
     let { modelName, firstRow, visibleRows, sort, filters, fieldConfig, userId, sessionID } = options;
     // Prefer sessionID for access control; fall back to userId for legacy callers
     const dbContext = sessionID ? { sessionID } : { userId };
+
+    // Язык сессии — для перевода display-значений FK-колонок (справочные данные,
+    // напр. статусы броней). Резолвится один раз и пробрасывается в resolveTableForeignKeys.
+    let _sessionLang = 'en';
+    if (sessionID) {
+        try {
+            const _sc = await require('../drive_forms/globalServerContext').getSessionContext(sessionID);
+            _sessionLang = (_sc && _sc.language) || 'en';
+        } catch (e) { /* fallback en */ }
+    }
     
     // Apply server-side limits to prevent abuse
     visibleRows = Math.min(visibleRows || 20, config.maxVisibleRows);
@@ -908,7 +918,7 @@ async function getDynamicTableData(options) {
 
     // Resolve foreign keys
     const t4 = Date.now();
-    const resolvedData = await resolveTableForeignKeys(modelName, data, fields);
+    const resolvedData = await resolveTableForeignKeys(modelName, data, fields, _sessionLang);
 
     
     // Add computed fields if fieldConfig is provided
@@ -1043,7 +1053,7 @@ function _fkCacheSet(table, uid, displayValue) {
  * @param {Array} fields - Field metadata from getTableMetadata
  * @returns {Promise<Array>} - Data with __<field>_display properties added
  */
-async function resolveTableForeignKeys(modelName, dataArray, fields) {
+async function resolveTableForeignKeys(modelName, dataArray, fields, language) {
     const fkFields = fields.filter(f => f.foreignKey !== null);
 
     if (fkFields.length === 0) {
@@ -1052,23 +1062,50 @@ async function resolveTableForeignKeys(modelName, dataArray, fields) {
 
     const fkDbGW = require('./dbGateway');
     const { Op } = require('sequelize');
+    const tmw = require('./translationMiddleware');
+    // 'en' — базовый язык, переводы не нужны (см. translationMiddleware).
+    const useTransl = !!language && language !== 'en';
 
-    // Phase 1: Collect unique FK values per target table, check cache
-    // Map: fkTableName -> { displayField, uids: Set of uncached UIDs }
+    // Phase 0: per-target-table info. displayField, признак translatable (поле справочных
+    // данных переводится таблицей translations) и предзагруженный lookup переводов.
+    // Map: fkTableName -> { displayField, translatable, lookup, uids: Set }
     const tableBatches = new Map();
-
     for (const fkField of fkFields) {
         const fkTableName = fkField.foreignKey.table;
         const displayField = fkField.foreignKey.displayField;
         if (!tableBatches.has(fkTableName)) {
-            tableBatches.set(fkTableName, { displayField, uids: new Set() });
+            let translatable = false;
+            if (useTransl) {
+                const tf = tmw.getTranslatableFields(fkTableName);
+                translatable = !!(tf && tf.includes(displayField));
+            }
+            tableBatches.set(fkTableName, { displayField, translatable, lookup: null, uids: new Set() });
         }
+    }
+    // Предзагрузка lookup'ов переводов для translatable display-полей (1 запрос на таблицу/язык,
+    // кэшируется внутри translationMiddleware).
+    if (useTransl) {
+        for (const [fkTableName, batch] of tableBatches) {
+            if (batch.translatable) {
+                try { batch.lookup = await tmw.getTranslationLookup(fkTableName, language); } catch (e) {}
+            }
+        }
+    }
+    // Ключ FK-кэша включает язык ТОЛЬКО для translatable display (иначе разные языки
+    // конфликтовали бы); для 'en'/непереводимых — прежний ключ (uid), кэш совместим.
+    // Язык кладём в uid-часть ключа (а не в table-часть), чтобы invalidateFkCache(table)
+    // продолжал чистить записи по префиксу `table::`.
+    const cacheUid = (fkTableName, uid) =>
+        tableBatches.get(fkTableName).translatable ? `${language}|${uid}` : uid;
+
+    // Phase 1: Collect unique uncached FK values per target table
+    for (const fkField of fkFields) {
+        const fkTableName = fkField.foreignKey.table;
         const batch = tableBatches.get(fkTableName);
         for (const row of dataArray) {
             const fkValue = row[fkField.name];
             if (fkValue === null || fkValue === undefined) continue;
-            // Only add to batch if not already cached
-            if (_fkCacheGet(fkTableName, fkValue) === undefined) {
+            if (_fkCacheGet(fkTableName, cacheUid(fkTableName, fkValue)) === undefined) {
                 batch.uids.add(fkValue);
             }
         }
@@ -1088,25 +1125,32 @@ async function resolveTableForeignKeys(modelName, dataArray, fields) {
                 context: { sessionID: SYSTEM_SESSION_ID }
             }).then(rows => {
                 // Populate cache from results
-                const rowMap = new Map();
+                const found = new Set();
                 if (Array.isArray(rows)) {
                     for (const r of rows) {
-                        const displayValue = r[batch.displayField] || r.UID.toString();
-                        _fkCacheSet(fkTableName, r.UID, displayValue);
-                        rowMap.set(r.UID, displayValue);
+                        let displayValue = r[batch.displayField] || r.UID.toString();
+                        // Перевод справочного значения (таблица translations) на язык сессии.
+                        // Запрос идёт под SYSTEM_SESSION_ID (минуя RLS и translationMiddleware),
+                        // поэтому перевод применяем здесь явно.
+                        if (batch.translatable && batch.lookup) {
+                            const tv = batch.lookup.get(`${r.UID}|${batch.displayField}`);
+                            if (tv !== undefined) displayValue = tv;
+                        }
+                        _fkCacheSet(fkTableName, cacheUid(fkTableName, r.UID), displayValue);
+                        found.add(r.UID);
                     }
                 }
                 // Mark UIDs not found in DB as "(not found)"
                 for (const uid of uidsArray) {
-                    if (!rowMap.has(uid)) {
-                        _fkCacheSet(fkTableName, uid, `(not found: ${uid})`);
+                    if (!found.has(uid)) {
+                        _fkCacheSet(fkTableName, cacheUid(fkTableName, uid), `(not found: ${uid})`);
                     }
                 }
             }).catch(e => {
                 console.error(`[resolveTableForeignKeys] Batch FK error for ${fkTableName}:`, e.message);
                 // Cache error results so we don't retry immediately
                 for (const uid of uidsArray) {
-                    _fkCacheSet(fkTableName, uid, `(error: ${uid})`);
+                    _fkCacheSet(fkTableName, cacheUid(fkTableName, uid), `(error: ${uid})`);
                 }
             })
         );
@@ -1124,7 +1168,7 @@ async function resolveTableForeignKeys(modelName, dataArray, fields) {
                 continue;
             }
             const fkTableName = fkField.foreignKey.table;
-            const cached = _fkCacheGet(fkTableName, fkValue);
+            const cached = _fkCacheGet(fkTableName, cacheUid(fkTableName, fkValue));
             resolvedRow[`__${fkField.name}_display`] = cached !== undefined ? cached : '';
         }
         result.push(resolvedRow);

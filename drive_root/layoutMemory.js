@@ -56,6 +56,11 @@ const _tableRecordCaptions = new Map();
 // Иконка записи (формы) хранится в _tableIcons (formIcon); иконка списка — здесь (listIcon).
 const _tableListIcons = new Map();
 
+// Table-level сортировка списка по умолчанию: tableName → [{ field, order }].
+// Регистрируется приложением через registerListSort(); читается дефолтным списком
+// uniForm (DynamicTable) как initialSort. Если не задана — список сортируется по name.
+const _tableListSort = new Map();
+
 // 5.2 — кэш ПЕРЕВЕДЁННОГО лейаута по ключу `storageKey|language`.
 // getLayoutForUser при наличии sessionID делал на КАЖДОЕ открытие формы
 // JSON.parse(JSON.stringify(result)) (глубокий клон) + рекурсивный перевод
@@ -291,4 +296,23 @@ function getTableListIcon(tableName) {
     return _tableListIcons.get(tableName) || null;
 }
 
-module.exports = { saveLayout, getLayoutForUser, getUserRoleBySession, hasRegistered, getTableIcon, getTableCaption, getTableRecordCaption, getTableListIcon };
+/**
+ * Register a default list sort for a table (used by the auto-generated DynamicTable list).
+ * @param {string} tableName
+ * @param {Array<{field:string, order:string}>} sort — e.g. [{ field: 'number', order: 'desc' }]
+ */
+function registerListSort(tableName, sort) {
+    if (!tableName || !Array.isArray(sort)) return;
+    _tableListSort.set(tableName, sort);
+}
+
+/**
+ * Get the default list sort for a table, or null.
+ * @param {string} tableName
+ * @returns {Array<{field:string, order:string}>|null}
+ */
+function getListSort(tableName) {
+    return _tableListSort.get(tableName) || null;
+}
+
+module.exports = { saveLayout, getLayoutForUser, getUserRoleBySession, hasRegistered, getTableIcon, getTableCaption, getTableRecordCaption, getTableListIcon, registerListSort, getListSort };

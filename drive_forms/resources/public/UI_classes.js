@@ -785,24 +785,8 @@ class Form extends UIObject {
         if (this.btnMaximize && this.btnMaximizeCanvas) {
             this.btnMaximize.disabled = value;
             this.btnMaximize.style.cursor = value ? 'not-allowed' : 'pointer';
-
-            // Redraw icon with correct color
-            const ctx = this.btnMaximizeCanvas.getContext('2d');
-            ctx.clearRect(0, 0, 12, 12);
-
-            if (value) {
-                // Inactive - dark border color (bottom and right edge)
-                const baseColor = UIObject.getClientConfigValue('defaultColor', '#c0c0c0');
-                ctx.fillStyle = UIObject.brightenColor(baseColor, -60);
-            } else {
-                // Active - black
-                ctx.fillStyle = '#000000';
-            }
-
-            ctx.fillRect(2, 2, 8, 1); // Top line
-            ctx.fillRect(2, 2, 1, 8); // Left line
-            ctx.fillRect(9, 2, 1, 8); // Right line
-            ctx.fillRect(2, 9, 8, 1); // Bottom line
+            // Перерисовываем иконку с учётом состояния (развернуть/восстановить + блокировка).
+            this._updateMaximizeIcon();
         }
     }
 
@@ -1067,12 +1051,6 @@ class Form extends UIObject {
             const canvasMax = document.createElement('canvas');
             canvasMax.width = 12;
             canvasMax.height = 12;
-            const ctxMax = canvasMax.getContext('2d');
-            ctxMax.fillStyle = '#000000';
-            ctxMax.fillRect(2, 2, 8, 1); // Top line
-            ctxMax.fillRect(2, 2, 1, 8); // Left line
-            ctxMax.fillRect(9, 2, 1, 8); // Right line
-            ctxMax.fillRect(2, 9, 8, 1); // Bottom line
             btnMaximize.appendChild(canvasMax);
             // Apply themed 3D style
             applyTitleButtonColors(btnMaximize, UIObject.getClientConfigValue('defaultColor', initialBg));
@@ -1081,6 +1059,8 @@ class Form extends UIObject {
             // Save reference to maximize button and its canvas
             this.btnMaximize = btnMaximize;
             this.btnMaximizeCanvas = canvasMax;
+            // Рисуем иконку по текущему состоянию (развернуть/восстановить).
+            this._updateMaximizeIcon();
 
             // Apply lock if set
             if (this.lockAspectRatio) {
@@ -1547,16 +1527,32 @@ class Form extends UIObject {
         }
     }
 
+    // Переключатель развёрнуто/восстановлено. Кнопка в заголовке зовёт его же.
     maximize() {
         if (this.isMaximized) {
-            // Restore
-            this.setX(this.restoreX);
-            this.setY(this.restoreY);
-            this.setWidth(this.restoreWidth);
-            this.setHeight(this.restoreHeight);
+            // Восстановить прежнюю геометрию. Если сохранённые значения невалидны
+            // (окно было открыто сразу развёрнутым — restore* могли не быть заданы),
+            // откатываемся к разумному центрированному размеру, чтобы окно не
+            // "схлопнулось" в ноль и осталось управляемым.
+            const validW = typeof this.restoreWidth === 'number' && this.restoreWidth > 80;
+            const validH = typeof this.restoreHeight === 'number' && this.restoreHeight > 80;
+            if (validW && validH) {
+                this.setWidth(this.restoreWidth);
+                this.setHeight(this.restoreHeight);
+                this.setX(typeof this.restoreX === 'number' ? this.restoreX : 0);
+                this.setY(typeof this.restoreY === 'number' ? this.restoreY : Form.topOffset);
+            } else {
+                const w = Math.round(window.innerWidth * 0.6);
+                const avail = window.innerHeight - Form.topOffset - Form.bottomOffset;
+                const h = Math.round(avail * 0.7);
+                this.setWidth(w);
+                this.setHeight(h);
+                this.setX(Math.round((window.innerWidth - w) / 2));
+                this.setY(Form.topOffset + 20);
+            }
             this.isMaximized = false;
         } else {
-            // Maximize
+            // Развернуть. Запоминаем текущую геометрию для последующего восстановления.
             this.restoreX = this.x;
             this.restoreY = this.y;
             this.restoreWidth = this.width;
@@ -1567,6 +1563,43 @@ class Form extends UIObject {
             this.setWidth(window.innerWidth);
             this.setHeight(window.innerHeight - Form.topOffset - Form.bottomOffset);
             this.isMaximized = true;
+        }
+        // Иконка кнопки должна отражать текущее состояние (развернуть / восстановить).
+        this._updateMaximizeIcon();
+    }
+
+    // Перерисовывает иконку кнопки максимизации в соответствии с состоянием окна.
+    //  isMaximized=false → глиф "развернуть" (одно окно с заголовком);
+    //  isMaximized=true  → глиф "восстановить" (два перекрывающихся окна, как в Win95).
+    // Когда максимизация запрещена (lockAspectRatio) — глиф рисуется приглушённым цветом.
+    _updateMaximizeIcon() {
+        if (!this.btnMaximizeCanvas) return;
+        const ctx = this.btnMaximizeCanvas.getContext('2d');
+        if (!ctx) return;
+        ctx.clearRect(0, 0, 12, 12);
+        const base = UIObject.getClientConfigValue('defaultColor', '#c0c0c0');
+        ctx.fillStyle = this.lockAspectRatio ? UIObject.brightenColor(base, -60) : '#000000';
+
+        if (this.isMaximized) {
+            // "Восстановить" — два перекрывающихся окна.
+            // Заднее окно (верх-право):
+            ctx.fillRect(4, 1, 7, 1);  // верхняя рамка
+            ctx.fillRect(10, 1, 1, 5); // правая рамка
+            ctx.fillRect(6, 5, 5, 1);  // низ заднего (виден справа)
+            ctx.fillRect(4, 1, 1, 2);  // левая (верхний кусок, до переднего окна)
+            // Переднее окно (низ-лево):
+            ctx.fillRect(1, 4, 7, 1);  // верх (заголовок)
+            ctx.fillRect(1, 5, 7, 1);  // утолщение заголовка
+            ctx.fillRect(1, 4, 1, 7);  // левая
+            ctx.fillRect(7, 4, 1, 7);  // правая
+            ctx.fillRect(1, 10, 7, 1); // низ
+        } else {
+            // "Развернуть" — одно окно с утолщённым заголовком.
+            ctx.fillRect(2, 2, 8, 1); // верх
+            ctx.fillRect(2, 3, 8, 1); // утолщение заголовка
+            ctx.fillRect(2, 2, 1, 8); // левая
+            ctx.fillRect(9, 2, 1, 8); // правая
+            ctx.fillRect(2, 9, 8, 1); // низ
         }
     }
 
@@ -9169,13 +9202,15 @@ class Table extends UIObject {
                 const isSelectMode = !!(this.appForm && this.appForm.selectMode);
                 const hiddenButtons = Array.isArray(this.hiddenButtons) ? this.hiddenButtons : [];
 
+                // Кнопка "Удалить" — последней в тулбаре (после Open/Settings), чтобы
+                // деструктивное действие не соседствовало с "Добавить".
                 const toolbarButtons = [
                     { action: 'select',       caption: __t('Select'),   icon: '/apps/general_icons/resources/public/16x16/select.png',   selectModeOnly: true },
                     { action: 'cancel',       caption: __t('Cancel'),   icon: '/apps/general_icons/resources/public/16x16/cancel.png',   selectModeOnly: true },
                     { action: 'recordAdd',    caption: __t('Add'),      icon: '/apps/general_icons/resources/public/16x16/add.png' },
-                    { action: 'recordDelete', caption: __t('Delete'),   icon: '/apps/general_icons/resources/public/16x16/delete.png' },
                     { action: 'recordOpen',   caption: __t('Open'),     icon: '/apps/general_icons/resources/public/16x16/open.png' },
-                    { action: 'listSettings', caption: __t('Settings'), icon: '/apps/general_icons/resources/public/16x16/settings.png' }
+                    { action: 'listSettings', caption: __t('Settings'), icon: '/apps/general_icons/resources/public/16x16/settings.png' },
+                    { action: 'recordDelete', caption: __t('Delete'),   icon: '/apps/general_icons/resources/public/16x16/delete.png' }
                 ];
 
                 for (const btnDef of toolbarButtons) {

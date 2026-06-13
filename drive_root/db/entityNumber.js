@@ -55,21 +55,37 @@ function injectEntityNumber(def) {
         };
     }
 
-    // 2. Автонумерация на number (beforeCreate), если ещё не назначена на это поле.
-    //    unshift — чтобы номер присваивался ДО прикладных beforeCreate-хуков и до
-    //    вычисления представления (которое может использовать номер).
+    // 2. Автонумерация (+ контроль уникальности) на number — на beforeCreate И beforeUpdate.
+    //    beforeUpdate нужен, чтобы при ОЧИСТКЕ номера в существующей записи автонумерация
+    //    присвоила новый (как при создании) — см. default.autoNumber (логика update).
+    //    Порядок в массиве: [autoNumber, uniqueNumber, ...прикладные хуки] — номер
+    //    присваивается первым, затем проверяется уникальность, затем прикладная логика.
+    //    unshift — чтобы это происходило ДО прикладных хуков и вычисления представления.
     const ec = def.entityConfig;
     ec.hooks = ec.hooks || {};
-    if (!Array.isArray(ec.hooks.beforeCreate)) ec.hooks.beforeCreate = [];
-    const alreadyOnNumber = ec.hooks.beforeCreate.some(h =>
-        h && h.handler === 'default.autoNumber' && h.params && h.params.field === 'number'
-    );
-    if (!alreadyOnNumber) {
-        ec.hooks.beforeCreate.unshift({
-            handler: 'default.autoNumber',
-            params: { field: 'number', length: 5 }
-        });
+
+    // Контроль уникальности номера: включён по умолчанию, отключается в db.json
+    // через entityConfig.uniqueNumber: false.
+    const uniqueEnabled = ec.uniqueNumber !== false;
+
+    function ensureNumberHooks(event) {
+        if (!Array.isArray(ec.hooks[event])) ec.hooks[event] = [];
+        const arr = ec.hooks[event];
+        // uniqueNumber unshift'им раньше autoNumber, чтобы итоговый порядок был
+        // [autoNumber, uniqueNumber, ...].
+        if (uniqueEnabled) {
+            const hasUnique = arr.some(h =>
+                h && h.handler === 'default.uniqueNumber' && h.params && h.params.field === 'number'
+            );
+            if (!hasUnique) arr.unshift({ handler: 'default.uniqueNumber', params: { field: 'number' } });
+        }
+        const hasAuto = arr.some(h =>
+            h && h.handler === 'default.autoNumber' && h.params && h.params.field === 'number'
+        );
+        if (!hasAuto) arr.unshift({ handler: 'default.autoNumber', params: { field: 'number', length: 5 } });
     }
+    ensureNumberHooks('beforeCreate');
+    ensureNumberHooks('beforeUpdate');
     return true;
 }
 

@@ -45,6 +45,7 @@ const presentationRegistry = new Map();
 // ── Автозагрузка встроенных обработчиков ─────────────────────────────────────
 const builtins = {
     'default.autoNumber': require('./default/autoNumber'),
+    'default.uniqueNumber': require('./default/uniqueNumber'),
 };
 
 for (const [name, fn] of Object.entries(builtins)) {
