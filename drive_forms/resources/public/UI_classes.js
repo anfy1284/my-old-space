@@ -1946,7 +1946,6 @@ Form.prototype.doAction = function(action, params) {
                         return;
                     }
                     const tableName = this.dbTable || (params && params.tableName) || '';
-                    const self = this;
                     if (typeof window.showConfirm === 'function') {
                         // showConfirm(message, onOk, onCancel): onOk вызывается БЕЗ аргументов
                         // при подтверждении. Раньше тут стоял `if (res === 'yes')` — res всегда
@@ -1958,7 +1957,9 @@ Form.prototype.doAction = function(action, params) {
                                     recordId:  row.UID
                                 });
                                 if (result && result.ok) {
-                                    if (self.table && typeof self.table.refresh === 'function') self.table.refresh();
+                                    // Список обновится сам через SSE (deleteRecord шлёт
+                                    // notifyTableChange). Явный refresh здесь убран — иначе
+                                    // список перерисовывался дважды (мелькание).
                                 } else {
                                     if (typeof showAlert === 'function') showAlert(__t('Delete error: ') + ((result && result.error) || __t('unknown error')));
                                 }
@@ -3248,6 +3249,13 @@ class DataForm extends Form {
                 }
             }
         } catch (e) {}
+
+        // Каскад окон — ПОСЛЕДНИЙ шаг позиционирования. Базовый Form.Draw уже зовёт
+        // _resolveOverlap, но ДО применения windowState: режим записи центрируется здесь,
+        // ПОСЛЕ него, поэтому каскад повторяем — иначе несколько форм, попавших в одну точку
+        // (центр экрана), легли бы стопкой. Развёрнутое (maximized) окно — на весь экран,
+        // каскад не нужен.
+        try { if (!this.isMaximized) Form._resolveOverlap(this); } catch (e) {}
 
         // Show form now that layout is ready and window state applied
         try { if (this.element) this.element.style.visibility = 'visible'; } catch (e) {}

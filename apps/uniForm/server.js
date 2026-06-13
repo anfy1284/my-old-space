@@ -1208,11 +1208,11 @@ async function generateFormSpec(tableName, params, sessionID) {
             resolvedCaption = resolvedCaption + ' ' + presentation;
         }
 
-        // Авто-генерируемая форма записи (без кастомного лейаута и без явного windowState)
-        // открывается по центру экрана с подгонкой размера под контент — это делает
-        // DataForm.Draw по windowState:'centered'.
-        let finalWindowState = windowState;
-        if (!finalWindowState && !customLayoutObj) finalWindowState = 'centered';
+        // Форма записи без явного windowState открывается по центру экрана с подгонкой
+        // размера под контент (DataForm.Draw, windowState:'centered'). Касается и авто-форм,
+        // и кастомных лейаутов, не задавших windowState — иначе при отсутствии хардкода
+        // размера/позиции окно оказалось бы 0×0 в углу.
+        let finalWindowState = windowState || 'centered';
 
         // Translate all { i18n: 'key' } objects in layout before sending to client
         if (Array.isArray(layout)) {
@@ -1303,9 +1303,12 @@ async function quickSearch({ tableName, searchText, limit, displayField: request
 // табличных частей, у которых parentTable = удаляемая таблица, где parentField ∈ parentIds.
 // Учитывает межсекционные FK (booking_room_services.bookingRoomId → booking_rooms): таблицы,
 // ссылающиеся на «соседей», удаляются ПЕРВЫМИ. Рекурсивно спускается в более глубокие ТЧ.
-async function cascadeDeleteChildren(tableName, parentIds, sessionID, visited) {
+// ВСЁ выполняется в ОДНОЙ транзакции (ctx.transaction): если хоть одно удаление (или сам
+// родитель) упадёт — откатывается весь каскад, осиротевших строк не остаётся. Ошибки НЕ
+// глушатся — пробрасываются вверх, чтобы deleteRecord сделал rollback. SSE-уведомления шлёт
+// deleteRecord ПОСЛЕ commit (ctx.affected — список затронутых таблиц).
+async function cascadeDeleteChildren(tableName, parentIds, sessionID, ctx) {
     if (!Array.isArray(parentIds) || parentIds.length === 0) return;
-    visited = visited || new Set();
 
     let allModels = [];
     try {
@@ -1330,34 +1333,32 @@ async function cascadeDeleteChildren(tableName, parentIds, sessionID, visited) {
     childDefs.sort((a, b) => (hasSiblingFKDeps(b.tableName) ? 1 : 0) - (hasSiblingFKDeps(a.tableName) ? 1 : 0));
 
     const cdGW = require('../../drive_root/dbGateway');
+    const t = ctx.transaction;
     for (const cd of childDefs) {
         const childTable = cd.tableName;
         const pf = cd.tabularSection.parentField;
         const key = childTable + '::' + pf;
-        if (visited.has(key)) continue;
-        visited.add(key);
+        if (ctx.visited.has(key)) continue;
+        ctx.visited.add(key);
 
         // UID дочерних строк нужны для рекурсии в более глубокие ТЧ.
         let childIds = [];
         try {
             const rows = await cdGW.execute({
                 operation: 'read', table: childTable, where: { [pf]: parentIds },
-                options: { attributes: ['UID'], raw: true }, context: { appName: 'uniForm', sessionID }
+                options: { attributes: ['UID'], raw: true, transaction: t }, context: { appName: 'uniForm', sessionID }
             });
             childIds = (rows || []).map(r => r.UID).filter(Boolean);
-        } catch (e) { /* нет доступа/строк — пропускаем */ }
+        } catch (e) { /* нет доступа/строк — пропускаем чтение, удаление ниже всё равно отработает */ }
 
-        if (childIds.length) await cascadeDeleteChildren(childTable, childIds, sessionID, visited);
+        if (childIds.length) await cascadeDeleteChildren(childTable, childIds, sessionID, ctx);
 
-        try {
-            await cdGW.execute({
-                operation: 'delete', table: childTable, where: { [pf]: parentIds },
-                context: { appName: 'uniForm', sessionID }
-            });
-            try { dynamicTableMethods.notifyTableChange(childTable, 'delete', null); } catch (e) {}
-        } catch (e) {
-            console.error('[uniForm] cascade delete error for', childTable, ':', e && e.message || e);
-        }
+        // Ошибку НЕ глушим — пусть всплывёт в deleteRecord для rollback всей транзакции.
+        await cdGW.execute({
+            operation: 'delete', table: childTable, where: { [pf]: parentIds },
+            options: { transaction: t }, context: { appName: 'uniForm', sessionID }
+        });
+        ctx.affected.add(childTable);
     }
 }
 
@@ -1367,27 +1368,53 @@ async function cascadeDeleteChildren(tableName, parentIds, sessionID, visited) {
 // datasetId (резолв через dataApp.getDataset) и НЕ умеет удалять — запись молча не удалялась.
 // Теперь удаление — отдельная операция через dbGateway (RLS соблюдается).
 async function deleteRecord(params, sessionID) {
+    const tableName = params && (params.tableName || params.table || params.dbTable);
+    const recordId  = params && (params.recordId || params.recordID || params.id);
+    if (!tableName) return { ok: false, error: await tForSession('no_table_context', sessionID) };
+    if (!recordId)  return { ok: false, error: await tForSession('missing_recordId', sessionID) };
+
+    const modelName = globalServerContext.getModelNameForTable(tableName) || tableName;
+    const Model = globalServerContext.modelsDB[modelName];
+    if (!Model) return { ok: false, error: 'Model not found for table: ' + tableName + ' (model: ' + modelName + ')' };
+
+    const delDbGW = require('../../drive_root/dbGateway');
+
+    // Весь каскад + удаление родителя — в ОДНОЙ транзакции: всё или ничего. Если родитель
+    // упрётся в RESTRICT (на него ссылаются чужие записи), уже удалённые дети откатятся.
+    const t = await Model.sequelize.transaction();
+    const affected = new Set();
     try {
-        const tableName = params && (params.tableName || params.table || params.dbTable);
-        const recordId  = params && (params.recordId || params.recordID || params.id);
-        if (!tableName) return { ok: false, error: await tForSession('no_table_context', sessionID) };
-        if (!recordId)  return { ok: false, error: await tForSession('missing_recordId', sessionID) };
-
-        const modelName = globalServerContext.getModelNameForTable(tableName) || tableName;
-        const Model = globalServerContext.modelsDB[modelName];
-        if (!Model) return { ok: false, error: 'Model not found for table: ' + tableName + ' (model: ' + modelName + ')' };
-
-        const delDbGW = require('../../drive_root/dbGateway');
-        // Каскад: сначала дочерние строки (табличные части), потом сама запись — иначе FK.
-        await cascadeDeleteChildren(tableName, [recordId], sessionID);
-        await delDbGW.execute({ operation: 'delete', table: tableName, where: { UID: recordId }, context: { appName: 'uniForm', sessionID } });
-        // Обновляем подписанные формы списка/выбора через SSE.
-        try { dynamicTableMethods.notifyTableChange(tableName, 'delete', recordId); } catch (e) {}
-        return { ok: true, recordId };
+        await cascadeDeleteChildren(tableName, [recordId], sessionID, { visited: new Set(), affected, transaction: t });
+        await delDbGW.execute({ operation: 'delete', table: tableName, where: { UID: recordId }, options: { transaction: t }, context: { appName: 'uniForm', sessionID } });
+        affected.add(tableName);
+        await t.commit();
     } catch (e) {
+        try { await t.rollback(); } catch (_) {}
         console.error('[uniForm] deleteRecord error:', e);
+        // FK RESTRICT: на запись ссылаются ДРУГИЕ записи (не её ТЧ — те владеет каскад), напр.
+        // удаляемый клиент используется в бронях (bookings.clientId → clients). Это не баг,
+        // а защита целостности — показываем понятное сообщение вместо сырого SQL-текста.
+        if (isForeignKeyError(e)) {
+            return { ok: false, error: await tForSession('delete_fk_restricted', sessionID) };
+        }
         return { ok: false, error: String(e) };
     }
+
+    // Уведомляем формы списка/выбора ПОСЛЕ commit — иначе refresh прочитал бы ещё не
+    // зафиксированные изменения. Шлём по всем затронутым таблицам (родитель + дети).
+    for (const tbl of affected) {
+        try { dynamicTableMethods.notifyTableChange(tbl, 'delete', null); } catch (e) {}
+    }
+    return { ok: true, recordId };
+}
+
+// Распознаёт нарушение внешнего ключа (PostgreSQL code 23503) сквозь обёртки Sequelize.
+function isForeignKeyError(e) {
+    if (!e) return false;
+    if (e.name === 'SequelizeForeignKeyConstraintError') return true;
+    const code = (e.original && e.original.code) || (e.parent && e.parent.code) || e.code;
+    if (code === '23503') return true;
+    return /foreign key|RESTRICT|23503|внешн|ограничени/i.test(String(e.message || e));
 }
 
 // ── getMultiInstanceTables ──────────────────────────────────────────────────────────────────

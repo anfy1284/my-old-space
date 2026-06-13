@@ -20,10 +20,10 @@ try {
 
             const appForm = new DataForm(APP_NAME);
             appForm.setTitle(APP_NAME);
-            appForm.setWidth(800);
-            appForm.setHeight(600);
-            appForm.setX(100);
-            appForm.setY(100);
+            // Ни размер, ни позицию НЕ хардкодим: режим записи центрируется и подгоняется под
+            // контент (windowState:'centered' → setSizeToContent в DataForm.Draw), режим списка
+            // разворачивается (windowState:'maximized'). Финальный шаг позиционирования —
+            // каскад окон (Form._resolveOverlap) в DataForm.Draw.
 
             // ── getCurrentRow: нужна для режима списка (selectMode / FK-пикер) ──────────────
             appForm.getCurrentRow = function() {

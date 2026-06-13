@@ -23,6 +23,12 @@
         "de": "Kein Datensatz zum Löschen angegeben",
         "pl": "Nie wskazano rekordu do usunięcia"
     },
+    "delete_fk_restricted": {
+        "en": "Cannot delete: this record is used by other records.",
+        "ru": "Невозможно удалить: запись используется в других записях.",
+        "de": "Löschen nicht möglich: Der Datensatz wird von anderen Datensätzen verwendet.",
+        "pl": "Nie można usunąć: rekord jest używany przez inne rekordy."
+    },
     "no_table_context": {
         "en": "No table context found in dataset",
         "ru": "Контекст таблицы не найден в наборе данных",
