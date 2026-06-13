@@ -43,6 +43,9 @@ module.exports = async function (modelsDB) {
             layout,
             clientScript: clientUID,
             formIcon:  '/apps/general_icons/resources/public/16x16/settings.png',
+            // Заголовок окна (иначе остаётся родовой «uniForm» — форма открывается через
+            // onLoadData, где appCaption берётся только из saveLayout). Зеркало organizationSettings.
+            appCaption: { i18n: 'user_settings_app_caption' },
             events: {
                 onLoadData: { serverScript: serverScriptName, fn: 'onLoadData' },
                 onSave:     { serverScript: serverScriptName, fn: 'onSave' }

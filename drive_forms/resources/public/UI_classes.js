@@ -1762,40 +1762,72 @@ class Form extends UIObject {
 
         if (!this.element || !this.contentArea) return;
 
-        // Temporarily unset width AND height so the content collapses to its intrinsic size
-        // before measuring. Critical for height: if the form was pre-sized tall (e.g. uniForm
-        // opens record forms at 600px before Draw), contentArea.scrollHeight would otherwise
-        // report the inflated container height, not the real content height — and the window
-        // would never shrink. Resetting the form element height too prevents a flex/explicit
-        // height from clamping the contentArea during measurement.
-        const prevWidth   = this.contentArea.style.width  || '';
-        const prevCHeight = this.contentArea.style.height || '';
+        // Верхние границы — чтобы контент с длинным неразрывным текстом / широкая таблица
+        // не растянули окно за пределы экрана.
+        const maxWidth = (typeof options.maxWidth === 'number') ? options.maxWidth
+            : ((typeof window !== 'undefined' ? window.innerWidth : 1200) - 40);
+        const maxHeight = (typeof options.maxHeight === 'number') ? options.maxHeight
+            : ((typeof window !== 'undefined' ? window.innerHeight : 800) - Form.topOffset - Form.bottomOffset - 8);
+
+        const titleH = this.titleBar ? this.titleBar.offsetHeight || 0 : 0;
+
+        // Сохраняем inline-стили для восстановления (мы временно меняем и width, и height).
+        const prevEWidth  = this.element.style.width      || '';
         const prevEHeight = this.element.style.height     || '';
+        const prevCWidth  = this.contentArea.style.width  || '';
+        const prevCHeight = this.contentArea.style.height || '';
+
+        // ── Фаза 1: ИНТРИНСИК-ширина контента ───────────────────────────────────────────────
+        // Окно открывается с width:0 (размер не хардкодим). При замере в нём aligned-grid
+        // колонка полей (1fr) схлопывается в 0, и интринсик-ширина полей (напр. cols у textarea)
+        // не учитывается — ширина всегда упиралась в minWidth. Даём элементу и contentArea
+        // shrink-to-fit (max-content), а у textarea временно убираем width:100%, чтобы их
+        // cols-ширина попала в замер. Высоту ЗДЕСЬ не меряем: она зависит от итоговой ширины
+        // (перенос строк) — меряем во второй фазе.
+        const taRestore = [];
         try {
             this.element.style.height     = 'auto';
-            this.contentArea.style.width  = 'auto';
+            this.element.style.width      = 'max-content';
+            this.contentArea.style.height = 'auto';
+            this.contentArea.style.width  = 'max-content';
+            const tas = this.contentArea.querySelectorAll ? this.contentArea.querySelectorAll('textarea') : [];
+            for (const ta of tas) { taRestore.push([ta, ta.style.width]); ta.style.width = 'auto'; }
+        } catch (e) {
+            // ignore
+        }
+
+        const contentWidth = Math.max(this.contentArea.scrollWidth || 0, this.contentArea.clientWidth || 0);
+        let targetWidth = Math.max(minWidth, Math.ceil(contentWidth + padW));
+        if (targetWidth > maxWidth) targetWidth = maxWidth;
+
+        // Возвращаем textarea их width:100% — высоту меряем при штатной ширине полей.
+        try { for (const tr of taRestore) tr[0].style.width = tr[1] || '100%'; } catch (e) {}
+
+        // ── Фаза 2: высота контента при ИТОГОВОЙ ширине ─────────────────────────────────────
+        // Фиксируем ширину на targetWidth, contentArea — на 100% (как в обычной отрисовке),
+        // высоту — auto. Тогда перенос строк соответствует финальному виду окна, и под
+        // контентом не остаётся пустоты (высота больше не меряется при 0px-ширине).
+        try {
+            this.element.style.width      = targetWidth + 'px';
+            this.contentArea.style.width  = '100%';
             this.contentArea.style.height = 'auto';
         } catch (e) {
             // ignore
         }
 
-        // Measure content size (now at intrinsic dimensions)
-        const contentWidth  = Math.max(this.contentArea.scrollWidth  || 0, this.contentArea.clientWidth  || 0);
         const contentHeight = Math.max(this.contentArea.scrollHeight || 0, this.contentArea.offsetHeight || 0);
+        let targetHeight = Math.max(minHeight, Math.ceil(titleH + contentHeight + padH));
+        if (targetHeight > maxHeight) targetHeight = maxHeight;
 
-        // Restore previous styles (final size is applied below via setWidth/setHeight)
+        // Восстанавливаем исходные inline-стили перед штатным применением размеров ниже.
         try {
-            this.contentArea.style.width  = prevWidth;
-            this.contentArea.style.height = prevCHeight;
+            this.element.style.width      = prevEWidth;
             this.element.style.height     = prevEHeight;
+            this.contentArea.style.width  = prevCWidth;
+            this.contentArea.style.height = prevCHeight;
         } catch (e) {
             // ignore
         }
-
-        const titleH = this.titleBar ? this.titleBar.offsetHeight || 0 : 0;
-
-        const targetWidth = Math.max(minWidth, Math.ceil(contentWidth + padW));
-        const targetHeight = Math.max(minHeight, Math.ceil(titleH + contentHeight + padH));
 
         this.setWidth(targetWidth);
         this.setHeight(targetHeight);
@@ -2278,6 +2310,7 @@ class DataForm extends Form {
             } catch (e) {}
             
             try { if (typeof item.rows === 'number' && typeof ctrl.setRows === 'function') ctrl.setRows(item.rows); else if (properties && properties.rows && typeof ctrl.setRows === 'function') ctrl.setRows(properties.rows); } catch (e) {}
+            try { if (typeof item.cols === 'number' && typeof ctrl.setCols === 'function') ctrl.setCols(item.cols); else if (properties && properties.cols && typeof ctrl.setCols === 'function') ctrl.setCols(properties.cols); } catch (e) {}
             try { if (typeof ctrl.setCaption === 'function') ctrl.setCaption(caption); } catch (e) {}
             ctrl.Draw(contentArea);
             try { if (item.data && ctrl.element) { ctrl.element.dataset.field = item.data; } } catch (e) {}
@@ -3245,7 +3278,7 @@ class DataForm extends Form {
                 // anchor is already present).
                 this.setAnchorToWindow('center');
                 if (typeof this.setSizeToContent === 'function') {
-                    this.setSizeToContent({ minWidth: 420, padH: 12 });
+                    this.setSizeToContent({ minWidth: 420, padH: 6 });
                 }
             }
         } catch (e) {}
@@ -5781,6 +5814,10 @@ class MultilineTextBox extends FormInput {
         if (typeof this.placeholder === 'undefined' || this.placeholder === null) this.placeholder = '';
         if (typeof this.readOnly === 'undefined' || this.readOnly === null) this.readOnly = false;
         this.rows = (typeof this.rows === 'number' && this.rows > 0) ? (this.rows | 0) : (properties.rows ? (properties.rows | 0) : 4);
+        // cols задаёт ИНТРИНСИК-ширину textarea — её использует setSizeToContent при замере
+        // (форма с многострочным полем становится шире). При рендере ширину перебивает
+        // width:100%, так что в обычных формах cols влияет только на авторазмер.
+        this.cols = (typeof this.cols === 'number' && this.cols > 0) ? (this.cols | 0) : (properties.cols ? (properties.cols | 0) : 50);
         this.wrap = this.wrap || properties.wrap || 'soft'; // soft|hard|off
         this.maxLength = (typeof this.maxLength === 'number') ? (this.maxLength | 0) : (properties.maxLength ? (properties.maxLength | 0) : 0);
         this.containerElement = null;
@@ -5810,6 +5847,11 @@ class MultilineTextBox extends FormInput {
         if (this.element) this.element.rows = this.rows;
     }
 
+    setCols(cols) {
+        this.cols = (typeof cols === 'number' && cols > 0) ? (cols | 0) : this.cols;
+        if (this.element) this.element.cols = this.cols;
+    }
+
     setMaxLength(maxLength) {
         this.maxLength = (typeof maxLength === 'number') ? (maxLength | 0) : (maxLength ? parseInt(maxLength, 10) : 0);
         if (this.element) {
@@ -5828,11 +5870,14 @@ class MultilineTextBox extends FormInput {
             this.element.placeholder = this.placeholder;
             this.element.readOnly = this.readOnly;
             this.element.rows = this.rows;
+            this.element.cols = this.cols;
             try { this.element.wrap = this.wrap; } catch (_) {}
 
-            // Flex layout participation
+            // Высота детерминирована числом строк (rows), не растягивается — иначе при замере
+            // авторазмера высота «гуляет», и под полем остаётся пустое место. Ширина — 100%
+            // контейнера (cols задаёт лишь интринсик-ширину для setSizeToContent).
             this.element.style.position = this.element.style.position || 'relative';
-            this.element.style.flex = '1 1 auto';
+            this.element.style.flex = '0 0 auto';
             this.element.style.width = '100%';
             this.element.style.boxSizing = 'border-box';
 
@@ -8088,7 +8133,91 @@ class Table extends UIObject {
         headerTable.appendChild(thead);
         headerContainer.appendChild(headerTable);
 
+        // Сохраняем ссылки для пост-рендерной синхронизации ширин заголовка и тела
+        // (_syncColumnWidthsToHeader) — заголовок и тело это ДВЕ отдельные <table>, и при
+        // ре-рендере их распределение ширин (table-layout:fixed, width:100%) расходится.
+        this._dtHcolgroup = hcolgroup;
+        this._dtHeaderTable = headerTable;
+        this._dtHtr = htr;
+
         return { headerTable: headerTable, hcolgroup: hcolgroup };
+    }
+
+    // Замораживает колонки заголовка И тела на ФАКТИЧЕСКИ отрисованных ширинах ячеек заголовка.
+    // Заголовок и тело — две отдельные таблицы (width:100%, table-layout:fixed); при равных
+    // colgroup-подсказках, но из-за округления/распределения свободного места их колонки
+    // расходятся (видно после refresh как сдвиг границ). Делаем оба colgroup побайтно
+    // одинаковыми в пикселях — выравнивание гарантировано. Это ровно то, что делает
+    // обработчик ресайза колонки мышью (потому ресайз и «чинит» картину).
+    _syncColumnWidthsToHeader() {
+        try {
+            const hcg = this._dtHcolgroup;
+            const bcg = this._dtBcolgroup;
+            const htr = this._dtHtr;
+            if (!hcg || !bcg || !htr) return;
+            const hTable = this._dtHeaderTable;
+            const bTable = this._mainTable;
+            // Сначала выставляем резерв под скроллбар (padding заголовка) — иначе замерим
+            // ширину заголовка без учёта скроллбара и тело окажется шире на его ширину.
+            try { if (typeof this._adjustHeaderForScrollbar === 'function') this._adjustHeaderForScrollbar(); } catch (e) {}
+            const ths = htr.children;
+            const n = Math.min(ths.length, hcg.children.length, bcg.children.length);
+            if (n === 0) return;
+
+            // Замеряем ФАКТИЧЕСКИ распределённые ширины ячеек заголовка (width:100% +
+            // table-layout:fixed уже разложил свободное место по колонкам).
+            const widths = [];
+            let sum = 0;
+            for (let k = 0; k < n; k++) {
+                const w = (ths[k] && ths[k].offsetWidth > 0) ? ths[k].offsetWidth : 0;
+                widths[k] = w;
+                sum += w;
+            }
+            if (sum <= 0) return;
+
+            // Подгоняем суммарную ширину под доступную ширину тела: правим последнюю колонку
+            // на разницу (обычно ±1px из-за «-1» в резерве скроллбара). Так нет ни щели, ни
+            // 1px-переполнения (которое дало бы лишний горизонтальный скроллбар). Если колонки
+            // шире контейнера (горизонтальный скролл) — не трогаем, иначе уломали бы посл. кол.
+            const avail = (this.bodyContainer && this.bodyContainer.clientWidth) || 0;
+            if (avail > 0 && sum > avail && (widths[n - 1] + (avail - sum)) >= 30) {
+                widths[n - 1] += (avail - sum);
+                sum = avail;
+            }
+
+            // Замораживаем ОБА colgroup побайтно одинаково и ОБЕ таблицы на одной явной ширине —
+            // ни одна не перераспределяет место, выравнивание заголовка и тела гарантировано.
+            for (let k = 0; k < n; k++) {
+                const px = widths[k] + 'px';
+                if (hcg.children[k]) hcg.children[k].style.width = px;
+                if (bcg.children[k]) bcg.children[k].style.width = px;
+            }
+            const tw = sum + 'px';
+            if (hTable) hTable.style.width = tw;
+            if (bTable) bTable.style.width = tw;
+        } catch (e) {}
+    }
+
+    // Перераспределить колонки под ТЕКУЩУЮ ширину контейнера и снова заморозить.
+    // _syncColumnWidthsToHeader замораживает колонки в пикселях по ширине, которая была
+    // на момент ПЕРВОЙ загрузки. Если окно списка разворачивается (maximize) уже ПОСЛЕ
+    // этого, контейнер становится шире, но замороженные px остаются узкими — столбцы не
+    // тянутся на всю форму (до ручного refresh, после которого замер шёл по широкому
+    // контейнеру). Снимаем заморозку (width:100% + table-layout:fixed раскладывает место
+    // пропорционально текущим px-подсказкам колонок → заполняет новую ширину) и фиксируем
+    // заново. Относительные пропорции (в т.ч. ручной ресайз) сохраняются. Зовётся из
+    // ResizeObserver при изменении ширины контейнера тела.
+    _resyncColumnWidthsToContainer() {
+        try {
+            const hTable = this._dtHeaderTable;
+            const bTable = this._mainTable;
+            if (!this._dtHcolgroup || !this._dtBcolgroup) return;
+            if (hTable) hTable.style.width = '100%';
+            if (bTable) bTable.style.width = '100%';
+            // Принудительный reflow перед повторным замером фактически распределённых ширин.
+            if (hTable) void hTable.offsetWidth;
+            this._syncColumnWidthsToHeader();
+        } catch (e) {}
     }
 
     // ===================== FILTER API =====================
@@ -9190,6 +9319,9 @@ class Table extends UIObject {
                     }
                 } catch (e) {}
             };
+            // Доступно методам ре-рендера (_syncColumnWidthsToHeader зовёт его ПЕРЕД замером
+            // ширин, чтобы учесть резерв под вертикальный скроллбар).
+            this._adjustHeaderForScrollbar = adjustHeaderForScrollbar;
 
             bodyContainer.addEventListener('scroll', () => {
                 headerContainer.scrollLeft = bodyContainer.scrollLeft;
@@ -9506,6 +9638,16 @@ class DynamicTable extends Table {
                         if (self.dataLoaded && !self.isLoading) {
                             // _onScroll reads current scrollTop — correct for any resize direction
                             self._onScroll();
+                        }
+                        // Изменилась ШИРИНА контейнера (напр. окно списка развернулось ПОСЛЕ
+                        // первичной загрузки, когда колонки уже заморожены под узкую ширину) —
+                        // пере-распределяем колонки под новую ширину, иначе они остаются узкими
+                        // до ручного refresh. Сравниваем с запомненной шириной, чтобы не
+                        // зациклиться: сам ресинк меняет ширину ТАБЛИЦ, а не контейнера.
+                        const w = (self.bodyContainer && self.bodyContainer.clientWidth) || 0;
+                        if (w > 0 && Math.abs(w - (self._lastSyncWidth || 0)) > 1) {
+                            self._lastSyncWidth = w;
+                            if (self.dataLoaded && self._dtHcolgroup) self._resyncColumnWidthsToContainer();
                         }
                     } catch (e) {}
                 });
@@ -10096,6 +10238,12 @@ class DynamicTable extends Table {
                     this._allocateRows();
                     // Fill visible rows from the freshly populated dataCache
                     this._fillVisibleRows();
+                    // Выравниваем ширины заголовка и тела СИНХРОННО (до отрисовки кадра):
+                    // чтение offsetWidth форсирует reflow, поэтому замер ширин уже корректен,
+                    // а заморозка обоих colgroup в пикселях происходит в этом же тике — кадр
+                    // рисуется сразу выровненным, без мелькания «съехавших» границ. Без этого
+                    // столбцы заголовка и тела расходились после refresh (до ручного ресайза).
+                    try { this._syncColumnWidthsToHeader(); } catch (e) {}
                 }
             } catch (e) { console.error('[DynamicTable] rebuild after loadData failed', e); }
 

@@ -838,7 +838,16 @@ async function generateFormSpec(tableName, params, sessionID) {
                         id: params && (params.recordID || params.recordId || params.id)
                     });
                     const fkLookups = await buildFkLookups(layout, sessionID);
-                    return { layout, data, datasetId, clientScript, formIcon, appCaption: await resolveAppCaption(appCaption, sessionID), windowState, fkLookups };
+                    // Без явного windowState центрируем и подгоняем размер под контент — как и
+                    // основная ветка generateFormSpec. Иначе форма (напр. настройки организации/
+                    // пользователя на onLoadData) осталась бы 0×0 в углу: хардкод размера в
+                    // uniForm/client.js убран.
+                    // Фолбэк заголовка — как в режиме списка и в модельной ветке: если у
+                    // кастомного лейаута нет appCaption, переводим по ключу = имя таблицы
+                    // (tForSession вернёт само имя при отсутствии перевода). Заголовок никогда
+                    // не должен остаться родовым «uniForm» (форма через onLoadData).
+                    const resolvedOnLoadCaption = (await resolveAppCaption(appCaption, sessionID)) || await tForSession(tableName, sessionID);
+                    return { layout, data, datasetId, clientScript, formIcon, appCaption: resolvedOnLoadCaption, windowState: windowState || 'centered', fkLookups };
                 }
             } catch (e) {
                 console.error('[uniForm/generateFormSpec] onLoadData dispatch error:', e && e.message || e);
