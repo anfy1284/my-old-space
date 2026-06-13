@@ -1490,20 +1490,25 @@ class Form extends UIObject {
             window.dispatchEvent(new CustomEvent('form-destroyed', { detail: { form: this } }));
         }
 
-        // Activate next top form
+        // Activate next top form below in z-order
+        Form.activateTopVisibleForm();
+    }
+
+    // Find the top-most visible (non-minimized) form by z-index and activate it.
+    // Used when the current top form is closed or minimized, so the next form
+    // below it in z-order becomes active (and its taskbar button presses in).
+    static activateTopVisibleForm() {
         let topForm = null;
-        let maxZ = -1;
+        let maxZ = -Infinity;
         Form._allForms.forEach(form => {
-            // Only consider visible forms
+            // Only consider visible (non-minimized) forms
             if (form.element && form.element.style.display !== 'none' && form.z > maxZ) {
                 maxZ = form.z;
                 topForm = form;
             }
         });
-
-        if (topForm) {
-            topForm.activate();
-        }
+        if (topForm) topForm.activate();
+        return topForm;
     }
 
     minimize() {
@@ -1526,6 +1531,10 @@ class Form extends UIObject {
         if (typeof window !== 'undefined') {
             window.dispatchEvent(new CustomEvent('form-minimized', { detail: { form: this } }));
         }
+
+        // After hiding, hand focus to the next form below in z-order so it
+        // activates and its taskbar button presses in.
+        Form.activateTopVisibleForm();
     }
 
     restore() {
