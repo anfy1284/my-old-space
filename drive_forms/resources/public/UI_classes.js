@@ -1777,21 +1777,19 @@ class Form extends UIObject {
         const prevCWidth  = this.contentArea.style.width  || '';
         const prevCHeight = this.contentArea.style.height || '';
 
-        // ── Фаза 1: ИНТРИНСИК-ширина контента ───────────────────────────────────────────────
-        // Окно открывается с width:0 (размер не хардкодим). При замере в нём aligned-grid
-        // колонка полей (1fr) схлопывается в 0, и интринсик-ширина полей (напр. cols у textarea)
-        // не учитывается — ширина всегда упиралась в minWidth. Даём элементу и contentArea
-        // shrink-to-fit (max-content), а у textarea временно убираем width:100%, чтобы их
-        // cols-ширина попала в замер. Высоту ЗДЕСЬ не меряем: она зависит от итоговой ширины
-        // (перенос строк) — меряем во второй фазе.
-        const taRestore = [];
+        // ── Фаза 1: ширина контента ─────────────────────────────────────────────────────────
+        // Меряем при «схлопнутых» размерах: contentArea width:auto, высота элемента auto. Окно
+        // открывается с width:0 — contentArea переполняется контентом, и scrollWidth отдаёт его
+        // интринсик-ширину. Полям, которым нужно больше места (textarea), ширину задаёт их
+        // собственный min-width (см. MultilineTextBox) — grid-колонка 1fr растягивается под него
+        // по min-content. НЕ переводим контейнер в max-content: иначе таблицы (ТЧ) сообщают свою
+        // огромную интринсик-ширину и раздувают форму на весь экран (форма «Настройки
+        // пользователя» с таблицей автозаполнения). Высоту ЗДЕСЬ не меряем — она зависит от
+        // итоговой ширины (перенос строк), меряем во второй фазе.
         try {
             this.element.style.height     = 'auto';
-            this.element.style.width      = 'max-content';
+            this.contentArea.style.width  = 'auto';
             this.contentArea.style.height = 'auto';
-            this.contentArea.style.width  = 'max-content';
-            const tas = this.contentArea.querySelectorAll ? this.contentArea.querySelectorAll('textarea') : [];
-            for (const ta of tas) { taRestore.push([ta, ta.style.width]); ta.style.width = 'auto'; }
         } catch (e) {
             // ignore
         }
@@ -1799,9 +1797,6 @@ class Form extends UIObject {
         const contentWidth = Math.max(this.contentArea.scrollWidth || 0, this.contentArea.clientWidth || 0);
         let targetWidth = Math.max(minWidth, Math.ceil(contentWidth + padW));
         if (targetWidth > maxWidth) targetWidth = maxWidth;
-
-        // Возвращаем textarea их width:100% — высоту меряем при штатной ширине полей.
-        try { for (const tr of taRestore) tr[0].style.width = tr[1] || '100%'; } catch (e) {}
 
         // ── Фаза 2: высота контента при ИТОГОВОЙ ширине ─────────────────────────────────────
         // Фиксируем ширину на targetWidth, contentArea — на 100% (как в обычной отрисовке),
@@ -5875,10 +5870,15 @@ class MultilineTextBox extends FormInput {
 
             // Высота детерминирована числом строк (rows), не растягивается — иначе при замере
             // авторазмера высота «гуляет», и под полем остаётся пустое место. Ширина — 100%
-            // контейнера (cols задаёт лишь интринсик-ширину для setSizeToContent).
+            // контейнера, но min-width задаёт «желаемую» ширину по cols: в авторазмерных формах
+            // (setSizeToContent) grid-колонка 1fr растягивается под этот min-width по min-content,
+            // и форма становится шире под многострочное поле; в широкой форме width:100% всё равно
+            // перебивает (поле тянется на весь столбец). Так cols влияет на ширину без max-content
+            // контейнера — не раздувая формы с таблицами (ТЧ).
             this.element.style.position = this.element.style.position || 'relative';
             this.element.style.flex = '0 0 auto';
             this.element.style.width = '100%';
+            try { this.element.style.minWidth = this.cols + 'ch'; } catch (_) {}
             this.element.style.boxSizing = 'border-box';
 
             // Append into container
