@@ -2225,11 +2225,18 @@ class DataForm extends Form {
         const formSelf = this;
         this._defaultBtnHandler = (ev) => {
             try {
-                if (ev.key !== 'Enter' || ev.shiftKey || ev.ctrlKey || ev.altKey || ev.metaKey) return;
+                if (ev.key !== 'Enter') return;
+                // Кнопку по умолчанию вызывает либо чистый Enter (без модификаторов),
+                // либо Ctrl+Enter. Прочие сочетания (Shift/Alt/Meta) игнорируем.
+                const plain     = !ev.shiftKey && !ev.ctrlKey && !ev.altKey && !ev.metaKey;
+                const ctrlEnter =  ev.ctrlKey  && !ev.shiftKey && !ev.altKey && !ev.metaKey;
+                if (!plain && !ctrlEnter) return;
                 const btn = formSelf._defaultButton;
                 if (!btn || !btn.element || btn.element.disabled) return;
                 const tgt = ev.target;
-                if (tgt && tgt.tagName && tgt.tagName.toLowerCase() === 'textarea') return;
+                // В textarea обычный Enter — это перевод строки; кнопку по умолчанию там
+                // вызывает только Ctrl+Enter.
+                if (tgt && tgt.tagName && tgt.tagName.toLowerCase() === 'textarea' && !ctrlEnter) return;
                 ev.preventDefault();
                 try { btn.element.click(); } catch (_) {}
             } catch (_) {}
@@ -4390,6 +4397,21 @@ class TextBox extends FormInput {
                                     this._listKeyHandler = (ev) => {
                                         try {
                                             const k = ev.key;
+                                            const isHandled = (k === 'ArrowDown' || k === 'ArrowUp' || k === 'Enter' || k === ' ' || k === 'Escape');
+                                            if (!isHandled) return;
+                                            // Пока выпадашка открыта — клавиша полностью наша: гасим распространение,
+                                            // чтобы её НЕ перехватили обработчики таблицы (отмена правки ячейки по Esc,
+                                            // навигация по строкам) или формы. Иначе в ячейке ТЧ Esc доходил до
+                                            // таблицы и список не закрывался (на форме работало). Симметрично _qsKeyCapture.
+                                            ev.stopPropagation();
+                                            if (typeof ev.stopImmediatePropagation === 'function') ev.stopImmediatePropagation();
+
+                                            if (k === 'Escape') {
+                                                ev.preventDefault();
+                                                try { this._closeList && this._closeList(); } catch(_){}
+                                                return;
+                                            }
+
                                             const rows = Array.from(popup.children || []);
                                             if (!rows.length) return;
                                             const active = document.activeElement;
@@ -4419,9 +4441,6 @@ class TextBox extends FormInput {
                                             } else if (k === 'Enter' || k === ' ') {
                                                 ev.preventDefault();
                                                 try { if (active && popup.contains(active)) active.click(); } catch(_){}
-                                            } else if (k === 'Escape') {
-                                                ev.preventDefault();
-                                                try { this._closeList && this._closeList(); } catch(_){}
                                             }
                                         } catch (_) {}
                                     };
