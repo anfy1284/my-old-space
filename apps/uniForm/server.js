@@ -244,7 +244,7 @@ async function getLayoutWithData(params, sessionID) {
                     });
                     const spec = await generateFormSpec(resolvedParams.tableName, resolvedParams, sessionID);
                     return { layout: spec.layout, data: spec.data, datasetId: spec.datasetId,
-                             clientScript: spec.clientScript || null, formIcon: spec.formIcon || null, appCaption: spec.appCaption || null, windowState: spec.windowState || null, fkLookups: spec.fkLookups || null };
+                             clientScript: spec.clientScript || null, formIcon: spec.formIcon || null, appCaption: spec.appCaption || null, windowState: spec.windowState || null, fkLookups: spec.fkLookups || null, isNew: !!spec.isNew };
                 }
             } catch (e) {
                 console.error('[uniForm/getLayoutWithData] datasetId refresh error:', e && e.message || e);
@@ -261,7 +261,7 @@ async function getLayoutWithData(params, sessionID) {
                     table: params.tableName,
                     id: params.recordID || params.recordId || params.id
                 });
-                return { layout: spec.layout, data: spec.data, datasetId, clientScript: spec.clientScript || null, formIcon: spec.formIcon || null, appCaption: spec.appCaption || null, windowState: spec.windowState || null, fkLookups: spec.fkLookups || null };
+                return { layout: spec.layout, data: spec.data, datasetId, clientScript: spec.clientScript || null, formIcon: spec.formIcon || null, appCaption: spec.appCaption || null, windowState: spec.windowState || null, fkLookups: spec.fkLookups || null, isNew: !!spec.isNew };
             } catch (e) {
                 console.error('[uniForm/getLayoutWithData] generateFormSpec error:', e && e.message || e);
             }
@@ -1228,7 +1228,7 @@ async function generateFormSpec(tableName, params, sessionID) {
             await translateLayoutI18n(layout, sessionID);
         }
 
-        return { data, layout, datasetId, clientScript, formIcon, appCaption: resolvedCaption, windowState: finalWindowState, fkLookups: await fkLookupsPromise };
+        return { data, layout, datasetId, clientScript, formIcon, appCaption: resolvedCaption, windowState: finalWindowState, fkLookups: await fkLookupsPromise, isNew: isNew };
     } catch (e) {
         console.error('[uniForm/generateFormSpec] failed:', e && e.message || e);
         return { data: [], layout: [] };

@@ -2070,6 +2070,7 @@ class DataForm extends Form {
         this._modified = false;
         this._originalTitle = '';
         this._closing = false; // guard against recursive close
+        this._isNew = false; // true для ещё не записанной в БД записи (приходит из formSpec.isNew)
         this._clientScript = null; // UID клиентского скрипта (из saveLayout({ clientScript }))
     }
 
@@ -2998,6 +2999,7 @@ class DataForm extends Form {
             if (both && (Array.isArray(both.layout) || Array.isArray(both.data))) {
                 this.layout = Array.isArray(both.layout) ? both.layout : (both.layout && Array.isArray(both.layout.layout) ? both.layout.layout : []);
                 try { this._datasetId = both.datasetId || null; } catch (e) { this._datasetId = null; }
+                try { this._isNew = !!both.isNew; } catch (e) { this._isNew = false; }
                 try { this._clientScript = both.clientScript || null; } catch (e) {}
                 try { this._windowState = both.windowState || null; } catch (e) {}
                 // Apply app caption (human-readable translated name) and icon
@@ -3125,8 +3127,17 @@ class DataForm extends Form {
                 // Изменений нет — просто закрываем
                 this._closing = true;
                 this.close();
+            } else if (this._isNew) {
+                // Новая запись (ещё не в БД) — подтверждение "Сохранить изменения?" не нужно:
+                // заполнение новой формы и есть намерение сохранить. Просто пишем и закрываем.
+                // Подтверждение оставлено только для правки уже существующих записей (ветка ниже).
+                await this.doAction('save');
+                if (!this._modified) {
+                    this._closing = true;
+                    this.close();
+                }
             } else {
-                // Есть изменения — спрашиваем "Сохранить?"
+                // Есть изменения в существующей записи — спрашиваем "Сохранить?"
                 const self = this;
                 if (typeof showConfirm === 'function') {
                     showConfirm(__t('Data has been modified. Save changes?'), async () => {
@@ -3187,6 +3198,9 @@ class DataForm extends Form {
                         if (freshBoth && freshBoth.appCaption) refreshedCaption = freshBoth.appCaption;
                         if (freshBoth && Array.isArray(freshBoth.data)) {
                             if (freshBoth.datasetId) this._datasetId = freshBoth.datasetId;
+                            // После записи в БД запись перестаёт быть новой — последующее
+                            // закрытие через OK уже спросит подтверждение (как для существующих).
+                            this._isNew = !!freshBoth.isNew;
                             // Собираем имена скалярных полей из свежего ответа
                             const freshScalarNames = new Set();
                             for (const rec of freshBoth.data) {

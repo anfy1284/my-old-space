@@ -250,6 +250,13 @@ try {
                 },
 
                 destroy() {
+                    // Программный teardown инстанса (MySpace.close, авто-закрытие после
+                    // onAfterSave/выбора записи) НЕ должен показывать интерактивное
+                    // подтверждение "Discard unsaved changes?". Выставляем _closing ДО
+                    // appForm.close(), чтобы DataForm.close() сразу ушёл в super.close()
+                    // без вопроса. Пользовательское закрытие крестиком идёт другим путём
+                    // (Form.close через титлбар) и подтверждение там сохраняется.
+                    try { appForm._closing = true; } catch(e) {}
                     try { if (typeof appForm.destroy === 'function') appForm.destroy(); } catch(e) {}
                     try { if (typeof appForm.close === 'function') appForm.close(); } catch(e) {}
                 }
