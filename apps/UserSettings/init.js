@@ -99,6 +99,7 @@ module.exports = async function (modelsDB) {
                 action: 'open',
                 singleton: true,
                 appName: 'uniForm',
+                order: 100, // настройки — в конец списка меню (см. sortByOrder в main_menu/client.js)
                 params: { mode: 'record', dbTable: 'user_settings' }
                 // icon берётся автоматически из layoutMemory (formIcon у user_settings)
             }]

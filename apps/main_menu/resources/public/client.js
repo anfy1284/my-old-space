@@ -205,6 +205,17 @@
         }
     }
 
+    // Стабильная сортировка пунктов по необязательному весу `order` (по умолчанию 0).
+    // Позволяет «утопить» отдельные пункты в конец списка (напр. настройки order:100),
+    // не нарушая порядок остальных. Применяется после client-merge, т.к. пункты id:'main'
+    // собираются из нескольких источников (динамические + конфиги приложений).
+    function sortByOrder(items) {
+        if (!Array.isArray(items)) return items;
+        items.forEach(it => { if (it.items) it.items = sortByOrder(it.items); });
+        items.sort((a, b) => (a.order || 0) - (b.order || 0));
+        return items;
+    }
+
     function getMainMenuCommands() {
         callServerMethod('main_menu', 'getMainMenuCommands', {})
             .then(result => {
@@ -217,6 +228,10 @@
                     } else {
                         mergedCommands[cmd.id].items = mergeItems(mergedCommands[cmd.id].items, cmd.items);
                     }
+                }
+                // Упорядочить пункты по весу (настройки уходят в конец).
+                for (const id in mergedCommands) {
+                    mergedCommands[id].items = sortByOrder(mergedCommands[id].items || []);
                 }
 
                 // Transform to MainMenu buttons

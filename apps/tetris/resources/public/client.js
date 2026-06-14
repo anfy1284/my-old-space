@@ -568,18 +568,21 @@
             game.buildUI = function (content) {
                 this.contentArea = content;
                 content.innerHTML = '';
+                // DataForm.Draw ставит contentArea в flex-column с padding — для игры
+                // переопределяем на block без padding, чтобы контейнер сам обтягивался.
+                content.style.display = 'block';
                 content.style.padding = '0';
                 content.style.overflow = 'hidden'; // размерами управляем сами — без скроллов
 
                 const gameContainer = document.createElement('div');
                 content.appendChild(gameContainer);
                 this.gameContainer = gameContainer;
-                gameContainer.style.display = 'flex';
+                // inline-flex → контейнер сжимается под содержимое, и общий механизм
+                // setSizeToContent корректно обтягивает окно (без пустоты снизу).
+                gameContainer.style.display = 'inline-flex';
                 gameContainer.style.gap = '8px';
                 gameContainer.style.padding = '8px';
                 gameContainer.style.boxSizing = 'border-box';
-                gameContainer.style.width = '100%';
-                gameContainer.style.height = '100%';
                 gameContainer.style.overflow = 'hidden';
                 gameContainer.style.alignItems = 'flex-start';
 
@@ -739,9 +742,13 @@
                     game.buildUI(content);
                     window.addEventListener('form-destroyed', onFormDestroyed);
 
-                    // Дать окну отрисоваться, затем посчитать размеры и стартовать.
+                    // Дать окну отрисоваться, затем посчитать размер клетки, обтянуть
+                    // окно под содержимое общим механизмом и стартовать.
                     setTimeout(() => {
                         game.reDraw();
+                        if (typeof appForm.setSizeToContent === 'function') {
+                            appForm.setSizeToContent({ minWidth: 200, padW: 8, padH: 8 });
+                        }
                         game.newGame();
                     }, 50);
                 },
