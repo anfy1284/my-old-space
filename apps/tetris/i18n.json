@@ -1,0 +1,44 @@
+{
+    "menu_games": {
+        "en": "Games",
+        "ru": "Игры",
+        "de": "Spiele",
+        "pl": "Gry"
+    },
+    "tetris_new_game": {
+        "en": "New Game",
+        "ru": "Новая игра",
+        "de": "Neues Spiel",
+        "pl": "Nowa gra"
+    },
+    "tetris_pause": {
+        "en": "Pause",
+        "ru": "Пауза",
+        "de": "Pause",
+        "pl": "Pauza"
+    },
+    "tetris_resume": {
+        "en": "Resume",
+        "ru": "Продолжить",
+        "de": "Fortsetzen",
+        "pl": "Wznów"
+    },
+    "tetris_score": {
+        "en": "Score",
+        "ru": "Очки",
+        "de": "Punkte",
+        "pl": "Wynik"
+    },
+    "tetris_level": {
+        "en": "Level",
+        "ru": "Уровень",
+        "de": "Level",
+        "pl": "Poziom"
+    },
+    "tetris_game_over": {
+        "en": "GAME OVER",
+        "ru": "ИГРА ОКОНЧЕНА",
+        "de": "SPIEL VORBEI",
+        "pl": "KONIEC GRY"
+    }
+}

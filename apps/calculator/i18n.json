@@ -1,0 +1,20 @@
+{
+    "menu_utilities": {
+        "en": "Utilities",
+        "ru": "Утилиты",
+        "de": "Dienstprogramme",
+        "pl": "Narzędzia"
+    },
+    "menu_calculator": {
+        "en": "Calculator",
+        "ru": "Калькулятор",
+        "de": "Taschenrechner",
+        "pl": "Kalkulator"
+    },
+    "calc_error": {
+        "en": "Error",
+        "ru": "Ошибка",
+        "de": "Fehler",
+        "pl": "Błąd"
+    }
+}

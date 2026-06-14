@@ -1,12 +1,13 @@
 {
     "level": "app",
+    "autoStart": true,
     "system": ["mySpace"],
     "access": ["admin", "public", "user"],
     "dependencies": {},
     "mainMenuCommands": [
         {"id": "main", "items": [
-            { "caption": "apps", "roles": ["admin"], "items": [
-                { "caption": "Tetris", "action": "open"}
+            { "caption": { "i18n": "menu_games" }, "roles": ["admin", "user"], "icon": "/apps/general_icons/resources/public/16x16/games.png", "items": [
+                { "caption": "Tetris", "action": "open", "singleton": true, "icon": "/apps/general_icons/resources/public/16x16/tetris.png" }
             ]}
         ]}
     ]
