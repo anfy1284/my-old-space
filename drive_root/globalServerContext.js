@@ -1377,6 +1377,14 @@ async function getLookupList(options) {
 
     const keyField = 'UID';
 
+    // Порядок строк выпадашки: если у справочника есть числовое поле displayOrder —
+    // сортируем по нему (явный порядок, заданный данными; не зависит от языка, в отличие
+    // от name, который переводится через translations). Иначе — по UID, как раньше.
+    // keyField добавляем вторым ключом для детерминированности при равных displayOrder.
+    const orderClause = attrs.displayOrder
+        ? [['displayOrder', 'ASC'], [keyField, 'ASC']]
+        : [[keyField, 'ASC']];
+
     const rows = await lookupDbGW.execute({
         operation: 'read',
         table: tableName || Model.tableName,
@@ -1384,7 +1392,7 @@ async function getLookupList(options) {
             attributes: [keyField, displayField],
             offset: firstRow,
             limit: visibleRows,
-            order: [[keyField, 'ASC']],
+            order: orderClause,
             raw: true
         },
         context: dbContext
