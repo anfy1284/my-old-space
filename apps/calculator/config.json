@@ -7,13 +7,9 @@
     "dependencies": {},
     "mainMenuCommands":
         [
-            {"id": "main", "items":
+            { "id": "utilities", "caption": { "i18n": "menu_utilities" }, "roles": ["admin", "user"], "icon": "/apps/general_icons/resources/public/16x16/utilities.png", "items":
                 [
-                    { "caption": { "i18n": "menu_utilities" }, "roles": ["admin", "user"], "icon": "/apps/general_icons/resources/public/16x16/utilities.png", "items":
-                        [
-                            { "caption": { "i18n": "menu_calculator" }, "action": "open", "singleton": true, "icon": "/apps/general_icons/resources/public/16x16/calculator.png" }
-                        ]
-                    }
+                    { "caption": { "i18n": "menu_calculator" }, "action": "open", "singleton": true, "icon": "/apps/general_icons/resources/public/16x16/calculator.png" }
                 ]
             }
         ]

@@ -5,10 +5,8 @@
     "access": ["admin", "public", "user"],
     "dependencies": {},
     "mainMenuCommands": [
-        {"id": "main", "items": [
-            { "caption": { "i18n": "menu_games" }, "roles": ["admin", "user"], "icon": "/apps/general_icons/resources/public/16x16/games.png", "items": [
-                { "caption": "Tetris", "action": "open", "singleton": true, "icon": "/apps/general_icons/resources/public/16x16/tetris.png" }
-            ]}
+        { "id": "games", "caption": { "i18n": "menu_games" }, "roles": ["admin", "user"], "order": 100, "icon": "/apps/general_icons/resources/public/16x16/games.png", "items": [
+            { "caption": "Tetris", "action": "open", "singleton": true, "icon": "/apps/general_icons/resources/public/16x16/tetris.png" }
         ]}
     ]
 }

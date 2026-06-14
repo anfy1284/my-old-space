@@ -234,8 +234,12 @@
                     mergedCommands[id].items = sortByOrder(mergedCommands[id].items || []);
                 }
 
-                // Transform to MainMenu buttons
-                const buttons = Object.values(mergedCommands).map(cmd => {
+                // Transform to MainMenu buttons.
+                // Сортируем top-level кнопки по весу `order` (стабильно): кнопки без веса
+                // сохраняют исходный порядок, помеченные (напр. «Игры» order:100) уходят в конец.
+                const buttons = Object.values(mergedCommands)
+                    .sort((a, b) => (a.order || 0) - (b.order || 0))
+                    .map(cmd => {
                     const btn = {
                         id: cmd.id,
                         caption: cmd.caption || '',
