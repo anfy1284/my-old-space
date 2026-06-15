@@ -2923,36 +2923,9 @@ class DataForm extends Form {
             }
             return null;
         };
-        // Резолв {data.field} плейсхолдеров из _dataMap формы
-        const resolveParams = (val) => {
-            if (typeof val === 'string') return val.replace(/\{data\.([^}]+)\}/g, (_, field) => {
-                const entry = formSelf._dataMap && formSelf._dataMap[field];
-                return (entry && entry.value !== undefined) ? entry.value : '';
-            });
-            if (Array.isArray(val)) return val.map(resolveParams);
-            if (val && typeof val === 'object') { const out = {}; for (const k in val) out[k] = resolveParams(val[k]); return out; }
-            return val;
-        };
-        const loadAndCallScript = async (binding, args) => {
-            try {
-                const uid = binding.clientScript;
-                const fn  = binding.fn;
-                if (!uid || !fn) return;
-                if (!window._clientScriptCache) window._clientScriptCache = {};
-                if (!window._clientScriptCache[uid]) {
-                    const resp = await fetch(`/files/${uid}`);
-                    if (!resp.ok) return;
-                    window._clientScriptCache[uid] = (new Function(await resp.text()))();
-                }
-                const mod = window._clientScriptCache[uid];
-                if (mod && typeof mod[fn] === 'function') {
-                    // Контекст: форма + резолвленные fnParams
-                    const ctx = { form: formSelf };
-                    if (binding.fnParams) ctx.fnParams = resolveParams(binding.fnParams);
-                    await mod[fn](...args, ctx);
-                }
-            } catch(e) { console.error('[_wireItemEvents] script error:', e); }
-        };
+        // Загрузка скрипта и вызов функции вынесены в метод формы callClientBinding,
+        // чтобы тем же путём диспетчеризовать и колоночные события ячеек (renderCellElement).
+        const loadAndCallScript = (binding, args) => formSelf.callClientBinding(binding, args);
         for (const [eventName, rawBinding] of Object.entries(events || {})) {
             if (!rawBinding) continue;
             const binding = normalizeBinding(rawBinding);
@@ -2982,6 +2955,57 @@ class DataForm extends Form {
                     : (...args) => loadAndCallScript(binding, args);
             }
         }
+    }
+
+    // Резолвит {data.field}-плейсхолдеры в значениях fnParams из _dataMap формы.
+    _resolveBindingParams(val) {
+        const formSelf = this;
+        const r = (v) => {
+            if (typeof v === 'string') return v.replace(/\{data\.([^}]+)\}/g, (_, field) => {
+                const entry = formSelf._dataMap && formSelf._dataMap[field];
+                return (entry && entry.value !== undefined) ? entry.value : '';
+            });
+            if (Array.isArray(v)) return v.map(r);
+            if (v && typeof v === 'object') { const out = {}; for (const k in v) out[k] = r(v[k]); return out; }
+            return v;
+        };
+        return r(val);
+    }
+
+    // Загружает (с кэшем) клиентский скрипт и вызывает его функцию по binding.
+    // binding: строка 'fn' | { clientScript?, fn, fnParams? } (без clientScript —
+    // подставляется form._clientScript). args — позиционные аргументы обработчика;
+    // последним всегда добавляется ctx = { form, fnParams }.
+    // Единая точка вызова клиентских обработчиков: используется и в _wireItemEvents
+    // (события контролов), и в renderCellElement (колоночные события ячеек ТЧ).
+    async callClientBinding(rawBinding, args) {
+        try {
+            let binding;
+            if (typeof rawBinding === 'string') {
+                binding = { clientScript: this._clientScript, fn: rawBinding };
+            } else if (rawBinding && typeof rawBinding === 'object') {
+                binding = (!rawBinding.clientScript && this._clientScript)
+                    ? Object.assign({}, rawBinding, { clientScript: this._clientScript })
+                    : rawBinding;
+            } else {
+                return;
+            }
+            const uid = binding.clientScript;
+            const fn  = binding.fn;
+            if (!uid || !fn) return;
+            if (!window._clientScriptCache) window._clientScriptCache = {};
+            if (!window._clientScriptCache[uid]) {
+                const resp = await fetch(`/files/${uid}`);
+                if (!resp.ok) return;
+                window._clientScriptCache[uid] = (new Function(await resp.text()))();
+            }
+            const mod = window._clientScriptCache[uid];
+            if (mod && typeof mod[fn] === 'function') {
+                const ctx = { form: this };
+                if (binding.fnParams) ctx.fnParams = this._resolveBindingParams(binding.fnParams);
+                await mod[fn](...(args || []), ctx);
+            }
+        } catch (e) { console.error('[callClientBinding] script error:', e); }
     }
 
     // Активировать первую строку во всех таблицах лейаута.
@@ -5865,6 +5889,11 @@ class TextBox extends FormInput {
             } catch (_) {}
 
             try { if (this.element) this.element.dispatchEvent(new Event('input', { bubbles: true })); } catch (_) {}
+            // Зеркалим путь выпадашки (_openList): после выбора через «...» диспетчеризуем
+            // и 'change', а не только 'input'. Иначе DOM-слушатели 'change' (в т.ч.
+            // колоночное events.onChange ячеек ТЧ в renderCellElement) не срабатывают
+            // при выборе кнопкой «...», хотя при выборе из выпадашки срабатывают.
+            try { if (this.element) this.element.dispatchEvent(new Event('change', { bubbles: true })); } catch (_) {}
 
             // Close/destroy chooser instance if provided
             try {
@@ -8671,6 +8700,19 @@ class Table extends UIObject {
                                     }
                                     this.data_updateValue(key, newVal);
                                     this.data_updateParentArray(this.dataKey, rowIndexLocal, colDef, newVal, displayVal);
+
+                                    // Колоночное событие onChange: если у колонки лейаута описан
+                                    // events.onChange — диспетчеризуем его через форму (аналог
+                                    // onRowActivate, но на уровне ячейки). Сигнатура обработчика:
+                                    // function(rowIndex, newVal, displayVal, ctx). Только на 'change'
+                                    // (не на 'input'), чтобы не дёргать обработчик на каждый
+                                    // промежуточный ввод и не сработать дважды (input+change — один handler).
+                                    try {
+                                        if (ev && ev.type === 'change' && colDef && colDef.events && colDef.events.onChange
+                                                && this.appForm && typeof this.appForm.callClientBinding === 'function') {
+                                            this.appForm.callClientBinding(colDef.events.onChange, [rowIndexLocal, newVal, displayVal]);
+                                        }
+                                    } catch (e) {}
                                 } catch (e) {}
                             };
                             el.addEventListener('input', handler);
