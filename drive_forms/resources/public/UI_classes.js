@@ -600,6 +600,13 @@ if (typeof window !== 'undefined') {
                     // reuse existing instance for single-instance apps
                     for (const k in instances) {
                         if (instances[k] && instances[k].appName === name) {
+                            // Окно могло быть закрыто (modal-форма destroy'нута), но инстанс
+                            // остался в реестре — close() формы не чистит instances. Без проверки
+                            // «живости» повторный open() вернёт мёртвый id и ничего не покажет
+                            // (баг «кнопка перестаёт работать после закрытия»). Сверяем с DOM.
+                            const form = instances[k].form || instances[k];
+                            const isAlive = form && form.element && document.contains(form.element);
+                            if (!isAlive) { delete instances[k]; continue; }
                             try { instances[k].onOpen && instances[k].onOpen(params); } catch (e) { console.error(e); }
                             return instances[k].id;
                         }
@@ -2105,6 +2112,9 @@ class DataForm extends Form {
         this._closing = false; // guard against recursive close
         this._isNew = false; // true для ещё не записанной в БД записи (приходит из formSpec.isNew)
         this._clientScript = null; // UID клиентского скрипта (из saveLayout({ clientScript }))
+        this._formEvents = null;   // клиентские form-level события (events лейаута без serverScript)
+        this._formReady = false;   // true после первичной отрисовки — гейт для onChange
+        this._suppressFormChange = false; // защита от рекурсии при программном изменении данных
     }
 
     // Override setTitle to keep track of the base (non-modified) title
@@ -2129,6 +2139,24 @@ class DataForm extends Form {
         } else if (!this._modified && wasModified) {
             if (this._originalTitle) super.setTitle(this._originalTitle);
         }
+        // Общее событие формы «при изменении»: дёргаем клиентский обработчик
+        // events.onChange (form-level) при любом изменении данных формы. Дебаунс
+        // схлопывает серию изменений; _suppressFormChange защищает от рекурсии
+        // (обработчик может программно менять данные → setModified → onChange → ...).
+        // _formReady отсекает срабатывания во время первичной отрисовки.
+        if (val && this._formReady && !this._suppressFormChange) {
+            try { this._fireFormChange(); } catch (e) {}
+        }
+    }
+
+    // Дебаунс-вызов form-level onChange-обработчика (из events лейаута, без serverScript).
+    _fireFormChange() {
+        const binding = this._formEvents && this._formEvents.onChange;
+        if (!binding || binding.serverScript) return;
+        try { clearTimeout(this._formChangeTimer); } catch (e) {}
+        this._formChangeTimer = setTimeout(() => {
+            try { this.callClientBinding(binding, []); } catch (e) {}
+        }, 300);
     }
 
     // Override close to prompt discard if modified
@@ -3032,6 +3060,8 @@ class DataForm extends Form {
                 } catch(e) {}
             }
         } catch(e) {}
+        // Форма полностью отрисована — с этого момента разрешаем form-level onChange.
+        this._formReady = true;
     }
 
     async loadData() {
@@ -3065,6 +3095,7 @@ class DataForm extends Form {
                 try { this._datasetId = both.datasetId || null; } catch (e) { this._datasetId = null; }
                 try { this._isNew = !!both.isNew; } catch (e) { this._isNew = false; }
                 try { this._clientScript = both.clientScript || null; } catch (e) {}
+                try { this._formEvents = both.events || null; } catch (e) { this._formEvents = null; }
                 try { this._windowState = both.windowState || null; } catch (e) {}
                 // Apply app caption (human-readable translated name) and icon
                 try {
@@ -3265,11 +3296,28 @@ class DataForm extends Form {
                             // После записи в БД запись перестаёт быть новой — последующее
                             // закрытие через OK уже спросит подтверждение (как для существующих).
                             this._isNew = !!freshBoth.isNew;
-                            // Собираем имена скалярных полей из свежего ответа
+                            // Собираем имена скалярных полей из свежего ответа.
+                            // Табличные части тоже обновляем — но массив строк мутируем
+                            // НА МЕСТЕ (сохраняя ссылку: её держит замыкание renderBodyRows
+                            // таблицы; замена ссылки сломала бы рендер). Затем перерисовываем
+                            // таблицы по их dataKey. Так пересчитанные на сервере значения
+                            // (напр. количество услуг по формуле в onBeforeSave) сразу видны.
                             const freshScalarNames = new Set();
+                            const tsToRerender = [];
                             for (const rec of freshBoth.data) {
                                 if (!rec || !rec.name) continue;
-                                if (rec.tabularSection === true) continue;
+                                if (rec.tabularSection === true) {
+                                    const existing = this._dataMap[rec.name];
+                                    if (existing && Array.isArray(existing.value)) {
+                                        const arr = existing.value;
+                                        arr.length = 0;
+                                        if (Array.isArray(rec.value)) for (const row of rec.value) arr.push(row);
+                                    } else {
+                                        this._dataMap[rec.name] = rec;
+                                    }
+                                    tsToRerender.push(rec.name);
+                                    continue;
+                                }
                                 this._dataMap[rec.name] = rec;
                                 freshScalarNames.add(rec.name);
                             }
@@ -3298,6 +3346,15 @@ class DataForm extends Form {
                                     if (typeof ctrl.setValue === 'function') ctrl.setValue(val, display);
                                     else if (typeof ctrl.setText === 'function') ctrl.setText(display !== undefined ? String(display) : String(val));
                                 } catch(_) {}
+                            }
+                            // Перерисовываем таблицы обновлённых ТЧ (по dataKey).
+                            if (tsToRerender.length) {
+                                for (const key in this.controlsMap) {
+                                    const ctrl = this.controlsMap[key];
+                                    if (ctrl && tsToRerender.indexOf(ctrl.dataKey) >= 0 && typeof ctrl._invokeRenderBodyRows === 'function') {
+                                        try { ctrl._invokeRenderBodyRows(); } catch(_) {}
+                                    }
+                                }
                             }
                         }
                     } catch(reloadErr) { console.error('[DataForm] data refresh after save error', reloadErr); }
@@ -3771,6 +3828,11 @@ class TextBox extends FormInput {
         if (typeof this.listMode === 'undefined' || this.listMode === null) this.listMode = false;
         // Optional: show a selection button ("...") to trigger a selection procedure
         if (typeof this.showSelectionButton === 'undefined' || this.showSelectionButton === null) this.showSelectionButton = false;
+        // editorButton: рисует кнопку «...» как у селектора, НО поле остаётся обычным
+        // текстовым (getValue возвращает введённый текст, без rawValue-семантики селектора).
+        // Для полей с кастомным редактором (напр. формула): «...» зовёт onSelectionStart,
+        // на который через events: { onSelectionStart } навешивается открытие редактора.
+        if (typeof this.editorButton === 'undefined' || this.editorButton === null) this.editorButton = false;
         // Optional: selection metadata for selector button (e.g. { table, idField, displayField })
         this.selection = (properties && properties.selection) ? properties.selection : (this.selection || null);
         // Optional: listSource metadata for dropdown list (e.g. { table, idField, displayField, limit })
@@ -4049,7 +4111,7 @@ class TextBox extends FormInput {
             // If requested, add selection button ("...") to the input container.
             // It should appear to the right of the input and (if present) to the left of the dropdown list button.
             try {
-                if (this.showSelectionButton) {
+                if (this.showSelectionButton || this.editorButton) {
                     if (!this._selectBtn) {
                         const sbtn = document.createElement('button');
                         sbtn.type = 'button';
@@ -5825,6 +5887,12 @@ class TextBox extends FormInput {
         try {
             const selMeta = this.selection || {};
             const table = selMeta.table || null;
+
+            // Поле с кнопкой «...», но БЕЗ справочника (selection.table) — это поле
+            // с кастомным редактором: дефолтное действие ничего не открывает, а свой
+            // обработчик навешивается через events: { onSelectionStart: 'fn' } (он
+            // выполнится по цепочке после этого no-op). Напр. редактор формул.
+            if (!table) return;
 
             const setSelected = (rec) => {
                 try {
@@ -8700,6 +8768,11 @@ class Table extends UIObject {
                                     }
                                     this.data_updateValue(key, newVal);
                                     this.data_updateParentArray(this.dataKey, rowIndexLocal, colDef, newVal, displayVal);
+
+                                    // Редактирование ячейки ТЧ помечает форму изменённой (dirty) →
+                                    // как следствие триггерит form-level onChange (setModified).
+                                    // Раньше cell-edit не выставлял _modified.
+                                    try { if (this.appForm && typeof this.appForm.setModified === 'function') this.appForm.setModified(true); } catch (e) {}
 
                                     // Колоночное событие onChange: если у колонки лейаута описан
                                     // events.onChange — диспетчеризуем его через форму (аналог
