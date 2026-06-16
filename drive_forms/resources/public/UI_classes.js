@@ -9723,6 +9723,12 @@ class Tabs extends UIObject {
     _showTab(idx) {
         this._panes.forEach((p, i) => {
             p.btn.classList.toggle('active', i === idx);
+            // Маркер скрытой панели. visibility:hidden наследуется, НО потомок с
+            // visibility:visible !important (напр. кнопки ячеек ТЧ в режиме
+            // cell-immediate — style.css) пробивает скрытие родителя и «проступает»
+            // на активной вкладке (панель лежит absolute top:0 left:0 поверх).
+            // Класс даёт CSS-правилу зацепку, чтобы пере-скрыть такие кнопки.
+            p.pane.classList.toggle('ui-tabs-pane-hidden', i !== idx);
             if (i === idx) {
                 p.pane.style.position = 'relative';
                 // '' (наследуем), а НЕ 'visible': literal 'visible' у потомка
@@ -9786,6 +9792,8 @@ class Tabs extends UIObject {
                     pane.style.left = '0';
                     pane.style.visibility = 'hidden';
                     pane.style.pointerEvents = 'none';
+                    // см. _showTab: пере-скрытие кнопок-потомков с visibility:visible !important
+                    pane.classList.add('ui-tabs-pane-hidden');
                 }
                 content.appendChild(pane);
                 this._panes.push({ btn, pane, tab: t });

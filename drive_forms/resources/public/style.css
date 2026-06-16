@@ -554,6 +554,18 @@ input[type="checkbox"],
 .ui-dynamictable.ui-table-immediate table tbody tr.ui-table-row:not(.active) button.input-field-button {
   visibility: visible !important;
 }
+
+/* Неактивная вкладка скрывается через visibility:hidden (panes лежат absolute
+   стопкой). Но правило выше делает кнопки ячеек cell-immediate
+   visibility:visible !important — а visible у потомка пробивает hidden предка,
+   поэтому кнопки ТЧ со скрытой вкладки «проступают» поверх активной. Гасим их,
+   когда панель помечена ui-tabs-pane-hidden (Tabs._showTab/Draw). Селектор
+   намеренно повторяет правило выше (та же специфичность + 1 класс предка) и идёт
+   позже по файлу, чтобы перебить его среди !important-объявлений. */
+.ui-tabs-pane-hidden .ui-dynamictable.ui-table-immediate table tbody tr.ui-table-row:not(.active) .input-field-button,
+.ui-tabs-pane-hidden .ui-dynamictable.ui-table-immediate table tbody tr.ui-table-row:not(.active) button.input-field-button {
+  visibility: hidden !important;
+}
 .ui-dynamictable table tbody tr.ui-table-row:focus {
   outline: none;
 }
