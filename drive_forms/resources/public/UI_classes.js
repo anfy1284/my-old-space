@@ -2150,13 +2150,17 @@ class DataForm extends Form {
     }
 
     // Дебаунс-вызов form-level onChange-обработчика (из events лейаута, без serverScript).
+    // Задержка схлопывает серию быстрых изменений (напр. посимвольный ввод даты) в один
+    // вызов, чтобы не слать серверный RPC на каждое нажатие клавиши. Значение подобрано
+    // так, чтобы гасить burst при наборе, но не быть заметным при дискретных правках.
     _fireFormChange() {
         const binding = this._formEvents && this._formEvents.onChange;
         if (!binding || binding.serverScript) return;
+        const debounceMs = (this._formChangeDebounceMs != null) ? this._formChangeDebounceMs : 150;
         try { clearTimeout(this._formChangeTimer); } catch (e) {}
         this._formChangeTimer = setTimeout(() => {
             try { this.callClientBinding(binding, []); } catch (e) {}
-        }, 300);
+        }, debounceMs);
     }
 
     // Override close to prompt discard if modified
