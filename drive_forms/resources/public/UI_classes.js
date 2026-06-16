@@ -4170,11 +4170,22 @@ class TextBox extends FormInput {
                         });
                         return b;
                     };
-                    // Только "+" — для быстрого набора количества мышью (легче попадать,
-                    // когда кнопка одна). Уменьшение — с клавиатуры. "−" намеренно убрана.
-                    const plus = mkSpin('+', this.step, 'spin-up');
+                    // Кнопки шага количества. Прочие кнопки поля ("...", "↗", календарь)
+                    // стоят СПРАВА от ввода. По просьбе пользователя "−" ставим, наоборот,
+                    // СЛЕВА — первым элементом контейнера, ДО цифр; "+" остаётся справа.
+                    // Итог: [−][цифры][+]. clamp по minValue/allowNegative — в _spinValue.
+                    const plus  = mkSpin('+', this.step,  'spin-up');
+                    const minus = mkSpin('−', -this.step, 'spin-down');
                     this.inputContainer.appendChild(plus);
-                    this._spinWrap = { plus };
+                    this.inputContainer.insertBefore(minus, this.inputContainer.firstChild);
+                    this._spinWrap = { plus, minus };
+                    // Число по центру между "−" и "+" (иначе цифры прилипают к левой
+                    // кнопке и выглядят неаккуратно). Небольшой горизонтальный паддинг —
+                    // дополнительный воздух у кнопок.
+                    try {
+                        this.element.style.textAlign = 'center';
+                        this.element.style.padding = '0 4px';
+                    } catch (_) {}
                 }
             } catch (e) {}
 
@@ -7422,7 +7433,10 @@ class CheckBox extends FormInput {
             wrapper.style.position = 'relative';
             wrapper.style.width = '13px';
             wrapper.style.height = '13px';
-            wrapper.style.marginRight = '6px';
+            // Отступ справа нужен только при наличии текста-подписи. В ячейке таблицы
+            // (без подписи) он создаёт лишнее пустое место и мешает центрированию.
+            const _cbHasLabel = ((this.label && this.label.length) || (this.caption && this.caption.length));
+            wrapper.style.marginRight = _cbHasLabel ? '6px' : '0';
 
             const checkbox = document.createElement('input');
             checkbox.type = 'checkbox';
@@ -7987,6 +8001,10 @@ class Table extends UIObject {
         // Признак табличной части — выставляется автоматически в Draw() из _dataMap
         this.isTabularSection = false;
         this.currentFilters = [];
+        // Голубая подсветка активной строки. По умолчанию включена; лейаут может
+        // отключить её через properties.highlightActiveRow = false (например, для ТЧ,
+        // где активная строка не несёт визуального смысла). Зебра при этом сохраняется.
+        this.highlightActiveRow = (properties.highlightActiveRow !== false);
     }
 
     // Обрабатывает действие тулбара внутри таблицы.
@@ -8158,7 +8176,13 @@ class Table extends UIObject {
         for (let i = 0; i < this.columns.length; i++) {
             const col = this.columns[i] || {};
             const c = document.createElement('col');
-            c.style.width = (col.width ? (col.width + 'px') : (100 + 'px'));
+            // autoWidth (или width:'auto'): колонка-«резинка» — поглощает всё свободное
+            // место таблицы (table-layout:fixed). Фиксированные колонки при этом сохраняют
+            // ТОЧНУЮ ширину и не растягиваются пропорционально (иначе узкие чекбокс-колонки
+            // «толстеют» за счёт распределения остатка). Колонке без width даём дефолт 100px.
+            if (!(col.autoWidth || col.width === 'auto')) {
+                c.style.width = (col.width ? (col.width + 'px') : (100 + 'px'));
+            }
             hcolgroup.appendChild(c);
         }
         headerTable.appendChild(hcolgroup);
@@ -8167,15 +8191,18 @@ class Table extends UIObject {
         for (let i = 0; i < this.columns.length; i++) {
             const col = this.columns[i] || {};
             const th = document.createElement('th');
+            // Чекбокс-колонка узкая: уменьшаем паддинг (иначе глиф заголовка обрезается
+            // многоточием) и центрируем — чтобы ✓/иконка стояли по центру, как в ячейках.
+            const _isCbCol = !!(col && (col.inputType === 'checkbox' || col.type === 'checkbox'));
             th.style.boxSizing = 'border-box';
-            th.style.padding = '4px 8px';
+            th.style.padding = _isCbCol ? '4px 2px' : '4px 8px';
             th.style.backgroundColor = '#c0c0c0';
             th.style.borderTop = '2px solid #ffffff';
             th.style.borderLeft = '2px solid #ffffff';
             th.style.borderRight = '2px solid #808080';
             th.style.borderBottom = '2px solid #808080';
             th.style.fontWeight = 'bold';
-            th.style.textAlign = 'left';
+            th.style.textAlign = _isCbCol ? 'center' : 'left';
             th.style.cursor = 'pointer';
             th.style.userSelect = 'none';
             th.style.position = 'relative';
@@ -8585,10 +8612,14 @@ class Table extends UIObject {
 
     renderCellElement(rowIndex, c, col, row) {
         const td = document.createElement('td');
-        td.style.padding = '4px 6px';
+        // Чекбокс-ячейка: симметричный маленький паддинг + центрирование, чтобы
+        // галочка стояла по центру квадратной ячейки (без пустого поля сбоку).
+        const isCheckboxCell = !!(col && (col.inputType === 'checkbox' || col.type === 'checkbox'));
+        td.style.padding = isCheckboxCell ? '4px 2px' : '4px 6px';
         td.style.overflow = 'hidden';
         td.style.borderRight = (c < this.columns.length - 1) ? '1px solid #c0c0c0' : '0';
         td.style.verticalAlign = 'top';
+        if (isCheckboxCell) { try { td.classList.add('ui-cell-checkbox'); td.style.textAlign = 'center'; } catch (e) {} }
 
         const cellContainer = document.createElement('div');
         cellContainer.style.width = '100%';
@@ -8596,6 +8627,7 @@ class Table extends UIObject {
         cellContainer.style.overflow = 'hidden';
         cellContainer.style.display = 'flex';
         cellContainer.style.alignItems = 'center';
+        if (isCheckboxCell) cellContainer.style.justifyContent = 'center';
         td.appendChild(cellContainer);
 
         const cellKey = (this.dataKey ? (this.dataKey + '__r' + rowIndex + '__' + (col.data || c)) : ('table_' + Math.random().toString(36).slice(2)));
@@ -8890,7 +8922,9 @@ class Table extends UIObject {
         // Храним реальный индекс в массиве данных — используется в activateRow и updateAllRowsReadOnly
         // для правильной подсветки при активных клиентских фильтрах.
         tr._dataIndex = rowIndex;
-        if (this._activeRowIndex === rowIndex) {
+        // 'active' навешиваем только если подсветка активной строки включена
+        // (highlightActiveRow !== false). Так отключение не зависит от загрузки CSS.
+        if (this._activeRowIndex === rowIndex && this.highlightActiveRow !== false) {
             try { tr.classList.add('active'); } catch (e) {}
         }
         // Make rows focusable so keyboard users can select them
@@ -8919,10 +8953,15 @@ class Table extends UIObject {
                     if (wasInactive) this.activateRow(clickedRow);
                     // If a checkbox cell was clicked while the row was inactive AND the checkbox
                     // was disabled (so the native click had no effect), toggle it now that the
-                    // row is active. In 'cell-immediate' the checkbox stays enabled even in
-                    // inactive rows, so the native/capture path already toggled it and set
-                    // __checkboxHandled — skip the manual toggle to avoid a double-toggle.
-                    if (wasInactive && td && !ev.__checkboxHandled) {
+                    // row is active. ВАЖНО: это только для режима 'row-activate', где чекбокс в
+                    // неактивной строке действительно disabled и нативный клик ничего не делает.
+                    // В 'cell-immediate' чекбокс всегда включён — нативный клик прямо по галочке
+                    // уже переключает её, но НЕ выставляет __checkboxHandled (его ставят только
+                    // наши capture/bubble обработчики при клике мимо галочки). Если бы фолбэк
+                    // срабатывал здесь, он переключил бы галочку второй раз → двойной тоггл гасит
+                    // сам себя, и первый клик лишь активирует строку (баг). Поэтому в
+                    // 'cell-immediate' фолбэк отключён.
+                    if (wasInactive && td && !ev.__checkboxHandled && this.editMode !== 'cell-immediate') {
                         try {
                             const nativeCb = td.querySelector('input[type="checkbox"]');
                             if (nativeCb && !nativeCb.disabled) {
@@ -8996,7 +9035,7 @@ class Table extends UIObject {
                         const child = children[i];
                         try {
                             // Сравниваем по _dataIndex, а не по визуальному номеру строки (при фильтрах виз. индекс ≠ реальному)
-                            if (child._dataIndex === rowIndex) child.classList.add('active');
+                            if (child._dataIndex === rowIndex && this.highlightActiveRow !== false) child.classList.add('active');
                             else child.classList.remove('active');
                         } catch (e) {}
                     }
@@ -9141,7 +9180,13 @@ class Table extends UIObject {
         for (let i = 0; i < this.columns.length; i++) {
             const col = this.columns[i] || {};
             const c = document.createElement('col');
-            c.style.width = (col.width ? (col.width + 'px') : (100 + 'px'));
+            // autoWidth (или width:'auto'): колонка-«резинка» — поглощает всё свободное
+            // место таблицы (table-layout:fixed). Фиксированные колонки при этом сохраняют
+            // ТОЧНУЮ ширину и не растягиваются пропорционально (иначе узкие чекбокс-колонки
+            // «толстеют» за счёт распределения остатка). Колонке без width даём дефолт 100px.
+            if (!(col.autoWidth || col.width === 'auto')) {
+                c.style.width = (col.width ? (col.width + 'px') : (100 + 'px'));
+            }
             bcolgroup.appendChild(c);
         }
         bodyTable.appendChild(bcolgroup);
@@ -9316,6 +9361,8 @@ class Table extends UIObject {
             // помечаем таблицу, чтобы CSS не прятал кнопки ("...", "+", выпадашка)
             // в неактивных строках.
             if (this.editMode === 'cell-immediate') wrapper.classList.add('ui-table-immediate');
+            // Отключение голубой подсветки активной строки (highlightActiveRow:false).
+            if (this.highlightActiveRow === false) wrapper.classList.add('ui-table-no-row-highlight');
             wrapper.style.position = 'relative';
             wrapper.style.width = '100%';
             wrapper.style.height = '100%';
@@ -9876,7 +9923,10 @@ class DynamicTable extends Table {
         for (let i = 0; i < this.columns.length; i++) {
             const col = this.columns[i] || {};
             const c = document.createElement('col');
-            c.style.width = (col.width ? col.width + 'px' : '100px');
+            // autoWidth: см. комментарий в Table.buildHeader — колонка-«резинка».
+            if (!(col.autoWidth || col.width === 'auto')) {
+                c.style.width = (col.width ? col.width + 'px' : '100px');
+            }
             bcolgroup.appendChild(c);
         }
         tableEl.appendChild(bcolgroup);

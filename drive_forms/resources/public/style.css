@@ -516,6 +516,21 @@ input[type="checkbox"],
   background-color: #cdeeff !important;
 }
 
+/* Чекбокс-ячейка таблицы: квадратная, галочка строго по центру (без пустого
+   поля сбоку). Класс td.ui-cell-checkbox выставляется в renderCellElement. */
+.ui-dynamictable td.ui-cell-checkbox { text-align: center; padding: 4px 2px; }
+.ui-dynamictable td.ui-cell-checkbox > div { justify-content: center; }
+.ui-dynamictable td.ui-cell-checkbox .ui-checkbox { justify-content: center; }
+
+/* Лейаут может отключить голубую подсветку активной строки (highlightActiveRow:false):
+   убираем синий фон, но сохраняем зебру (чёт/нечет). */
+.ui-dynamictable.ui-table-no-row-highlight table tbody tr.ui-table-row.active {
+  background-color: #ffffff !important;
+}
+.ui-dynamictable.ui-table-no-row-highlight table tbody tr.ui-table-row.active:nth-child(even) {
+  background-color: #f0f0f0 !important;
+}
+
 /* Hide input buttons in non-active table rows (useful when rows are styled
    gray for inactive state). This makes buttons invisible instead of gray. */
 .ui-dynamictable table tbody tr.ui-table-row:not(.active) .input-field-button,
