@@ -2621,6 +2621,37 @@ class DataForm extends Form {
                 { const ctrlKey = item.name || item.data; if (ctrlKey) this.controlsMap[ctrlKey] = cb; }
                 break;
             }
+            case 'color': {
+                const col = new Color(contentArea, properties);
+                let cval = '';
+                if (item.value !== null && item.value !== undefined) cval = item.value;
+                else if (item.data && this._dataMap && Object.prototype.hasOwnProperty.call(this._dataMap, item.data)) {
+                    const rec = this._dataMap[item.data];
+                    cval = (rec && (rec.value !== undefined)) ? rec.value : rec;
+                }
+                try { col.setValue(cval); } catch (e) {}
+                col.setCaption(caption);
+                col.Draw(contentArea);
+                try { if (item.data && col.element) col.element.dataset.field = item.data; } catch (e) {}
+                // Dirty tracking + синхронизация значения в _dataMap (как у других контролов).
+                try {
+                    if (item.data && col.element) {
+                        const fieldKey = item.data;
+                        const formSelf = this;
+                        col.element.addEventListener('input', () => {
+                            try {
+                                const nv = col.getValue();
+                                if (!formSelf._dataMap) formSelf._dataMap = {};
+                                if (!formSelf._dataMap[fieldKey]) formSelf._dataMap[fieldKey] = { name: fieldKey, value: nv };
+                                else formSelf._dataMap[fieldKey].value = nv;
+                            } catch (_) {}
+                            try { if (typeof formSelf.setModified === 'function') formSelf.setModified(true); } catch (_) {}
+                        });
+                    }
+                } catch (_) {}
+                { const ctrlKey = item.name || item.data; if (ctrlKey) this.controlsMap[ctrlKey] = col; }
+                break;
+            }
             case 'group': {
                 const grp = new Group(contentArea, properties);
                 grp.setCaption(caption);
@@ -2853,10 +2884,11 @@ class DataForm extends Form {
                             : rawCap;
                         return Object.assign({}, t, { caption: resolvedCap });
                     });
-                    try { tabsCtrl = new Tabs(contentArea, { tabs: resolvedTabs, appForm: this }); } catch (e) {
+                    const tabsFill = !!(item.fillHeight || (properties && properties.fillHeight));
+                    try { tabsCtrl = new Tabs(contentArea, { tabs: resolvedTabs, appForm: this, fillHeight: tabsFill }); } catch (e) {
                         const TabsClass = (window.UI_Classes && window.UI_Classes.Tabs) ? window.UI_Classes.Tabs : null;
                         if (!TabsClass) throw new Error('Tabs control is not available');
-                        tabsCtrl = new TabsClass(contentArea, { tabs: item.tabs || [], appForm: this });
+                        tabsCtrl = new TabsClass(contentArea, { tabs: item.tabs || [], appForm: this, fillHeight: tabsFill });
                     }
                     try { if (typeof tabsCtrl.setCaption === 'function') tabsCtrl.setCaption(caption); } catch (e) {}
                     try { if (typeof tabsCtrl.Draw === 'function') tabsCtrl.Draw(contentArea); } catch (e) {}
@@ -2869,6 +2901,27 @@ class DataForm extends Form {
                     try { if (tabsCtrl && tabsCtrl._renderAllPromise) await tabsCtrl._renderAllPromise; } catch (e) {}
                 } catch (e) {
                     console.error('Error creating tabs control', e);
+                }
+                break;
+            }
+            case 'calendar': {
+                try {
+                    const cal = new Calendar(contentArea, Object.assign({}, properties || {}, { appForm: this }));
+                    try { cal.Draw(contentArea); } catch (e) { console.error('[Calendar] Draw error', e); }
+                    if (item.name) this.controlsMap[item.name] = cal;
+                    // Дожидаемся первой загрузки данных до завершения renderLayout (как таблицы).
+                    try {
+                        if (cal._initialLoadPromise) {
+                            let _to;
+                            await Promise.race([
+                                cal._initialLoadPromise,
+                                new Promise(res => { _to = setTimeout(res, 2500); })
+                            ]);
+                            try { clearTimeout(_to); } catch (e) {}
+                        }
+                    } catch (e) {}
+                } catch (e) {
+                    console.error('Error creating calendar control', e);
                 }
                 break;
             }
@@ -7341,6 +7394,82 @@ function loadHTMLContent(src, callback) {
 }
 
 // CheckBox class for boolean values
+// Контрол выбора цвета — Win95-обёртка над нативным <input type="color"> + hex-подпись.
+// Используется через inputType:'color' в db.json (автоформы) либо type:'color' в лейауте.
+// Хранит/возвращает строку вида '#rrggbb'.
+class Color extends FormInput {
+    constructor(parentElement = null, properties = {}) {
+        super(parentElement, properties);
+        this.readOnly = !!(properties && properties.readOnly);
+        this._value = this._normalizeHex((properties && properties.value) || '');
+        this._swatchText = null;
+        this.parentElement = parentElement;
+    }
+
+    _normalizeHex(v) {
+        if (!v || typeof v !== 'string') return '';
+        let s = v.trim();
+        if (!s) return '';
+        if (s[0] !== '#') s = '#' + s;
+        if (/^#[0-9a-fA-F]{3}$/.test(s)) {
+            s = '#' + s.slice(1).split('').map(c => c + c).join('');
+        }
+        return /^#[0-9a-fA-F]{6}$/.test(s) ? s.toLowerCase() : '';
+    }
+
+    setValue(value) {
+        this._value = this._normalizeHex(value);
+        if (this.element) this.element.value = this._value || '#ffffff';
+        if (this._swatchText) this._swatchText.textContent = this._value || '';
+    }
+
+    getValue() {
+        if (this.element && this.element.value) return this.element.value;
+        return this._value || '';
+    }
+
+    getText() { return this.getValue(); }
+
+    setReadOnly(v) {
+        this.readOnly = !!v;
+        if (this.element) this.element.disabled = this.readOnly;
+    }
+
+    Draw(container) {
+        super.Draw(container);
+        const host = this.containerElement || container;
+        if (!this.element) {
+            const input = document.createElement('input');
+            input.type = 'color';
+            try { input.classList.add('ui-color'); } catch (e) {}
+            input.value = this._value || '#ffffff';
+            input.disabled = this.readOnly;
+            input._uiObject = this;
+            this.element = input;
+
+            const hex = document.createElement('span');
+            try { hex.classList.add('ui-color-hex'); } catch (e) {}
+            hex.textContent = this._value || '';
+            this._swatchText = hex;
+
+            const self = this;
+            input.addEventListener('input', () => {
+                self._value = input.value;
+                if (self._swatchText) self._swatchText.textContent = input.value;
+            });
+
+            if (host) { host.appendChild(input); host.appendChild(hex); }
+        }
+        return this.containerElement || this.element;
+    }
+
+    destroy() {
+        try { if (this._swatchText && typeof this._swatchText.remove === 'function') this._swatchText.remove(); } catch (e) {}
+        this._swatchText = null;
+        super.destroy();
+    }
+}
+
 class CheckBox extends FormInput {
     constructor(parentElement = null, properties = {}) {
         super(parentElement, properties);
@@ -9699,6 +9828,613 @@ class Table extends UIObject {
 }
 
 // Tabs control: simple tabbed panels that render layouts via appForm.renderLayout
+// ─────────────────────────────────────────────────────────────────────────────
+// Calendar — элемент формы «шахматка занятости» (resource × time).
+//
+// Декларативно-конфигурируемый (фреймворк-элемент, не привязан к booking):
+//   resourceField — поле события → ресурс-дорожка (комната)
+//   startField / endField — даты начала/конца (DATEONLY 'YYYY-MM-DD')
+//   labelField — подпись полосы; colorField — цвет полосы (#rrggbb)
+//   idField — идентификатор записи (для открытия/выбора), по умолчанию 'UID'
+//   tableName — таблица записи (open/select/add); serverScript+loadFn — RPC данных
+//   orientation — 'horizontal' (даты по X) | 'vertical' (даты по Y)
+//
+// Единица — НОЧЬ: бронь занимает «половину заезда» даты заезда → «половину выезда»
+// даты выезда (полоса смещена на полклетки), что само даёт диагональ на стыках.
+// Свободная половина-заезда — цель двойного клика для новой брони с этой даты.
+//
+// Данные тянет сам через window.callServer(serverScript, loadFn, { hotelId, from, to })
+// → { hotels:[{UID,name}], hotelId, rooms:[{UID,number}], events:[...], from, to, orientation }.
+// Выбор/открытие записи — тем же путём, что DynamicTable.onSelectOrOpen.
+class Calendar extends UIObject {
+    constructor(parentElement = null, properties = {}) {
+        super();
+        const p = properties || {};
+        this.parentElement = parentElement;
+        this.appForm = p.appForm || null;
+        this.tableName = p.tableName || (this.appForm && this.appForm.dbTable) || 'bookings';
+        this.serverScript = p.serverScript || null;
+        this.loadFn = p.loadFn || 'loadCalendar';
+        this.idField = p.idField || 'UID';
+        this.resourceField = p.resourceField || 'resourceId';
+        this.startField = p.startField || 'start';
+        this.endField = p.endField || 'end';
+        this.labelField = p.labelField || 'label';
+        this.colorField = p.colorField || 'color';
+        this.orientation = (p.orientation === 'vertical') ? 'vertical' : 'horizontal';
+        this.hiddenButtons = Array.isArray(p.hiddenButtons) ? p.hiddenButtons : [];
+        this.pastDays = (p.pastDays != null) ? p.pastDays : 14;
+        this.futureDays = (p.futureDays != null) ? p.futureDays : 90;
+
+        // Геометрия (px). step — ось времени, lane — ось ресурса.
+        this.dayW = 46;       // ширина дня (горизонтальная ось времени)
+        this.rowH = 30;       // высота дорожки-комнаты (горизонталь)
+        this.dateRowH = 26;   // высота дня (вертикальная ось времени)
+        this.roomColW = 110;  // ширина дорожки-комнаты (вертикаль)
+        this.labelW = 130;    // левый жёлоб (подписи)
+        this.headerH = 38;    // верхняя шапка
+
+        // Состояние
+        this.hotels = [];
+        this.rooms = [];
+        this.events = [];
+        this.hotelId = p.hotelId || null;
+        this.fromDate = null;
+        this.toDate = null;
+        this._selectedId = null;
+        this._buttons = {};
+        this._hotelSelect = null;
+        this._initialLoadPromise = null;
+    }
+
+    // ── Утилиты дат ──────────────────────────────────────────────────────────
+    _pad(n) { return String(n).padStart(2, '0'); }
+    _ymd(d) { return `${d.getFullYear()}-${this._pad(d.getMonth() + 1)}-${this._pad(d.getDate())}`; }
+    _parse(ymd) {
+        if (!ymd) return null;
+        const s = String(ymd).slice(0, 10);
+        const m = s.split('-');
+        if (m.length < 3) { const dt = new Date(s); return isNaN(dt) ? null : dt; }
+        return new Date(Number(m[0]), Number(m[1]) - 1, Number(m[2]));
+    }
+    _addDays(d, n) { const x = new Date(d.getTime()); x.setDate(x.getDate() + n); return x; }
+    _dayDiff(a, b) { return Math.round((this._parse(b) - this._parse(a)) / 86400000); }
+    _todayYmd() { const t = new Date(); return this._ymd(new Date(t.getFullYear(), t.getMonth(), t.getDate())); }
+
+    // ── Построение DOM ───────────────────────────────────────────────────────
+    Draw(container) {
+        if (!this.element) {
+            const wrap = document.createElement('div');
+            wrap.classList.add('ui-calendar');
+            this.element = wrap;
+            wrap._uiObject = this;
+
+            this._toolbarEl = document.createElement('div');
+            this._toolbarEl.classList.add('ui-calendar-toolbar');
+            wrap.appendChild(this._toolbarEl);
+
+            this._scrollEl = document.createElement('div');
+            this._scrollEl.classList.add('ui-calendar-scroll');
+            wrap.appendChild(this._scrollEl);
+
+            this._buildToolbar();
+
+            // Пересчёт раскладки при изменении размера контейнера (ресайз окна, появление
+            // вкладки из display:none): строки-ресурсы растягиваются под доступную высоту,
+            // сетка перестраивается, восстанавливается прокрутка к сегодня.
+            if (typeof ResizeObserver !== 'undefined') {
+                this._resizeObserver = new ResizeObserver(() => this._scheduleRelayout());
+                try { this._resizeObserver.observe(this._scrollEl); } catch (e) {}
+            }
+        }
+        if (container && this.element && !this.element.parentElement) {
+            try { container.appendChild(this.element); } catch (e) {}
+        }
+        // Начальное окно: сегодня ± pastDays/futureDays.
+        const today = this._todayYmd();
+        this.fromDate = this._ymd(this._addDays(this._parse(today), -this.pastDays));
+        this.toDate = this._ymd(this._addDays(this._parse(today), this.futureDays));
+        this._initialLoadPromise = this._load({});
+        return this.element;
+    }
+
+    _mkButton(key, caption, icon, onClick, opts) {
+        if (this.hiddenButtons.indexOf(key) >= 0) return null;
+        const o = opts || {};
+        const btn = new Button(this._toolbarEl, { caption: caption, icon: icon, showIcon: !!icon, showText: o.showText !== false, tooltip: o.tooltip || caption });
+        btn.Draw(this._toolbarEl);
+        btn.onClick = (e) => { try { onClick(e); } catch (err) { console.error('[Calendar] button', key, err); } };
+        this._buttons[key] = btn;
+        return btn;
+    }
+
+    _buildToolbar() {
+        const self = this;
+        const ic = (n) => '/apps/general_icons/resources/public/16x16/' + n + '.png';
+
+        // Селектор отеля
+        const sel = document.createElement('select');
+        sel.classList.add('ui-calendar-hotel');
+        sel.addEventListener('change', () => { self.hotelId = sel.value; self._load({ hotelId: sel.value }); });
+        this._hotelSelect = sel;
+        this._toolbarEl.appendChild(sel);
+
+        const isSelect = !!(this.appForm && this.appForm.selectMode);
+
+        this._mkButton('prev',  __t('calendar_prev'),  ic('prev'),  () => self._shiftWindow(-30), { showText: false });
+        this._mkButton('today', __t('calendar_today'), ic('calendar'), () => self._goToday());
+        this._mkButton('next',  __t('calendar_next'),  ic('next'), () => self._shiftWindow(30),  { showText: false });
+        this._mkButton('orientation', __t('calendar_orientation_toggle'), ic('orientation'), () => self._toggleOrientation(), { showText: false });
+
+        if (!isSelect) {
+            this._mkButton('recordAdd',    __t('Add'),    ic('add'),    () => self._addBooking());
+            this._mkButton('recordOpen',   __t('Open'),   ic('open'),   () => self._openSelected());
+            this._mkButton('recordDelete', __t('Delete'), ic('delete'), () => self._deleteSelected());
+        } else {
+            this._mkButton('select', __t('Select'), ic('select'), () => self._selectRecord());
+            this._mkButton('cancel', __t('Cancel'), ic('cancel'), () => { try { if (self.appForm && typeof self.appForm.doAction === 'function') self.appForm.doAction('cancel'); } catch (e) {} });
+        }
+    }
+
+    _renderHotelSelect() {
+        const sel = this._hotelSelect;
+        if (!sel) return;
+        sel.innerHTML = '';
+        (this.hotels || []).forEach(h => {
+            const o = document.createElement('option');
+            o.value = h.UID; o.textContent = h.name || h.UID;
+            if (h.UID === this.hotelId) o.selected = true;
+            sel.appendChild(o);
+        });
+        sel.style.display = (this.hotels && this.hotels.length > 1) ? '' : 'none';
+    }
+
+    // ── Загрузка данных ──────────────────────────────────────────────────────
+    async _load(params) {
+        if (!this.serverScript) { console.warn('[Calendar] serverScript not configured'); return; }
+        const req = {
+            hotelId: (params && params.hotelId) || this.hotelId || null,
+            from: (params && params.from) || this.fromDate,
+            to:   (params && params.to)   || this.toDate
+        };
+        try {
+            const payload = await window.callServer(this.serverScript, this.loadFn, req) || {};
+            this.setData(payload);
+        } catch (e) {
+            console.error('[Calendar] load error:', e && e.message || e);
+        }
+    }
+
+    setData(payload) {
+        const d = payload || {};
+        this.hotels = d.hotels || this.hotels || [];
+        if (d.hotelId) this.hotelId = d.hotelId;
+        this.rooms = d.rooms || [];
+        this.events = d.events || [];
+        if (d.from) this.fromDate = d.from;
+        if (d.to) this.toDate = d.to;
+        if (d.orientation) this.orientation = (d.orientation === 'vertical') ? 'vertical' : 'horizontal';
+        this._renderHotelSelect();
+        this._renderGrid();
+        this._scrollToToday();
+    }
+
+    // ── Рендер сетки ─────────────────────────────────────────────────────────
+    _buildDates() {
+        const dates = [];
+        if (!this.fromDate || !this.toDate) return dates;
+        const start = this._parse(this.fromDate), end = this._parse(this.toDate);
+        for (let d = new Date(start.getTime()); d <= end; d = this._addDays(d, 1)) {
+            dates.push(this._ymd(d));
+        }
+        return dates;
+    }
+
+    _renderGrid() {
+        const scroll = this._scrollEl;
+        if (!scroll) return;
+        scroll.innerHTML = '';
+
+        const horizontal = this.orientation !== 'vertical';
+        const dates = this._buildDates();
+        const rooms = this.rooms || [];
+        const timeCount = dates.length;
+        const resCount = rooms.length;
+        const step = horizontal ? this.dayW : this.dateRowH;       // ось времени
+        // Ось ресурса (строки-комнаты по горизонтали / столбцы по вертикали) растягивается,
+        // чтобы сетка заполняла доступное место, когда ресурсов мало (иначе узкая полоска
+        // сверху и пустота). Много ресурсов → базовый размер + скролл.
+        let lane = horizontal ? this.rowH : this.roomColW;         // ось ресурса
+        const laneMax = horizontal ? 140 : 260;
+        const avail = horizontal ? (scroll.clientHeight - this.headerH) : (scroll.clientWidth - this.labelW);
+        if (resCount > 0 && avail > 0) {
+            const fill = Math.floor(avail / resCount);
+            if (fill > lane) lane = Math.min(laneMax, fill);
+        }
+        const todayYmd = this._todayYmd();
+
+        const canvas = document.createElement('div');
+        canvas.classList.add('ui-calendar-canvas');
+        canvas.classList.add(horizontal ? 'ui-cal-h' : 'ui-cal-v');
+        if (horizontal) {
+            canvas.style.gridTemplateColumns = `${this.labelW}px repeat(${timeCount}, ${step}px)`;
+            canvas.style.gridTemplateRows = `${this.headerH}px repeat(${resCount}, ${lane}px)`;
+        } else {
+            canvas.style.gridTemplateColumns = `${this.labelW}px repeat(${resCount}, ${lane}px)`;
+            canvas.style.gridTemplateRows = `${this.headerH}px repeat(${timeCount}, ${step}px)`;
+        }
+
+        // Угол
+        const corner = document.createElement('div');
+        corner.classList.add('ui-calendar-corner');
+        canvas.appendChild(corner);
+
+        // Шапка + жёлоб
+        const weekdays = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
+        if (horizontal) {
+            // Шапка дат (top, sticky), жёлоб комнат (left, sticky)
+            dates.forEach((ymd, i) => {
+                const c = document.createElement('div');
+                c.classList.add('ui-calendar-datehead');
+                if (ymd === todayYmd) c.classList.add('ui-cal-today');
+                const dt = this._parse(ymd);
+                const wd = weekdays[dt.getDay()];
+                if (dt.getDay() === 0 || dt.getDay() === 6) c.classList.add('ui-cal-weekend');
+                c.innerHTML = `<span class="ui-cal-wd">${wd}</span><span class="ui-cal-dn">${this._pad(dt.getDate())}.${this._pad(dt.getMonth() + 1)}</span>`;
+                c.style.gridColumn = (i + 2) + '';
+                c.style.gridRow = '1';
+                canvas.appendChild(c);
+            });
+            rooms.forEach((room, r) => {
+                const c = document.createElement('div');
+                c.classList.add('ui-calendar-roomlabel');
+                c.textContent = room.number || room.name || room.UID;
+                c.title = c.textContent;
+                c.style.gridColumn = '1';
+                c.style.gridRow = (r + 2) + '';
+                canvas.appendChild(c);
+            });
+        } else {
+            rooms.forEach((room, r) => {
+                const c = document.createElement('div');
+                c.classList.add('ui-calendar-roomhead');
+                c.textContent = room.number || room.name || room.UID;
+                c.title = c.textContent;
+                c.style.gridColumn = (r + 2) + '';
+                c.style.gridRow = '1';
+                canvas.appendChild(c);
+            });
+            dates.forEach((ymd, i) => {
+                const c = document.createElement('div');
+                c.classList.add('ui-calendar-datelabel');
+                if (ymd === todayYmd) c.classList.add('ui-cal-today');
+                const dt = this._parse(ymd);
+                if (dt.getDay() === 0 || dt.getDay() === 6) c.classList.add('ui-cal-weekend');
+                c.textContent = `${weekdays[dt.getDay()]} ${this._pad(dt.getDate())}.${this._pad(dt.getMonth() + 1)}`;
+                c.style.gridColumn = '1';
+                c.style.gridRow = (i + 2) + '';
+                canvas.appendChild(c);
+            });
+        }
+
+        // Тело-оверлей (span на всю область данных): фон-сетка + полосы
+        const overlay = document.createElement('div');
+        overlay.classList.add('ui-calendar-overlay');
+        if (horizontal) {
+            overlay.style.gridColumn = `2 / span ${Math.max(timeCount, 1)}`;
+            overlay.style.gridRow = `2 / span ${Math.max(resCount, 1)}`;
+            overlay.style.width = (timeCount * step) + 'px';
+            overlay.style.height = (resCount * lane) + 'px';
+            // Вертикальные линии дней + подсветка сегодня/выходных через градиент-фон.
+            overlay.style.backgroundSize = `${step}px ${lane}px`;
+        } else {
+            overlay.style.gridColumn = `2 / span ${Math.max(resCount, 1)}`;
+            overlay.style.gridRow = `2 / span ${Math.max(timeCount, 1)}`;
+            overlay.style.width = (resCount * lane) + 'px';
+            overlay.style.height = (timeCount * step) + 'px';
+            overlay.style.backgroundSize = `${lane}px ${step}px`;
+        }
+        this._overlayEl = overlay;
+
+        // Колонка/строка «сегодня» — подсветка
+        const todayIdx = dates.indexOf(todayYmd);
+        if (todayIdx >= 0) {
+            const tline = document.createElement('div');
+            tline.classList.add('ui-calendar-todayline');
+            if (horizontal) {
+                tline.style.left = (todayIdx * step) + 'px';
+                tline.style.top = '0'; tline.style.width = step + 'px'; tline.style.height = '100%';
+            } else {
+                tline.style.top = (todayIdx * step) + 'px';
+                tline.style.left = '0'; tline.style.height = step + 'px'; tline.style.width = '100%';
+            }
+            overlay.appendChild(tline);
+        }
+
+        // Полосы броней
+        const slant = Math.round(step / 2);
+        const roomIndex = {};
+        rooms.forEach((room, idx) => { roomIndex[room.UID] = idx; });
+
+        (this.events || []).forEach(ev => {
+            const resId = ev[this.resourceField];
+            const r = roomIndex[resId];
+            if (r === undefined) return; // комната не из этого отеля / без комнаты — пропуск
+            const sIdx = this._dayDiff(this.fromDate, ev[this.startField]);
+            const eIdx = this._dayDiff(this.fromDate, ev[this.endField]);
+            if (isNaN(sIdx) || isNaN(eIdx)) return;
+            const nights = eIdx - sIdx;
+            if (nights <= 0) return;
+            // Видимая часть в окне
+            const visS = Math.max(sIdx, 0);
+            const visE = Math.min(eIdx, timeCount);
+            if (visE <= visS) return;
+
+            const bar = document.createElement('div');
+            bar.classList.add('ui-calendar-bar');
+            const color = ev[this.colorField] || '#2196F3';
+            bar.style.backgroundColor = color;
+            bar.style.borderColor = this._darken(color, 0.75);
+            const label = ev[this.labelField] != null ? String(ev[this.labelField]) : '';
+            bar.textContent = label;
+            bar.title = `${label} (${ev[this.startField]} – ${ev[this.endField]})`;
+            bar.dataset.recordId = ev[this.idField];
+
+            // Геометрия: смещение на полклетки (модель «ночи»). Полоса от середины
+            // дня заезда до середины дня выезда. Часть, выходящая за окно, отсекается
+            // плоским краем (продолжение), внутри окна — диагональю (стык гостей).
+            const startPx = (sIdx + 0.5) * step;
+            const endPx = (eIdx + 0.5) * step;
+            const maxPx = timeCount * step;
+            let a = startPx, b = endPx, flatStart = false, flatEnd = false;
+            if (a < 0) { a = 0; flatStart = true; }
+            if (b > maxPx) { b = maxPx; flatEnd = true; }
+            const lenPx = b - a;
+            if (lenPx <= 1) return;
+            // Наклон рисуется только на «внутренних» краях; отступ текста уводит его
+            // из-под диагонали (иначе первые/последние буквы обрезаются).
+            const L = flatStart ? 0 : slant;
+            const R = flatEnd ? 0 : slant;
+            const padStart = flatStart ? 5 : Math.round(slant * 0.6);
+            const padEnd = flatEnd ? 5 : Math.round(slant * 0.6);
+            // Толщина полосы по оси ресурса ограничена и центрируется в строке —
+            // при растянутых строках полоса не раздувается на всю высоту.
+            const thick = Math.min(lane - 6, horizontal ? 40 : 80);
+            const off = Math.round((lane - thick) / 2);
+            if (horizontal) {
+                bar.style.left = a + 'px';
+                bar.style.width = lenPx + 'px';
+                bar.style.top = (r * lane + off) + 'px';
+                bar.style.height = thick + 'px';
+                bar.style.clipPath = `polygon(${L}px 0, 100% 0, calc(100% - ${R}px) 100%, 0 100%)`;
+                bar.style.paddingLeft = padStart + 'px';
+                bar.style.paddingRight = padEnd + 'px';
+            } else {
+                bar.style.top = a + 'px';
+                bar.style.height = lenPx + 'px';
+                bar.style.left = (r * lane + off) + 'px';
+                bar.style.width = thick + 'px';
+                bar.style.clipPath = `polygon(0 ${L}px, 100% 0, 100% calc(100% - ${R}px), 0 100%)`;
+                bar.style.paddingTop = padStart + 'px';
+                bar.style.paddingBottom = padEnd + 'px';
+                bar.classList.add('ui-calendar-bar-v');
+            }
+            if (ev[this.idField] === this._selectedId) bar.classList.add('ui-cal-selected');
+
+            const self = this;
+            bar.addEventListener('click', (e) => {
+                e.stopPropagation();
+                self._selectBar(ev[this.idField]);
+            });
+            bar.addEventListener('dblclick', (e) => {
+                e.stopPropagation();
+                self._selectBar(ev[this.idField]);
+                self._activateRecord(ev);
+            });
+            overlay.appendChild(bar);
+        });
+
+        // Двойной клик по пустому месту оверлея → новая бронь (комната + дата).
+        const self = this;
+        overlay.addEventListener('dblclick', (e) => {
+            const rect = overlay.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            let dayIdx, resIdx;
+            if (horizontal) { dayIdx = Math.floor(x / step); resIdx = Math.floor(y / lane); }
+            else { dayIdx = Math.floor(y / step); resIdx = Math.floor(x / lane); }
+            if (dayIdx < 0 || dayIdx >= dates.length || resIdx < 0 || resIdx >= rooms.length) return;
+            self._addBooking({ checkIn: dates[dayIdx], roomId: rooms[resIdx].UID });
+        });
+
+        canvas.appendChild(overlay);
+        scroll.appendChild(canvas);
+        this._canvasEl = canvas;
+        this._dates = dates;
+    }
+
+    _darken(hex, k) {
+        try {
+            const s = String(hex).replace('#', '');
+            const n = parseInt(s.length === 3 ? s.split('').map(c => c + c).join('') : s, 16);
+            const r = Math.round(((n >> 16) & 255) * k), g = Math.round(((n >> 8) & 255) * k), b = Math.round((n & 255) * k);
+            return `rgb(${r},${g},${b})`;
+        } catch (e) { return '#1565c0'; }
+    }
+
+    _scrollToToday() {
+        const scroll = this._scrollEl;
+        // На неактивной вкладке (нулевой размер) scrollLeft не применится — перемотку
+        // выполнит _scheduleRelayout по ResizeObserver, когда вкладка станет видимой.
+        if (!scroll || !this._dates || (scroll.clientWidth === 0 && scroll.clientHeight === 0)) return;
+        const todayIdx = this._dates.indexOf(this._todayYmd());
+        const idx = todayIdx >= 0 ? todayIdx : 0;
+        const step = (this.orientation !== 'vertical') ? this.dayW : this.dateRowH;
+        // Сегодня ближе к началу видимой области (2 дня контекста слева/сверху).
+        const offset = Math.max(0, (idx - 2) * step);
+        try {
+            if (this.orientation !== 'vertical') scroll.scrollLeft = offset;
+            else scroll.scrollTop = offset;
+        } catch (e) {}
+    }
+
+    // Дебаунс-пересборка сетки под текущий размер (растяжение строк) + перемотка к сегодня.
+    _scheduleRelayout() {
+        if (this._relayoutTimer) return;
+        this._relayoutTimer = setTimeout(() => {
+            this._relayoutTimer = null;
+            const scroll = this._scrollEl;
+            if (scroll && scroll.clientWidth > 0 && this._dates) {
+                this._renderGrid();
+                this._scrollToToday();
+            }
+        }, 60);
+    }
+
+    // ── Действия ─────────────────────────────────────────────────────────────
+    _selectBar(id) {
+        this._selectedId = id;
+        const overlay = this._overlayEl;
+        if (!overlay) return;
+        overlay.querySelectorAll('.ui-calendar-bar').forEach(b => {
+            b.classList.toggle('ui-cal-selected', b.dataset.recordId === id);
+        });
+        // Контекст текущей записи для формы (как в таблице).
+        try {
+            const ev = (this.events || []).find(e => e[this.idField] === id);
+            if (ev && this.appForm) this.appForm._currentRecord = ev.raw || ev;
+        } catch (e) {}
+    }
+
+    // Открыть (обычный режим) или выбрать (selectMode) — тот же путь, что DynamicTable.
+    _activateRecord(ev) {
+        const isSelect = !!(this.appForm && this.appForm.selectMode);
+        if (isSelect) {
+            this._selectRecord();
+            return;
+        }
+        const recId = ev[this.idField];
+        if (!recId) return;
+        if (window.MySpace && typeof window.MySpace.open === 'function') {
+            const self = this;
+            (async () => {
+                try {
+                    const instId = await window.MySpace.open('uniForm', { mode: 'record', tableName: self.tableName, recordID: recId });
+                    if (instId) {
+                        const onDestroyed = (e) => {
+                            try {
+                                const inst = window.MySpace.getInstance(instId);
+                                const destroyedForm = e && e.detail && e.detail.form;
+                                if (inst && inst.form && destroyedForm === inst.form) {
+                                    window.removeEventListener('form-destroyed', onDestroyed);
+                                    self._load({});
+                                }
+                            } catch (err) {}
+                        };
+                        window.addEventListener('form-destroyed', onDestroyed);
+                    }
+                } catch (err) { console.error('[Calendar] open record error:', err); }
+            })();
+        }
+    }
+
+    _selectRecord() {
+        if (!this.appForm) return;
+        if (!this._selectedId) { if (typeof showAlert === 'function') showAlert(__t('Please select a record')); return; }
+        const ev = (this.events || []).find(e => e[this.idField] === this._selectedId);
+        if (!ev) return;
+        try { this.appForm._currentRecord = ev.raw || ev; } catch (e) {}
+        try {
+            const inst = this.appForm && this.appForm.instance ? this.appForm.instance : null;
+            if (inst && typeof inst.onSelect === 'function') inst.onSelect({});
+            else if (typeof this.appForm.onSelect === 'function') this.appForm.onSelect({});
+        } catch (e) {}
+    }
+
+    _openSelected() {
+        if (!this._selectedId) { if (typeof showAlert === 'function') showAlert(__t('Please select a record')); return; }
+        const ev = (this.events || []).find(e => e[this.idField] === this._selectedId);
+        if (ev) this._activateRecord(ev);
+    }
+
+    _addBooking(prefill) {
+        if (!(window.MySpace && typeof window.MySpace.open === 'function')) return;
+        const params = { mode: 'record', tableName: this.tableName };
+        const pf = {};
+        if (this.hotelId) pf.hotelId = this.hotelId;
+        if (prefill && prefill.checkIn) {
+            pf.checkIn = prefill.checkIn;
+            pf.checkOut = this._ymd(this._addDays(this._parse(prefill.checkIn), 1));
+        }
+        if (Object.keys(pf).length) params.prefill = pf;
+        if (prefill && prefill.roomId) params.prefillTabular = { booking_rooms: [{ roomId: prefill.roomId }] };
+        const self = this;
+        (async () => {
+            try {
+                const instId = await window.MySpace.open('uniForm', params);
+                if (instId) {
+                    const onDestroyed = (e) => {
+                        try {
+                            const inst = window.MySpace.getInstance(instId);
+                            const destroyedForm = e && e.detail && e.detail.form;
+                            if (inst && inst.form && destroyedForm === inst.form) {
+                                window.removeEventListener('form-destroyed', onDestroyed);
+                                self._load({});
+                            }
+                        } catch (err) {}
+                    };
+                    window.addEventListener('form-destroyed', onDestroyed);
+                }
+            } catch (err) { console.error('[Calendar] add booking error:', err); }
+        })();
+    }
+
+    _deleteSelected() {
+        if (!this._selectedId) { if (typeof showAlert === 'function') showAlert(__t('Please select a record to delete')); return; }
+        const self = this;
+        const id = this._selectedId;
+        if (typeof window.showConfirm === 'function') {
+            window.showConfirm(__t('Are you sure you want to delete this record?'), async () => {
+                try {
+                    const result = await callServerMethod('uniForm', 'deleteRecord', { tableName: self.tableName, recordId: id });
+                    if (result && result.ok) { self._selectedId = null; self._load({}); }
+                    else if (typeof showAlert === 'function') showAlert(__t('Delete error: ') + ((result && result.error) || __t('unknown error')));
+                } catch (e) { console.error('[Calendar] delete error:', e); }
+            });
+        }
+    }
+
+    _shiftWindow(deltaDays) {
+        this.fromDate = this._ymd(this._addDays(this._parse(this.fromDate), deltaDays));
+        this.toDate = this._ymd(this._addDays(this._parse(this.toDate), deltaDays));
+        this._load({});
+    }
+
+    _goToday() {
+        const today = this._todayYmd();
+        this.fromDate = this._ymd(this._addDays(this._parse(today), -this.pastDays));
+        this.toDate = this._ymd(this._addDays(this._parse(today), this.futureDays));
+        this._load({});
+    }
+
+    _toggleOrientation() {
+        this.orientation = (this.orientation === 'vertical') ? 'horizontal' : 'vertical';
+        this._renderGrid();
+        this._scrollToToday();
+    }
+
+    destroy() {
+        try { if (this._resizeObserver && typeof this._resizeObserver.disconnect === 'function') this._resizeObserver.disconnect(); } catch (e) {}
+        this._resizeObserver = null;
+        try { if (this._relayoutTimer) { clearTimeout(this._relayoutTimer); this._relayoutTimer = null; } } catch (e) {}
+        try { for (const k in this._buttons) { if (this._buttons[k] && typeof this._buttons[k].destroy === 'function') this._buttons[k].destroy(); } } catch (e) {}
+        this._buttons = {};
+        try { if (this.element && typeof this.element.remove === 'function') this.element.remove(); } catch (e) {}
+        this.element = null; this._toolbarEl = null; this._scrollEl = null;
+        this._overlayEl = null; this._canvasEl = null; this._hotelSelect = null;
+    }
+}
+
 class Tabs extends UIObject {
     constructor(parentElement = null, properties = {}) {
         super();
@@ -9706,6 +10442,10 @@ class Tabs extends UIObject {
         this.tabs = Array.isArray(properties.tabs) ? properties.tabs : (properties.tabItems || []);
         this.appForm = properties.appForm || properties.app || null;
         this.caption = properties.caption || '';
+        // fillHeight: панель вкладок и активная вкладка растягиваются на всю высоту
+        // контент-области формы (нужно для вкладок с таблицей/календарём на весь экран).
+        // По умолчанию выключено — форма записи с полями размерится по контенту.
+        this.fillHeight = !!properties.fillHeight;
         this.element = null;
         this._header = null;
         this._content = null;
@@ -9751,6 +10491,7 @@ class Tabs extends UIObject {
         if (!this.element) {
             const wrapper = document.createElement('div');
             wrapper.classList.add('ui-tabs');
+            if (this.fillHeight) wrapper.classList.add('ui-tabs-fill');
 
             const header = document.createElement('div');
             header.classList.add('ui-tabs-header');
@@ -9807,13 +10548,18 @@ class Tabs extends UIObject {
                             await this.appForm.renderLayout(this._panes[i].pane, this._panes[i].tab.layout || []);
                         } catch (e) { console.error('Tabs pane render error', e); }
                     }
-                    // After all panes rendered — lock min-height to tallest pane
-                    requestAnimationFrame(() => {
-                        try {
-                            const maxH = Math.max(...this._panes.map(p => p.pane.offsetHeight || 0));
-                            if (maxH > 0) content.style.minHeight = maxH + 'px';
-                        } catch (e) {}
-                    });
+                    // After all panes rendered — lock min-height to tallest pane.
+                    // В fillHeight-режиме этого НЕ делаем: панель растягивается флексом на
+                    // всю высоту, а зафиксированный minHeight по высокому контенту (календарь)
+                    // распёр бы форму выше окна.
+                    if (!this.fillHeight) {
+                        requestAnimationFrame(() => {
+                            try {
+                                const maxH = Math.max(...this._panes.map(p => p.pane.offsetHeight || 0));
+                                if (maxH > 0) content.style.minHeight = maxH + 'px';
+                            } catch (e) {}
+                        });
+                    }
                 };
                 // Expose the render promise so the form's renderItem('tabs') can await
                 // pane rendering before scheduling _activateFirstRows(). Pane content

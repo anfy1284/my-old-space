@@ -540,8 +540,11 @@ async function buildTableFieldsFromModel(tableName) {
 
         const fields = meta.map(f => {
             const typeKey = f.type || '';
-            let inputType = 'textbox';
-            if (f.foreignKey) inputType = 'recordSelector';
+            // Явный inputType из db.json (метаданные getTableMetadata) имеет приоритет:
+            // поле может задать кастомный контрол (напр. "color"), не завязываясь на тип.
+            let inputType = f.inputType || 'textbox';
+            if (f.inputType) { /* явный контрол — по типу не переопределяем */ }
+            else if (f.foreignKey) inputType = 'recordSelector';
             else if (f.isAddress) inputType = 'address';
             else if (typeKey === 'INTEGER') inputType = 'integer';
             else if (typeKey === 'BOOLEAN') inputType = 'checkbox';
@@ -589,6 +592,7 @@ function mapInputTypeToControl(inputType) {
     if (t === 'address') return 'address';
     if (t === 'textarea' || t === 'text') return 'textarea';
     if (t === 'enum' || t === 'emunlist' || t === 'emunlist') return 'emunList';
+    if (t === 'color') return 'color';
     return 'textbox';
 }
 
@@ -970,6 +974,25 @@ async function generateFormSpec(tableName, params, sessionID) {
             if (Object.keys(dfltMap).length > 0) applyAutofillFromFields(data, fields, dfltMap);
         }
 
+        // Prefill: явные начальные значения скалярных полей новой записи
+        // (params.prefill = { field: value }). Имеет приоритет над автозаполнением.
+        // Для FK-полей резолвим display, чтобы поле сразу показало имя, а не UID.
+        if (isNew && params && params.prefill && typeof params.prefill === 'object') {
+            for (const [k, v] of Object.entries(params.prefill)) {
+                const item = data.find(d => d.name === k);
+                if (!item) continue;
+                item.value = v;
+                const sel = item.properties && item.properties.selection;
+                if (sel && sel.table && v != null && v !== '') {
+                    try {
+                        const pfDbGW = require('../../drive_root/dbGateway');
+                        const trg = await pfDbGW.execute({ operation: 'findByPk', table: sel.table, where: { UID: v }, options: { raw: true }, context: { appName: 'uniForm', sessionID } });
+                        if (trg) item.selection = { id: trg.UID, display: trg[sel.displayField || 'name'] || String(trg.UID) };
+                    } catch (e) { /* без display — поле покажет UID до перезагрузки */ }
+                }
+            }
+        }
+
         if (!layout) {
             layout = [
                 { type: 'commandBar' },
@@ -995,6 +1018,14 @@ async function generateFormSpec(tableName, params, sessionID) {
                         const tsParentField = tsDef.tabularSection && tsDef.tabularSection.parentField;
                         if (!tsTableName || !tsParentField) return null;
 
+                        // prefillTabular: для новой записи можно предзаполнить строки ТЧ
+                        // (напр. календарь добавляет бронь с уже выбранной комнатой).
+                        const prefillRows = (isNew && params && params.prefillTabular && Array.isArray(params.prefillTabular[tsTableName]))
+                            ? params.prefillTabular[tsTableName].map(r => Object.assign(
+                                { UID: (_util && typeof _util.generateUID === 'function') ? _util.generateUID(tsDef.name) : undefined },
+                                r))
+                            : null;
+
                         // Строки ТЧ и метаданные полей независимы → читаем параллельно.
                         const tsRowsP = (effectiveRecordId && !isNew)
                             ? (async () => {
@@ -1010,7 +1041,7 @@ async function generateFormSpec(tableName, params, sessionID) {
                                     return [];
                                 }
                             })()
-                            : Promise.resolve([]);
+                            : Promise.resolve(prefillRows || []);
 
                         const tsFieldsP = (async () => {
                             try {

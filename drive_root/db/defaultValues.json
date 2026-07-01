@@ -41,6 +41,13 @@
             "typeId": "000000000-roles-0001",
             "options": { "referenceTable": "languages", "displayField": "name" },
             "UID": "000000000-users-0007"
+        },
+        {
+            "name": "BookingCalendarOrientation",
+            "displayName": "calendar_orientation_setting",
+            "typeId": "000000000-roles-0005",
+            "options": ["horizontal", "vertical"],
+            "UID": "000000000-users-0008"
         }
     ],
     "languages": [

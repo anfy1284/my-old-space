@@ -1,4 +1,10 @@
 {
+    "calendar_orientation_setting": {
+        "en": "Booking calendar orientation",
+        "ru": "Ориентация календаря броней",
+        "de": "Ausrichtung des Buchungskalenders",
+        "pl": "Orientacja kalendarza rezerwacji"
+    },
     "user_settings_app_caption": {
         "en": "User Settings",
         "ru": "Настройки пользователя",

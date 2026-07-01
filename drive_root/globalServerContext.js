@@ -771,6 +771,10 @@ async function getTableMetadata(modelName) {
             }
         }
 
+        // Явный inputType из db.json (как isAddress) — позволяет полю задать кастомный
+        // контрол (напр. "color" для пикера цвета), не завязываясь на тип Sequelize.
+        const explicitInputType = (modelDef && modelDef.fields && modelDef.fields[fieldName] && modelDef.fields[fieldName].inputType) || null;
+
         fields.push({
             name: fieldName,
             caption: caption,
@@ -780,7 +784,8 @@ async function getTableMetadata(modelName) {
             isPrimary: !!attr.primaryKey,
             isUID: fieldName === 'UID',
             editable: false,  // All fields readonly for now
-            isAddress: !!(modelDef && modelDef.fields && modelDef.fields[fieldName] && modelDef.fields[fieldName].isAddress)
+            isAddress: !!(modelDef && modelDef.fields && modelDef.fields[fieldName] && modelDef.fields[fieldName].isAddress),
+            inputType: explicitInputType
         });
     }
 
