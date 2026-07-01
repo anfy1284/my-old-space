@@ -9886,6 +9886,18 @@ class Calendar extends UIObject {
         this._buttons = {};
         this._hotelSelect = null;
         this._initialLoadPromise = null;
+        // Прокрутка/окно: к «сегодня» перематываем только один раз (первый показ);
+        // далее позиция сохраняется. Диапазон авто-расширяется при скролле к краям.
+        this._scrolledOnce = false;
+        this._forceToday = false;
+        this._extending = false;
+        this._extendChunk = 30;
+        this._pendingScrollDelta = 0;
+        this._lastW = 0;
+        this._lastH = 0;
+        // Ориентацию из настройки применяем один раз (первая загрузка); далее авторитетна
+        // клиентская (пользователь мог переключить кнопкой), перезагрузки её не сбрасывают.
+        this._orientationInitialized = false;
     }
 
     // ── Утилиты дат ──────────────────────────────────────────────────────────
@@ -9921,12 +9933,24 @@ class Calendar extends UIObject {
             this._buildToolbar();
 
             // Пересчёт раскладки при изменении размера контейнера (ресайз окна, появление
-            // вкладки из display:none): строки-ресурсы растягиваются под доступную высоту,
-            // сетка перестраивается, восстанавливается прокрутка к сегодня.
+            // вкладки): строки-ресурсы растягиваются под доступную высоту, позиция скролла
+            // сохраняется. Прокрутка к сегодня — только при первом показе.
             if (typeof ResizeObserver !== 'undefined') {
                 this._resizeObserver = new ResizeObserver(() => this._scheduleRelayout());
                 try { this._resizeObserver.observe(this._scrollEl); } catch (e) {}
             }
+
+            // Колесо мыши в горизонтальном календаре крутит по горизонтали (ось времени).
+            this._scrollEl.addEventListener('wheel', (e) => {
+                if (this.orientation === 'vertical') return; // вертикальный — натуральный скролл
+                if (e.deltaY !== 0 && Math.abs(e.deltaY) >= Math.abs(e.deltaX)) {
+                    this._scrollEl.scrollLeft += e.deltaY;
+                    e.preventDefault();
+                }
+            }, { passive: false });
+
+            // Авто-расширение диапазона дат при скролле к краям (вместо кнопок ←/→).
+            this._scrollEl.addEventListener('scroll', () => this._onScroll());
         }
         if (container && this.element && !this.element.parentElement) {
             try { container.appendChild(this.element); } catch (e) {}
@@ -9962,9 +9986,9 @@ class Calendar extends UIObject {
 
         const isSelect = !!(this.appForm && this.appForm.selectMode);
 
-        this._mkButton('prev',  __t('calendar_prev'),  ic('prev'),  () => self._shiftWindow(-30), { showText: false });
+        // Диапазон авто-расширяется при скролле — кнопок ←/→ нет. «Сегодня» перематывает
+        // к текущей дате, поворот меняет ориентацию.
         this._mkButton('today', __t('calendar_today'), ic('calendar'), () => self._goToday());
-        this._mkButton('next',  __t('calendar_next'),  ic('next'), () => self._shiftWindow(30),  { showText: false });
         this._mkButton('orientation', __t('calendar_orientation_toggle'), ic('orientation'), () => self._toggleOrientation(), { showText: false });
 
         if (!isSelect) {
@@ -10014,10 +10038,68 @@ class Calendar extends UIObject {
         this.events = d.events || [];
         if (d.from) this.fromDate = d.from;
         if (d.to) this.toDate = d.to;
-        if (d.orientation) this.orientation = (d.orientation === 'vertical') ? 'vertical' : 'horizontal';
+        // Ориентацию из настройки — только при первой загрузке; далее не трогаем
+        // (иначе toggle-ориентация слетала бы при каждой подгрузке диапазона).
+        if (d.orientation && !this._orientationInitialized) {
+            this.orientation = (d.orientation === 'vertical') ? 'vertical' : 'horizontal';
+        }
+        this._orientationInitialized = true;
         this._renderHotelSelect();
+        this._renderPreservingScroll();
+    }
+
+    // Перерисовка сетки с сохранением позиции скролла. К «сегодня» перематываем только
+    // при первом показе (или по явному запросу _forceToday); иначе восстанавливаем прежнюю
+    // позицию (+ дельта при расширении окна влево, т.к. контент сместился вправо).
+    _renderPreservingScroll() {
+        const scroll = this._scrollEl;
+        const prevLeft = scroll ? scroll.scrollLeft : 0;
+        const prevTop = scroll ? scroll.scrollTop : 0;
+        const delta = this._pendingScrollDelta || 0;
+        this._pendingScrollDelta = 0;
         this._renderGrid();
-        this._scrollToToday();
+        // Скрыт/не разложен (нулевая ширина или высота) — позицию выставит _scheduleRelayout
+        // при реальном появлении вкладки.
+        if (!scroll || scroll.clientWidth === 0 || scroll.clientHeight === 0) return;
+        this._lastW = scroll.clientWidth; this._lastH = scroll.clientHeight;
+        if (this._forceToday || !this._scrolledOnce) {
+            this._scrollToToday();
+            this._scrolledOnce = true;
+            this._forceToday = false;
+        } else if (this.orientation !== 'vertical') {
+            scroll.scrollLeft = prevLeft + delta;
+        } else {
+            scroll.scrollTop = prevTop + delta;
+        }
+    }
+
+    // Скролл к краю → расширяем окно дат (бесконечная лента вместо кнопок ←/→).
+    _onScroll() {
+        if (this._extending) return;
+        const scroll = this._scrollEl;
+        if (!scroll || !this._dates) return;
+        const horizontal = this.orientation !== 'vertical';
+        const step = horizontal ? this.dayW : this.dateRowH;
+        const pos = horizontal ? scroll.scrollLeft : scroll.scrollTop;
+        const size = horizontal ? scroll.clientWidth : scroll.clientHeight;
+        const total = horizontal ? scroll.scrollWidth : scroll.scrollHeight;
+        const edge = step * 3;
+        if (pos < edge) this._extendWindow('past');
+        else if (pos > total - size - edge) this._extendWindow('future');
+    }
+
+    _extendWindow(dir) {
+        if (this._extending) return;
+        this._extending = true;
+        const step = (this.orientation !== 'vertical') ? this.dayW : this.dateRowH;
+        if (dir === 'past') {
+            this.fromDate = this._ymd(this._addDays(this._parse(this.fromDate), -this._extendChunk));
+            // Контент вырос слева на chunk*step → добавляем к позиции, чтобы вид не «прыгнул».
+            this._pendingScrollDelta = this._extendChunk * step;
+        } else {
+            this.toDate = this._ymd(this._addDays(this._parse(this.toDate), this._extendChunk));
+        }
+        Promise.resolve(this._load({})).finally(() => { this._extending = false; });
     }
 
     // ── Рендер сетки ─────────────────────────────────────────────────────────
@@ -10053,91 +10135,72 @@ class Calendar extends UIObject {
             if (fill > lane) lane = Math.min(laneMax, fill);
         }
         const todayYmd = this._todayYmd();
+        const labelW = this.labelW, headerH = this.headerH;
+        const weekdays = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
 
+        const timeAxisPx = timeCount * step;
+        const resAxisPx  = resCount * lane;
+        const totalW   = labelW + (horizontal ? timeAxisPx : resAxisPx);
+        const bodyMain = horizontal ? resAxisPx : timeAxisPx;   // высота тела
+
+        // Строково-слоевая раскладка (не CSS-grid): у sticky-шапки и sticky-жёлоба
+        // containing block во всю ширину/высоту, поэтому они «приклеены» на всём протяжении
+        // скролла (в grid containing block sticky-ячейки — её узкий трек, и подписи «уезжали»).
         const canvas = document.createElement('div');
         canvas.classList.add('ui-calendar-canvas');
-        canvas.classList.add(horizontal ? 'ui-cal-h' : 'ui-cal-v');
-        if (horizontal) {
-            canvas.style.gridTemplateColumns = `${this.labelW}px repeat(${timeCount}, ${step}px)`;
-            canvas.style.gridTemplateRows = `${this.headerH}px repeat(${resCount}, ${lane}px)`;
-        } else {
-            canvas.style.gridTemplateColumns = `${this.labelW}px repeat(${resCount}, ${lane}px)`;
-            canvas.style.gridTemplateRows = `${this.headerH}px repeat(${timeCount}, ${step}px)`;
-        }
+        canvas.style.width = totalW + 'px';
 
-        // Угол
+        // ── Шапка (sticky top): угол + ячейки оси (даты по горизонтали | комнаты по вертикали) ──
+        const header = document.createElement('div');
+        header.classList.add('ui-calendar-headrow');
+        header.style.width = totalW + 'px';
+        header.style.height = headerH + 'px';
         const corner = document.createElement('div');
         corner.classList.add('ui-calendar-corner');
-        canvas.appendChild(corner);
-
-        // Шапка + жёлоб
-        const weekdays = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
-        if (horizontal) {
-            // Шапка дат (top, sticky), жёлоб комнат (left, sticky)
-            dates.forEach((ymd, i) => {
-                const c = document.createElement('div');
+        corner.style.width = labelW + 'px';
+        corner.style.height = headerH + 'px';
+        header.appendChild(corner);
+        const headCount = horizontal ? timeCount : resCount;
+        const headSize  = horizontal ? step : lane;
+        for (let i = 0; i < headCount; i++) {
+            const c = document.createElement('div');
+            c.style.position = 'absolute';
+            c.style.top = '0';
+            c.style.left = (labelW + i * headSize) + 'px';
+            c.style.width = headSize + 'px';
+            c.style.height = headerH + 'px';
+            if (horizontal) {
                 c.classList.add('ui-calendar-datehead');
+                const ymd = dates[i], dt = this._parse(ymd);
                 if (ymd === todayYmd) c.classList.add('ui-cal-today');
-                const dt = this._parse(ymd);
-                const wd = weekdays[dt.getDay()];
                 if (dt.getDay() === 0 || dt.getDay() === 6) c.classList.add('ui-cal-weekend');
-                c.innerHTML = `<span class="ui-cal-wd">${wd}</span><span class="ui-cal-dn">${this._pad(dt.getDate())}.${this._pad(dt.getMonth() + 1)}</span>`;
-                c.style.gridColumn = (i + 2) + '';
-                c.style.gridRow = '1';
-                canvas.appendChild(c);
-            });
-            rooms.forEach((room, r) => {
-                const c = document.createElement('div');
-                c.classList.add('ui-calendar-roomlabel');
-                c.textContent = room.number || room.name || room.UID;
-                c.title = c.textContent;
-                c.style.gridColumn = '1';
-                c.style.gridRow = (r + 2) + '';
-                canvas.appendChild(c);
-            });
-        } else {
-            rooms.forEach((room, r) => {
-                const c = document.createElement('div');
+                c.innerHTML = `<span class="ui-cal-wd">${weekdays[dt.getDay()]}</span><span class="ui-cal-dn">${this._pad(dt.getDate())}.${this._pad(dt.getMonth() + 1)}</span>`;
+            } else {
                 c.classList.add('ui-calendar-roomhead');
+                const room = rooms[i];
                 c.textContent = room.number || room.name || room.UID;
                 c.title = c.textContent;
-                c.style.gridColumn = (r + 2) + '';
-                c.style.gridRow = '1';
-                canvas.appendChild(c);
-            });
-            dates.forEach((ymd, i) => {
-                const c = document.createElement('div');
-                c.classList.add('ui-calendar-datelabel');
-                if (ymd === todayYmd) c.classList.add('ui-cal-today');
-                const dt = this._parse(ymd);
-                if (dt.getDay() === 0 || dt.getDay() === 6) c.classList.add('ui-cal-weekend');
-                c.textContent = `${weekdays[dt.getDay()]} ${this._pad(dt.getDate())}.${this._pad(dt.getMonth() + 1)}`;
-                c.style.gridColumn = '1';
-                c.style.gridRow = (i + 2) + '';
-                canvas.appendChild(c);
-            });
+            }
+            header.appendChild(c);
         }
+        canvas.appendChild(header);
 
-        // Тело-оверлей (span на всю область данных): фон-сетка + полосы
+        // ── Тело: оверлей полос + жёлоб подписей (sticky left) ──
+        const bodyWrap = document.createElement('div');
+        bodyWrap.classList.add('ui-calendar-bodywrap');
+        bodyWrap.style.width = totalW + 'px';
+        bodyWrap.style.height = bodyMain + 'px';
+
         const overlay = document.createElement('div');
         overlay.classList.add('ui-calendar-overlay');
-        if (horizontal) {
-            overlay.style.gridColumn = `2 / span ${Math.max(timeCount, 1)}`;
-            overlay.style.gridRow = `2 / span ${Math.max(resCount, 1)}`;
-            overlay.style.width = (timeCount * step) + 'px';
-            overlay.style.height = (resCount * lane) + 'px';
-            // Вертикальные линии дней + подсветка сегодня/выходных через градиент-фон.
-            overlay.style.backgroundSize = `${step}px ${lane}px`;
-        } else {
-            overlay.style.gridColumn = `2 / span ${Math.max(resCount, 1)}`;
-            overlay.style.gridRow = `2 / span ${Math.max(timeCount, 1)}`;
-            overlay.style.width = (resCount * lane) + 'px';
-            overlay.style.height = (timeCount * step) + 'px';
-            overlay.style.backgroundSize = `${lane}px ${step}px`;
-        }
+        overlay.style.left = labelW + 'px';
+        overlay.style.top = '0';
+        overlay.style.width = (horizontal ? timeAxisPx : resAxisPx) + 'px';
+        overlay.style.height = bodyMain + 'px';
+        overlay.style.backgroundSize = horizontal ? `${step}px ${lane}px` : `${lane}px ${step}px`;
         this._overlayEl = overlay;
 
-        // Колонка/строка «сегодня» — подсветка
+        // Подсветка «сегодня»
         const todayIdx = dates.indexOf(todayYmd);
         if (todayIdx >= 0) {
             const tline = document.createElement('div');
@@ -10236,7 +10299,40 @@ class Calendar extends UIObject {
             self._addBooking({ checkIn: dates[dayIdx], roomId: rooms[resIdx].UID });
         });
 
-        canvas.appendChild(overlay);
+        bodyWrap.appendChild(overlay);
+
+        // Жёлоб подписей (sticky left) — один элемент во всю высоту тела: containing block
+        // = bodyWrap (полная ширина), поэтому подписи «приклеены» при любом гор. скролле.
+        const gutter = document.createElement('div');
+        gutter.classList.add('ui-calendar-gutter');
+        gutter.style.width = labelW + 'px';
+        gutter.style.height = bodyMain + 'px';
+        const gutCount = horizontal ? resCount : timeCount;
+        const gutSize  = horizontal ? lane : step;
+        for (let i = 0; i < gutCount; i++) {
+            const c = document.createElement('div');
+            c.style.position = 'absolute';
+            c.style.left = '0';
+            c.style.top = (i * gutSize) + 'px';
+            c.style.width = labelW + 'px';
+            c.style.height = gutSize + 'px';
+            if (horizontal) {
+                c.classList.add('ui-calendar-roomlabel');
+                const room = rooms[i];
+                c.textContent = room.number || room.name || room.UID;
+                c.title = c.textContent;
+            } else {
+                c.classList.add('ui-calendar-datelabel');
+                const ymd = dates[i], dt = this._parse(ymd);
+                if (ymd === todayYmd) c.classList.add('ui-cal-today');
+                if (dt.getDay() === 0 || dt.getDay() === 6) c.classList.add('ui-cal-weekend');
+                c.textContent = `${weekdays[dt.getDay()]} ${this._pad(dt.getDate())}.${this._pad(dt.getMonth() + 1)}`;
+            }
+            gutter.appendChild(c);
+        }
+        bodyWrap.appendChild(gutter);
+
+        canvas.appendChild(bodyWrap);
         scroll.appendChild(canvas);
         this._canvasEl = canvas;
         this._dates = dates;
@@ -10267,16 +10363,17 @@ class Calendar extends UIObject {
         } catch (e) {}
     }
 
-    // Дебаунс-пересборка сетки под текущий размер (растяжение строк) + перемотка к сегодня.
+    // Дебаунс-пересборка сетки под текущий размер (растяжение строк) с сохранением скролла.
     _scheduleRelayout() {
         if (this._relayoutTimer) return;
         this._relayoutTimer = setTimeout(() => {
             this._relayoutTimer = null;
             const scroll = this._scrollEl;
-            if (scroll && scroll.clientWidth > 0 && this._dates) {
-                this._renderGrid();
-                this._scrollToToday();
-            }
+            if (!scroll || scroll.clientWidth === 0 || !this._dates) return;
+            // Размер не изменился (напр. переключение вкладки visibility) и уже прокручивали —
+            // не пересобираем: позиция скролла сохраняется сама, лишняя работа не нужна.
+            if (this._scrolledOnce && scroll.clientWidth === this._lastW && scroll.clientHeight === this._lastH) return;
+            this._renderPreservingScroll();
         }, 60);
     }
 
@@ -10393,23 +10490,19 @@ class Calendar extends UIObject {
         }
     }
 
-    _shiftWindow(deltaDays) {
-        this.fromDate = this._ymd(this._addDays(this._parse(this.fromDate), deltaDays));
-        this.toDate = this._ymd(this._addDays(this._parse(this.toDate), deltaDays));
-        this._load({});
-    }
-
     _goToday() {
         const today = this._todayYmd();
         this.fromDate = this._ymd(this._addDays(this._parse(today), -this.pastDays));
         this.toDate = this._ymd(this._addDays(this._parse(today), this.futureDays));
+        this._forceToday = true;
         this._load({});
     }
 
     _toggleOrientation() {
         this.orientation = (this.orientation === 'vertical') ? 'horizontal' : 'vertical';
-        this._renderGrid();
-        this._scrollToToday();
+        // Смена оси делает прежнюю позицию бессмысленной — центрируем на сегодня.
+        this._forceToday = true;
+        this._renderPreservingScroll();
     }
 
     destroy() {

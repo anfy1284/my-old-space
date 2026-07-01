@@ -865,24 +865,31 @@ input[type="checkbox"],
     background: #ffffff;
 }
 .ui-calendar-canvas {
-    display: grid;
     position: relative;
     background: #ffffff;
 }
-.ui-calendar-corner {
+/* Шапка (sticky top) — приклеена при вертикальном скролле; ячейки внутри позиционируются
+   абсолютно, угол — sticky left (приклеен при горизонтальном скролле). */
+.ui-calendar-headrow {
     position: sticky;
     top: 0;
+    z-index: 5;
+    box-sizing: border-box;
+}
+.ui-calendar-corner {
+    position: sticky;
     left: 0;
     z-index: 6;
+    display: inline-block;
+    vertical-align: top;
+    box-sizing: border-box;
     background: #c0c0c0;
     border-right: 1px solid #808080;
     border-bottom: 1px solid #808080;
 }
 .ui-calendar-datehead,
 .ui-calendar-roomhead {
-    position: sticky;
-    top: 0;
-    z-index: 5;
+    box-sizing: border-box;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -893,11 +900,20 @@ input[type="checkbox"],
     overflow: hidden;
     white-space: nowrap;
 }
-.ui-calendar-roomlabel,
-.ui-calendar-datelabel {
+/* Тело: относительный контейнер; жёлоб подписей — sticky left, во всю высоту тела. */
+.ui-calendar-bodywrap {
+    position: relative;
+    box-sizing: border-box;
+}
+.ui-calendar-gutter {
     position: sticky;
     left: 0;
     z-index: 4;
+    box-sizing: border-box;
+}
+.ui-calendar-roomlabel,
+.ui-calendar-datelabel {
+    box-sizing: border-box;
     display: flex;
     align-items: center;
     padding: 0 6px;
@@ -915,7 +931,7 @@ input[type="checkbox"],
 .ui-calendar-datehead.ui-cal-today,
 .ui-calendar-datelabel.ui-cal-today { background: #fff3b0; }
 .ui-calendar-overlay {
-    position: relative;
+    position: absolute;
     z-index: 1;
     background-color: #ffffff;
     background-image:
@@ -946,10 +962,13 @@ input[type="checkbox"],
     display: flex;
     align-items: center;
 }
+/* Вертикальная ориентация: полоса — вертикальная лента, но текст остаётся ГОРИЗОНТАЛЬНЫМ
+   и прижат к верху (читаемо для высоких полос). */
 .ui-calendar-bar-v {
-    writing-mode: vertical-rl;
-    text-orientation: mixed;
-    justify-content: center;
+    align-items: flex-start;
+    padding-top: 3px;
+    white-space: normal;
+    word-break: break-word;
 }
 .ui-calendar-bar.ui-cal-selected {
     outline: 2px solid #000000;
