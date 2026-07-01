@@ -9839,9 +9839,10 @@ class Table extends UIObject {
 //   tableName — таблица записи (open/select/add); serverScript+loadFn — RPC данных
 //   orientation — 'horizontal' (даты по X) | 'vertical' (даты по Y)
 //
-// Единица — НОЧЬ: бронь занимает «половину заезда» даты заезда → «половину выезда»
-// даты выезда (полоса смещена на полклетки), что само даёт диагональ на стыках.
-// Свободная половина-заезда — цель двойного клика для новой брони с этой даты.
+// Единица — НОЧЬ: прямоугольник от СЕРЕДИНЫ дня заезда до СЕРЕДИНЫ дня выезда (смещение на
+// полклетки). В день смены уезжающая бронь занимает левую половину клетки, приезжающая —
+// правую (встык через зазор 1px) — классическая PMS-шахматка, но без диагоналей. Двойной
+// клик по пустой ячейке — новая бронь с этой даты как датой заезда.
 //
 // Данные тянет сам через window.callServer(serverScript, loadFn, { hotelId, from, to })
 // → { hotels:[{UID,name}], hotelId, rooms:[{UID,number}], events:[...], from, to, orientation }.
@@ -10152,7 +10153,6 @@ class Calendar extends UIObject {
         }
 
         // Полосы броней
-        const slant = Math.round(step / 2);
         const roomIndex = {};
         rooms.forEach((room, idx) => { roomIndex[room.UID] = idx; });
 
@@ -10180,43 +10180,32 @@ class Calendar extends UIObject {
             bar.title = `${label} (${ev[this.startField]} – ${ev[this.endField]})`;
             bar.dataset.recordId = ev[this.idField];
 
-            // Геометрия: смещение на полклетки (модель «ночи»). Полоса от середины
-            // дня заезда до середины дня выезда. Часть, выходящая за окно, отсекается
-            // плоским краем (продолжение), внутри окна — диагональю (стык гостей).
-            const startPx = (sIdx + 0.5) * step;
-            const endPx = (eIdx + 0.5) * step;
+            // Геометрия «ночей»: прямоугольник от СЕРЕДИНЫ дня заезда до СЕРЕДИНЫ дня
+            // выезда (смещение на полклетки). В день смены уезжающая бронь занимает левую
+            // половину клетки, приезжающая — правую (встык через зазор), как в PMS-шахматке.
+            // Без диагоналей — обычные прямоугольники. Часть вне окна отсекается.
             const maxPx = timeCount * step;
-            let a = startPx, b = endPx, flatStart = false, flatEnd = false;
-            if (a < 0) { a = 0; flatStart = true; }
-            if (b > maxPx) { b = maxPx; flatEnd = true; }
+            let a = (sIdx + 0.5) * step;
+            let b = (eIdx + 0.5) * step;
+            if (a < 0) a = 0;
+            if (b > maxPx) b = maxPx;
             const lenPx = b - a;
             if (lenPx <= 1) return;
-            // Наклон рисуется только на «внутренних» краях; отступ текста уводит его
-            // из-под диагонали (иначе первые/последние буквы обрезаются).
-            const L = flatStart ? 0 : slant;
-            const R = flatEnd ? 0 : slant;
-            const padStart = flatStart ? 5 : Math.round(slant * 0.6);
-            const padEnd = flatEnd ? 5 : Math.round(slant * 0.6);
-            // Толщина полосы по оси ресурса ограничена и центрируется в строке —
-            // при растянутых строках полоса не раздувается на всю высоту.
-            const thick = Math.min(lane - 6, horizontal ? 40 : 80);
-            const off = Math.round((lane - thick) / 2);
+            // Зазор между соседними бронями (день смены), поля по оси ресурса —
+            // полоса растягивается на высоту строки, оставляя разделители между строками.
+            const gap = 1;
+            const marginCross = 4;
+            const thick = Math.max(10, lane - marginCross * 2);
             if (horizontal) {
-                bar.style.left = a + 'px';
-                bar.style.width = lenPx + 'px';
-                bar.style.top = (r * lane + off) + 'px';
+                bar.style.left = (a + gap) + 'px';
+                bar.style.width = Math.max(1, lenPx - gap * 2) + 'px';
+                bar.style.top = (r * lane + marginCross) + 'px';
                 bar.style.height = thick + 'px';
-                bar.style.clipPath = `polygon(${L}px 0, 100% 0, calc(100% - ${R}px) 100%, 0 100%)`;
-                bar.style.paddingLeft = padStart + 'px';
-                bar.style.paddingRight = padEnd + 'px';
             } else {
-                bar.style.top = a + 'px';
-                bar.style.height = lenPx + 'px';
-                bar.style.left = (r * lane + off) + 'px';
+                bar.style.top = (a + gap) + 'px';
+                bar.style.height = Math.max(1, lenPx - gap * 2) + 'px';
+                bar.style.left = (r * lane + marginCross) + 'px';
                 bar.style.width = thick + 'px';
-                bar.style.clipPath = `polygon(0 ${L}px, 100% 0, 100% calc(100% - ${R}px), 0 100%)`;
-                bar.style.paddingTop = padStart + 'px';
-                bar.style.paddingBottom = padEnd + 'px';
                 bar.classList.add('ui-calendar-bar-v');
             }
             if (ev[this.idField] === this._selectedId) bar.classList.add('ui-cal-selected');
