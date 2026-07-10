@@ -1212,6 +1212,21 @@ async function generateFormSpec(tableName, params, sessionID) {
                     } catch (e) {
                         console.error('[uniForm/generateFormSpec] tabularFilter load error for', targetTable, ':', e && e.message);
                     }
+                } else if (isNew && params && params.prefillTabular && Array.isArray(params.prefillTabular[targetTable])) {
+                    // prefillTabular для КАСТОМНЫХ лейаутов («создать на основании»):
+                    // новая запись открывается с предзаполненными строками ТЧ — данные
+                    // живут только на форме, в БД попадут при сохранении (applyChanges).
+                    // Зеркало prefillRows авто-ТЧ выше; UID строк генерируем здесь же,
+                    // FK display-значения дорезолвит общий блок ниже (rows.length > 0).
+                    try {
+                        const globalCtxPT = require('../../drive_root/globalServerContext');
+                        const tsModelName = globalCtxPT.getModelNameForTable(targetTable) || targetTable;
+                        rows = params.prefillTabular[targetTable].map(r => Object.assign(
+                            { UID: (_util && typeof _util.generateUID === 'function') ? _util.generateUID(tsModelName) : undefined },
+                            r));
+                    } catch (e) {
+                        console.error('[uniForm/generateFormSpec] tabularFilter prefill error for', targetTable, ':', e && e.message);
+                    }
                 }
                 if (rows.length > 0) {
                     try {
@@ -1274,11 +1289,13 @@ async function generateFormSpec(tableName, params, sessionID) {
             resolvedCaption = resolvedCaption + ' ' + presentation;
         }
 
-        // Форма записи без явного windowState открывается по центру экрана с подгонкой
-        // размера под контент (DataForm.Draw, windowState:'centered'). Касается и авто-форм,
-        // и кастомных лейаутов, не задавших windowState — иначе при отсутствии хардкода
-        // размера/позиции окно оказалось бы 0×0 в углу.
-        let finalWindowState = windowState || 'centered';
+        // Форма записи без явного windowState: СУЩНОСТИ (документы/справочники,
+        // entityConfig.entityType) по умолчанию разворачиваются на весь экран —
+        // это «рабочие» окна уровня ERP (бронь, счёт, прайс-лист). Прочие формы
+        // (настройки, простые виртуальные) — по центру экрана с подгонкой размера
+        // под контент (DataForm.Draw, windowState:'centered'); иначе при отсутствии
+        // хардкода размера/позиции окно оказалось бы 0×0 в углу.
+        let finalWindowState = windowState || (getEntityTypeForTable(tableName) ? 'maximized' : 'centered');
 
         // Translate all { i18n: 'key' } objects in layout before sending to client
         if (Array.isArray(layout)) {
