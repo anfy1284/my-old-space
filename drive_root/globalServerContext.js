@@ -874,6 +874,31 @@ async function getDynamicTableData(options) {
             else if (operator === 'endsWith')   where[field] = { [Op.like]: `%${value}` };
             else if (operator === 'isNull')     where[field] = null;
             else if (operator === 'isNotNull')  where[field] = { [Op.ne]: null };
+            else if (operator === 'in')         where[field] = { [Op.in]: Array.isArray(value) ? value : [value] };
+            else if (operator === 'inRelated') {
+                // «Список связанных записей» через таблицу-связку (аналог подзапроса):
+                //   value = { table, select, where } → field IN (SELECT select FROM table WHERE where)
+                // Связка читается через dbGateway с ТЕМ ЖЕ контекстом (RLS применяется).
+                // Пример (relatedList счетов брони): field='UID', value={ table:'invoice_bookings',
+                // select:'invoiceId', where:{ bookingId: <UID брони> } }.
+                let ids = [];
+                try {
+                    const linkRows = await require('./dbGateway').execute({
+                        operation: 'read',
+                        table: value && value.table,
+                        where: (value && value.where) || {},
+                        options: { raw: true },
+                        context: dbContext
+                    });
+                    const sel = value && value.select;
+                    ids = (Array.isArray(linkRows) ? linkRows : [])
+                        .map(r => r && r[sel])
+                        .filter(v => v !== null && v !== undefined);
+                } catch (e) {
+                    console.error('[getDynamicTableData] inRelated subquery failed:', e && e.message || e);
+                }
+                where[field] = { [Op.in]: ids };
+            }
         }
     }
 

@@ -183,6 +183,17 @@ function registerDynamicTableMethods(appName, config = {}) {
                 fieldConfig = null;
             }
 
+            // Явный выбор видимых колонок (params.fields: ['number','date',...]) —
+            // используется встраиваемыми списками (relatedList), которым не нужны
+            // все колонки модели. Порядок колонок — порядок в params.fields.
+            // На состав ДАННЫХ не влияет (строки по-прежнему несут все поля, вкл. UID).
+            if (Array.isArray(params.fields) && params.fields.length && Array.isArray(fieldConfig)) {
+                const wanted = params.fields;
+                fieldConfig = wanted
+                    .map(n => fieldConfig.find(f => f && (f.name === n || f.data === n)))
+                    .filter(Boolean);
+            }
+
             // Вызов глобальной функции получения сырых данных
             const raw = await globalServerContext.getDynamicTableData({
                 modelName,

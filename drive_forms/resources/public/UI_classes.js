@@ -825,6 +825,15 @@ class Form extends UIObject {
         try {
             // If the form has a DynamicTable or other control assigned to common properties, destroy them
             try { if (this.table && typeof this.table.destroy === 'function') this.table.destroy(); } catch (e) {}
+            // ВСЕ таблицы формы (this._tables), не только первая: у DynamicTable/relatedList
+            // есть долгоживущие ресурсы (SSE-подписка, таймеры) — без destroy они утекают.
+            try {
+                if (Array.isArray(this._tables)) {
+                    for (const tbl of this._tables) {
+                        try { if (tbl && tbl !== this.table && typeof tbl.destroy === 'function') tbl.destroy(); } catch (e) {}
+                    }
+                }
+            } catch (e) {}
             try { if (this._child && typeof this._child.destroy === 'function') this._child.destroy(); } catch (e) {}
         } catch (e) {}
 
@@ -2749,13 +2758,33 @@ class DataForm extends Form {
                 const extraButtons = Array.isArray(item.extraButtons) ? item.extraButtons : [];
                 for (const exBtn of extraButtons) {
                     const exCaption = (typeof exBtn.caption === 'string') ? exBtn.caption : (exBtn.caption || '');
-                    const btn = new Button(cmdBarEl, {
+                    const exProps = {
                         caption: exCaption,
                         tooltip: exBtn.tooltip || exCaption,
                         icon: exBtn.icon || null,
                         showIcon: !!(exBtn.icon),
                         showText: true
-                    });
+                    };
+                    let btn;
+                    if (exBtn.type === 'splitButton') {
+                        // Кнопка с выпадающим меню. Декларативные пункты menu:
+                        // [{ caption, icon, onClick }] — onClick это binding клиентского
+                        // скрипта (строка 'fn' | { fn, fnParams }), диспетчеризуется через
+                        // callClientBinding — тот же путь, что events контролов.
+                        const formSelfEx = this;
+                        const menuItems = (Array.isArray(exBtn.menu) ? exBtn.menu : []).map(mi => {
+                            if (mi && mi.separator) return { separator: true };
+                            const binding = mi && ((mi.events && mi.events.onClick) || mi.onClick);
+                            return {
+                                caption: (mi && typeof mi.caption === 'string') ? mi.caption : ((mi && mi.caption) || ''),
+                                icon: (mi && mi.icon) || null,
+                                onClick: binding ? ((ev) => formSelfEx.callClientBinding(binding, [ev])) : null
+                            };
+                        });
+                        btn = new SplitButton(cmdBarEl, Object.assign({}, exProps, { menu: menuItems }));
+                    } else {
+                        btn = new Button(cmdBarEl, exProps);
+                    }
                     btn.Draw(cmdBarEl);
                     if (exBtn.name) this.controlsMap[exBtn.name] = btn;
                     // Подключаем события (events.onClick, top-level onXxx) через стандартный механизм
@@ -2772,6 +2801,85 @@ class DataForm extends Form {
                             if (mergedEvts) this._wireItemEvents(this.controlsMap[exBtn.name], mergedEvts);
                         }
                     } catch(e) {}
+                }
+                break;
+            }
+            case 'relatedList': {
+                // «Список связанных документов» в форме записи (аналог «Структуры
+                // подчинённости» в 1С): read-only DynamicTable другой таблицы,
+                // отфильтрованная по связи с текущей записью. Живёт на SSE dataChanged
+                // (унаследовано от DynamicTable, с дебаунсом и очисткой в destroy) и
+                // дополнительно следит за таблицей-связкой (extraWatchTables).
+                // Двойной клик открывает запись (штатный openRecord).
+                //
+                // properties:
+                //   tableName — целевая таблица (обязательно)
+                //   appName   — приложение данных (по умолчанию 'uniForm')
+                //   fields    — видимые колонки: ['number','date','status','name']
+                //   link      — связь с текущей записью:
+                //     { via, sourceField, targetField } — через таблицу-связку:
+                //         target.UID IN (SELECT targetField FROM via WHERE sourceField = <UID записи>)
+                //     { field } — прямой FK: target.field = <UID записи>
+                //   visibleRows — высота списка в строках (по умолчанию 8)
+                // events: onDataRefreshed — после каждой (пере)загрузки данных.
+                try {
+                    const props = properties || {};
+                    if (!props.tableName) { console.warn('[relatedList] properties.tableName is required'); break; }
+                    const uidEntry = this._dataMap && this._dataMap['UID'];
+                    const recordUID = uidEntry && uidEntry.value;
+
+                    const link = props.link || {};
+                    let initialFilter = [];
+                    let extraWatch = null;
+                    if (link.via && link.targetField) {
+                        const linkWhere = {};
+                        linkWhere[link.sourceField || 'UID'] = recordUID || '__none__';
+                        initialFilter = [{
+                            field: 'UID', operator: 'inRelated', type: 'server',
+                            value: { table: link.via, select: link.targetField, where: linkWhere }
+                        }];
+                        extraWatch = [link.via];
+                    } else if (link.field) {
+                        initialFilter = [{ field: link.field, operator: '=', value: recordUID || '__none__', type: 'server' }];
+                    }
+
+                    const relConf = {
+                        appName: props.appName || 'uniForm',
+                        tableName: props.tableName,
+                        dataKey: item.data || item.name,
+                        appForm: this,
+                        readOnly: true,
+                        editable: false,
+                        showToolbar: false,
+                        rowHeight: props.rowHeight || 25,
+                        visibleRows: props.visibleRows || 8,
+                        initialFilter,
+                        extraWatchTables: extraWatch,
+                        serverFields: Array.isArray(props.fields) ? props.fields : null,
+                        hiddenButtons: props.hiddenButtons || []
+                    };
+                    const rel = new DynamicTable(relConf);
+                    try { if (typeof rel.setCaption === 'function') rel.setCaption(caption); } catch (e) {}
+                    try { if (typeof rel.Draw === 'function') rel.Draw(contentArea); } catch (e) {}
+                    // Высота списка — props.visibleRows строк (DynamicTable перекрывает
+                    // this.visibleRows своим значением «строк на загрузку», поэтому
+                    // высоту тела задаём явно; прокрутка внутри — виртуальная).
+                    try {
+                        if (rel.bodyContainer) {
+                            const h = ((props.visibleRows || 8) * (props.rowHeight || 25)) + 'px';
+                            rel.bodyContainer.style.minHeight = h;
+                            rel.bodyContainer.style.maxHeight = h;
+                        }
+                    } catch (e) {}
+                    if (item.name) this.controlsMap[item.name] = rel;
+                    try {
+                        if (!this._tables) this._tables = [];
+                        this._tables.push(rel);
+                    } catch (e) {}
+                    // Первичную загрузку НЕ ждём: события (onDataRefreshed) подвязываются
+                    // синхронно сразу после switch — до прихода ответа сети.
+                } catch (e) {
+                    console.error('[relatedList] render error:', e);
                 }
                 break;
             }
@@ -3761,6 +3869,230 @@ class Button extends UIObject {
         }
 
         return this.element;
+    }
+}
+
+// ── SplitButton ────────────────────────────────────────────────────────────────────────────────
+// Кнопка с выпадающим меню (Win95-стиль, как тулбары Office 97): основной сегмент
+// (icon+caption, свой onClick) + узкий сегмент со стрелкой «▾» (отдельная 3D-рамка),
+// открывающий попап-меню. Общий контрол без прикладной логики (печать с вариантами,
+// экспорт в форматы, «открыть/создать документ» и т.п.).
+//
+// Свойства (properties):
+//   menu: [{ caption, icon, onClick }] — пункты меню. Пустой/отсутствующий menu →
+//         стрелка скрыта, контрол ведёт себя как обычная Button.
+// API: setCaption(text) — подпись основного сегмента (наследуется от Button);
+//      setMenu(items)   — сменить пункты меню (пустой массив прячет стрелку).
+// Попап — по образцу выпадашки TextBox._openList: div на body (z-index 99999),
+// строки с иконками, подсветка, клавиатура в capture-фазе (Escape/стрелки/Enter),
+// закрытие по клику вне/scroll/resize. Очистка — в destroy().
+class SplitButton extends Button {
+
+    constructor(parentElement = null, properties = {}) {
+        super(parentElement, properties);
+        this.menu = Array.isArray(properties.menu) ? properties.menu : [];
+        this._arrowEl = null;
+        this._menuPopup = null;
+        this._menuOpen = false;
+        this._menuKeyHandler = null;
+        this._menuOutsideHandler = null;
+        this._menuScrollHandler = null;
+    }
+
+    setMenu(items) {
+        this.menu = Array.isArray(items) ? items : [];
+        this._closeMenu();
+        this._updateArrowVisibility();
+    }
+
+    _updateArrowVisibility() {
+        if (!this._arrowEl) return;
+        // Без меню сегмент со стрелкой не нужен вовсе — display, не visibility:
+        // кнопка в тулбаре должна ужаться до обычной Button, а не держать пустое место.
+        this._arrowEl.style.display = (this.menu && this.menu.length) ? 'inline-flex' : 'none';
+    }
+
+    Draw(container) {
+        if (this._wrapEl) return this._wrapEl;
+
+        const wrap = document.createElement('span');
+        wrap.style.display = 'inline-flex';
+        wrap.style.alignItems = 'stretch';
+        wrap._uiObject = this;
+        this._wrapEl = wrap;
+
+        // Основной сегмент — штатная кнопка Button (цвета/рамки/tooltip как у всех).
+        super.Draw(wrap);
+
+        // Сегмент со стрелкой — своя 3D-рамка, зеркалит стиль основного сегмента.
+        const arrow = document.createElement('button');
+        arrow.classList.add('ui-button');
+        arrow.textContent = '▾';
+        const base = UIObject.getClientConfigValue('defaultColor', '#c0c0c0');
+        const light = UIObject.brightenColor(base, 60);
+        const dark = UIObject.brightenColor(base, -60);
+        arrow.style.backgroundColor = base;
+        arrow.style.borderTop = `2px solid ${light}`;
+        arrow.style.borderLeft = `2px solid ${light}`;
+        arrow.style.borderRight = `2px solid ${dark}`;
+        arrow.style.borderBottom = `2px solid ${dark}`;
+        arrow.style.fontFamily = 'MS Sans Serif, sans-serif';
+        arrow.style.fontSize = '11px';
+        arrow.style.cursor = 'default';
+        arrow.style.outline = 'none';
+        arrow.style.boxSizing = 'border-box';
+        arrow.style.display = 'inline-flex';
+        arrow.style.alignItems = 'center';
+        arrow.style.justifyContent = 'center';
+        arrow.style.padding = '0 3px';
+        arrow.style.marginLeft = '-1px';
+        arrow.addEventListener('mousedown', () => {
+            arrow.style.borderTop = '2px solid #808080';
+            arrow.style.borderLeft = '2px solid #808080';
+            arrow.style.borderRight = '2px solid #ffffff';
+            arrow.style.borderBottom = '2px solid #ffffff';
+            const up = () => {
+                arrow.style.borderTop = `2px solid ${light}`;
+                arrow.style.borderLeft = `2px solid ${light}`;
+                arrow.style.borderRight = `2px solid ${dark}`;
+                arrow.style.borderBottom = `2px solid ${dark}`;
+                document.removeEventListener('mouseup', up);
+            };
+            document.addEventListener('mouseup', up);
+        });
+        arrow.addEventListener('click', (e) => {
+            try { e.stopPropagation(); } catch (_) {}
+            try { if (this._menuOpen) this._closeMenu(); else this._openMenu(); } catch (_) {}
+        });
+        wrap.appendChild(arrow);
+        this._arrowEl = arrow;
+        this._updateArrowVisibility();
+
+        if (container) container.appendChild(wrap);
+        return wrap;
+    }
+
+    _openMenu() {
+        if (this._menuOpen) return;
+        const items = Array.isArray(this.menu) ? this.menu : [];
+        if (!items.length) return;
+
+        const popup = document.createElement('div');
+        popup.className = 'splitbutton-menu-popup';
+        popup.style.position = 'absolute';
+        popup.style.backgroundColor = '#ffffff';
+        popup.style.border = 'none';
+        popup.style.fontFamily = 'MS Sans Serif, sans-serif';
+        popup.style.fontSize = '11px';
+        popup.style.zIndex = '99999';
+        popup.style.boxSizing = 'border-box';
+        popup.style.padding = '2px';
+        popup.style.boxShadow = '0 4px 10px rgba(0,0,0,0.25)';
+        popup.style.minWidth = (this._wrapEl ? this._wrapEl.getBoundingClientRect().width : 120) + 'px';
+
+        const self = this;
+        for (const it of items) {
+            if (it && it.separator) {
+                const sep = document.createElement('div');
+                sep.style.borderTop = '1px solid #c0c0c0';
+                sep.style.margin = '2px 4px';
+                popup.appendChild(sep);
+                continue;
+            }
+            const row = document.createElement('div');
+            row.style.padding = '3px 6px';
+            row.style.cursor = 'pointer';
+            row.style.userSelect = 'none';
+            row.style.display = 'flex';
+            row.style.alignItems = 'center';
+            if (it && it.icon) {
+                const img = document.createElement('img');
+                img.src = it.icon;
+                img.style.width = '16px';
+                img.style.height = '16px';
+                img.style.marginRight = '4px';
+                row.appendChild(img);
+            }
+            const txt = document.createElement('span');
+            txt.textContent = (it && it.caption != null) ? String(it.caption) : '';
+            row.appendChild(txt);
+            row.addEventListener('mouseenter', () => { row.style.backgroundColor = '#b0b0b0'; });
+            row.addEventListener('mouseleave', () => { row.style.backgroundColor = ''; });
+            row.addEventListener('click', (e) => {
+                try { self._closeMenu(); } catch (_) {}
+                try { if (it && typeof it.onClick === 'function') it.onClick(e); } catch (err) { try { console.error('[SplitButton] menu onClick error', err); } catch (_) {} }
+            });
+            popup.appendChild(row);
+        }
+
+        const rect = (this._wrapEl || this.element).getBoundingClientRect();
+        popup.style.left = (rect.left + (window.pageXOffset || document.documentElement.scrollLeft)) + 'px';
+        popup.style.top = (rect.bottom + (window.pageYOffset || document.documentElement.scrollTop)) + 'px';
+        document.body.appendChild(popup);
+        this._menuPopup = popup;
+        this._menuOpen = true;
+
+        // Клавиатура — capture-фаза (правило pop-up контролов): Escape закрывает,
+        // стрелки ходят по пунктам, Enter активирует.
+        this._menuKeyHandler = (ev) => {
+            try {
+                const k = ev.key;
+                if (k !== 'Escape' && k !== 'ArrowDown' && k !== 'ArrowUp' && k !== 'Enter') return;
+                ev.stopPropagation();
+                if (typeof ev.stopImmediatePropagation === 'function') ev.stopImmediatePropagation();
+                ev.preventDefault();
+                if (k === 'Escape') { self._closeMenu(); return; }
+                const rows = Array.from(popup.children || []).filter(r => r.style.cursor === 'pointer');
+                if (!rows.length) return;
+                let idx = rows.findIndex(r => r.getAttribute && r.getAttribute('data-selected') === '1');
+                if (k === 'ArrowDown') idx = (idx >= 0 && idx < rows.length - 1) ? idx + 1 : 0;
+                else if (k === 'ArrowUp') idx = (idx > 0) ? idx - 1 : rows.length - 1;
+                else if (k === 'Enter') { if (idx >= 0) rows[idx].click(); return; }
+                rows.forEach(r => { r.style.backgroundColor = ''; r.removeAttribute('data-selected'); });
+                rows[idx].style.backgroundColor = '#b0b0b0';
+                rows[idx].setAttribute('data-selected', '1');
+            } catch (_) {}
+        };
+        document.addEventListener('keydown', this._menuKeyHandler, true);
+
+        // Клик вне попапа/кнопки — закрыть.
+        this._menuOutsideHandler = (ev) => {
+            try {
+                if (popup.contains(ev.target)) return;
+                if (self._wrapEl && self._wrapEl.contains(ev.target)) return;
+                self._closeMenu();
+            } catch (_) {}
+        };
+        document.addEventListener('mousedown', this._menuOutsideHandler, true);
+
+        // Прокрутка/ресайз — позиция попапа устаревает, закрываем.
+        this._menuScrollHandler = () => { try { self._closeMenu(); } catch (_) {} };
+        window.addEventListener('resize', this._menuScrollHandler);
+        document.addEventListener('scroll', this._menuScrollHandler, true);
+    }
+
+    _closeMenu() {
+        try {
+            if (this._menuPopup && this._menuPopup.parentNode) this._menuPopup.parentNode.removeChild(this._menuPopup);
+        } catch (_) {}
+        this._menuPopup = null;
+        this._menuOpen = false;
+        try { if (this._menuKeyHandler) document.removeEventListener('keydown', this._menuKeyHandler, true); } catch (_) {}
+        this._menuKeyHandler = null;
+        try { if (this._menuOutsideHandler) document.removeEventListener('mousedown', this._menuOutsideHandler, true); } catch (_) {}
+        this._menuOutsideHandler = null;
+        try {
+            if (this._menuScrollHandler) {
+                window.removeEventListener('resize', this._menuScrollHandler);
+                document.removeEventListener('scroll', this._menuScrollHandler, true);
+            }
+        } catch (_) {}
+        this._menuScrollHandler = null;
+    }
+
+    destroy() {
+        try { this._closeMenu(); } catch (_) {}
+        try { if (typeof super.destroy === 'function') super.destroy(); } catch (_) {}
     }
 }
 
@@ -10671,11 +11003,16 @@ class Tabs extends UIObject {
 // DynamicTable class for displaying tabular data with virtual scrolling
 class DynamicTable extends Table {
     constructor(options = {}) {
-        super(null, { columns: options.fields || options.columns || [], rowHeight: options.rowHeight, appForm: options.appForm, dataKey: options.dataKey || options.data || options.tableName, readOnly: options.readOnly !== false });
+        super(null, { columns: options.fields || options.columns || [], rowHeight: options.rowHeight, appForm: options.appForm, dataKey: options.dataKey || options.data || options.tableName, readOnly: options.readOnly !== false, showToolbar: options.showToolbar, hiddenButtons: options.hiddenButtons });
 
         this.appName = options.appName || '';
         this.tableName = options.tableName || '';
         this.bufferRows = 10;
+        // Явный выбор видимых колонок (имена полей модели) — сервер отдаст только их.
+        this.serverFields = Array.isArray(options.serverFields) ? options.serverFields : null;
+        // Дополнительные наблюдаемые таблицы: SSE dataChanged по ним тоже рефрешит
+        // эту таблицу (напр. relatedList следит и за таблицей-связкой).
+        this.extraWatchTables = Array.isArray(options.extraWatchTables) ? options.extraWatchTables : null;
 
         // Minimal state needed for server interactions
         this.totalRows = 0;
@@ -11135,6 +11472,11 @@ class DynamicTable extends Table {
         try {
             this.calculateVisibleRows();
             await this.loadData(this.firstVisibleRow);
+            // Декларативный колбэк «данные перезагружены» (events.onDataRefreshed
+            // на элементе лейаута, напр. relatedList): форма может перечитать
+            // зависимое состояние (кнопки и т.п.) из уже загруженных данных,
+            // без второго RPC. Срабатывает и на первичной загрузке, и на SSE-refresh.
+            try { if (typeof this.onDataRefreshed === 'function') this.onDataRefreshed(this); } catch (e) {}
         } catch (error) {
             console.error('[DynamicTable] Refresh error:', error);
             if (typeof showAlert === 'function') {
@@ -11200,7 +11542,10 @@ class DynamicTable extends Table {
                 firstRow: firstRow,
                 visibleRows: this.visibleRows,
                 sort: this.currentSort,
-                filters: serverFilters
+                filters: serverFilters,
+                // Явный выбор видимых колонок (relatedList и др. встраиваемые списки);
+                // без него сервер отдаёт все колонки модели.
+                fields: (Array.isArray(this.serverFields) && this.serverFields.length) ? this.serverFields : undefined
             });
             // Expect new format only: { columns, rows, totalRows }
             const columnsRaw = data && data.columns ? data.columns : [];
@@ -11411,7 +11756,13 @@ class DynamicTable extends Table {
                             if (!subs) return;
                             subs.forEach(sub => {
                                 try {
-                                    if (!sub || sub.appName !== d.app || sub.tableName !== d.tableName) return;
+                                    // Подписка реагирует на СВОЮ таблицу и на дополнительные
+                                    // наблюдаемые (extraWatchTables — напр. relatedList следит
+                                    // и за таблицей-связкой: invoice_bookings при списке invoices).
+                                    if (!sub || sub.appName !== d.app) return;
+                                    const watches = sub.tableName === d.tableName ||
+                                        (Array.isArray(sub.extraWatchTables) && sub.extraWatchTables.includes(d.tableName));
+                                    if (!watches) return;
                                     sub.dataCache = {};
                                     // Debounce SSE refresh to avoid rapid cascading refreshes
                                     if (sub._sseRefreshTimer) clearTimeout(sub._sseRefreshTimer);
@@ -11499,7 +11850,11 @@ class DynamicTable extends Table {
                 subs.forEach(sub => {
                     try {
                         // 4.1: реагирует только подписка, чьи app/tableName совпали с событием
-                        if (!sub || sub.appName !== d.app || sub.tableName !== d.tableName) return;
+                        // (+ дополнительные наблюдаемые таблицы, см. extraWatchTables).
+                        if (!sub || sub.appName !== d.app) return;
+                        const watches = sub.tableName === d.tableName ||
+                            (Array.isArray(sub.extraWatchTables) && sub.extraWatchTables.includes(d.tableName));
+                        if (!watches) return;
                         sub.dataCache = {};
                         // Debounce SSE refresh
                         if (sub._sseRefreshTimer) clearTimeout(sub._sseRefreshTimer);

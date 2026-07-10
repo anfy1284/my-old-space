@@ -64,7 +64,9 @@ function getEntityTypeForTable(tableName) {
 /**
  * Рекурсивно переводит все { i18n: 'key' } объекты в дереве layout.
  * Обрабатывает: item.caption, item.options[].caption, item.columns[].caption,
- *               tab.caption, item.layout[], item.tabs[].layout[].
+ *               tab.caption, item.layout[], item.tabs[].layout[],
+ *               item.extraButtons[] (+ их menu[]), item.menu[] (splitButton).
+ * Набор ветвей ОБЯЗАН совпадать с layoutMemory.translateLayoutCaptions.
  * Мутирует объекты in-place.
  */
 async function translateLayoutI18n(items, sessionID) {
@@ -92,6 +94,13 @@ async function translateLayoutI18n(items, sessionID) {
         // Recurse into table columns (each column is a node with its own caption)
         if (Array.isArray(item.columns)) {
             await translateLayoutI18n(item.columns, sessionID);
+        }
+        // Кнопки commandBar (у каждой свой caption) и пункты меню splitButton
+        if (Array.isArray(item.extraButtons)) {
+            await translateLayoutI18n(item.extraButtons, sessionID);
+        }
+        if (Array.isArray(item.menu)) {
+            await translateLayoutI18n(item.menu, sessionID);
         }
         // Recurse into tabs
         if (Array.isArray(item.tabs)) {
@@ -1526,5 +1535,9 @@ module.exports = {
     subscribeToTable: dynamicTableMethods.subscribeToTable,
     saveClientState: dynamicTableMethods.saveClientState,
     recordTableEdit: dynamicTableMethods.recordTableEdit,
-    commitTableEdits: dynamicTableMethods.commitTableEdits
+    commitTableEdits: dynamicTableMethods.commitTableEdits,
+    // SSE-оповещение об изменении таблицы — для серверного кода, меняющего данные
+    // мимо applyChanges (программное создание/перезаполнение документов): подписанные
+    // DynamicTable/relatedList обновятся так же, как после сохранения формы.
+    notifyTableChange: dynamicTableMethods.notifyTableChange
 };

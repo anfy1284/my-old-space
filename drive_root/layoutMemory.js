@@ -150,6 +150,9 @@ function translateLayoutCaptions(nodes, tFn) {
         if (Array.isArray(node.columns))       translateLayoutCaptions(node.columns, tFn);
         if (Array.isArray(node.options))       translateLayoutCaptions(node.options, tFn);
         if (Array.isArray(node.extraButtons))  translateLayoutCaptions(node.extraButtons, tFn);
+        // menu[] — пункты выпадающего меню (splitButton), у каждого свой caption.
+        // При добавлении новой контейнерной ветви — обнови и uniForm.translateLayoutI18n!
+        if (Array.isArray(node.menu))          translateLayoutCaptions(node.menu, tFn);
         // tabs[] hold their content in tab.layout / tab.caption — recurse so
         // captions inside tabs (groups, fields AND table columns) get translated.
         if (Array.isArray(node.tabs))          translateLayoutCaptions(node.tabs, tFn);
