@@ -77,6 +77,12 @@
         "de": "Nummer",
         "pl": "Numer"
     },
+    "document_date_field": {
+        "en": "Date",
+        "ru": "Дата",
+        "de": "Datum",
+        "pl": "Data"
+    },
     "name_field": {
         "en": "Name",
         "ru": "Наименование",

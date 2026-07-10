@@ -12,19 +12,22 @@
  */
 
 const { injectEntityNumbers } = require('./drive_root/db/entityNumber');
+const { injectEntityDates } = require('./drive_root/db/entityDate');
 
 module.exports = {
     /**
      * Вызывается после сбора и слияния моделей, до инициализации Sequelize.
      * Системно добавляет реквизит `number` + автонумерацию всем сущностям
-     * (документы/справочники). UID инъектируется отдельно (drive_root/globalServerContext
-     * в рантайме и проектный events_handler на миграции).
+     * (документы/справочники) и реквизит `date` документам. UID инъектируется
+     * отдельно (drive_root/globalServerContext в рантайме и проектный
+     * events_handler на миграции).
      * @param {Object} context — { mergedModelsDef, allAssociations, sequelize, projectRoot }
      */
     onModelsPostCollect: async function (context) {
         const { mergedModelsDef } = context || {};
         if (!Array.isArray(mergedModelsDef)) return;
         const n = injectEntityNumbers(mergedModelsDef);
-        console.log(`[my-old-space:events_handler] "number" + autonumber injected into ${n} entity model(s).`);
+        const d = injectEntityDates(mergedModelsDef);
+        console.log(`[my-old-space:events_handler] "number" + autonumber injected into ${n} entity model(s), "date" into ${d} document(s).`);
     }
 };

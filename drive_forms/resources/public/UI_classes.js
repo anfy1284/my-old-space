@@ -5484,11 +5484,21 @@ class TextBox extends FormInput {
                 if (!isNaN(val.getTime())) { d = val.getDate(); m = val.getMonth() + 1; y = val.getFullYear(); }
             } else {
                 const s = String(val).trim();
-                const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
-                if (iso) { y = parseInt(iso[1], 10); m = parseInt(iso[2], 10); d = parseInt(iso[3], 10); }
-                else {
-                    const dmy = s.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})/);
-                    if (dmy) { d = parseInt(dmy[1], 10); m = parseInt(dmy[2], 10); y = parseInt(dmy[3], 10); }
+                // ISO дата-время с таймзоной (DATE/TIMESTAMP из Sequelize, "...T...Z"):
+                // берём ЛОКАЛЬНЫЕ компоненты, иначе около полуночи дата по UTC-префиксу
+                // уезжает на день. Чистый ISO-date ("YYYY-MM-DD") по-прежнему читается
+                // из строки как есть — new Date() трактовал бы его как UTC-полночь.
+                if (/^\d{4}-\d{2}-\d{2}[T ]\d{2}/.test(s)) {
+                    const dt = new Date(s);
+                    if (!isNaN(dt.getTime())) { d = dt.getDate(); m = dt.getMonth() + 1; y = dt.getFullYear(); }
+                }
+                if (!(d && m && y)) {
+                    const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+                    if (iso) { y = parseInt(iso[1], 10); m = parseInt(iso[2], 10); d = parseInt(iso[3], 10); }
+                    else {
+                        const dmy = s.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})/);
+                        if (dmy) { d = parseInt(dmy[1], 10); m = parseInt(dmy[2], 10); y = parseInt(dmy[3], 10); }
+                    }
                 }
             }
             if (d && m && y && d >= 1 && d <= 31 && m >= 1 && m <= 12) {

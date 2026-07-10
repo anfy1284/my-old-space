@@ -234,15 +234,17 @@ function collectAllModelDefs() {
         console.error('[globalModels] Unexpected error processing apps.json:', e.message);
     }
 
-    // Системно: реквизит `number` + автонумерация для сущностей (документы/справочники).
+    // Системно: реквизит `number` + автонумерация для сущностей (документы/справочники)
+    // и реквизит `date` для документов.
     // Здесь — единый источник определений: используется и для построения моделей
     // (generateModelsFromDefs), и для метаданных/подписей (getTableMetadata → _cachedModelDefs).
     // require-кэш отдаёт одни и те же объекты, поэтому мутация попадает во все потребители.
     try {
         const { injectEntityNumber } = require('./db/entityNumber');
-        for (const def of defs) injectEntityNumber(def);
+        const { injectEntityDate } = require('./db/entityDate');
+        for (const def of defs) { injectEntityNumber(def); injectEntityDate(def); }
     } catch (e) {
-        console.error('[globalModels] entity number injection failed:', e && e.message || e);
+        console.error('[globalModels] entity number/date injection failed:', e && e.message || e);
     }
 
     return { models: defs, associations };

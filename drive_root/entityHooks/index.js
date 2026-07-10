@@ -46,6 +46,7 @@ const presentationRegistry = new Map();
 const builtins = {
     'default.autoNumber': require('./default/autoNumber'),
     'default.uniqueNumber': require('./default/uniqueNumber'),
+    'default.documentDate': require('./default/documentDate'),
 };
 
 for (const [name, fn] of Object.entries(builtins)) {
