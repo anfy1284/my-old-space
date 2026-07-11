@@ -9175,6 +9175,14 @@ class Table extends UIObject {
 
         const cellItem = Object.assign({}, col);
         cellItem.data = cellKey;
+        // renderItem регистрирует контрол в controlsMap по item.name || item.data.
+        // Серверные колонки (relatedList и др.) несут name поля модели ('number',
+        // 'date', ...) — без подмены ячейка вытесняет из controlsMap одноимённый
+        // контрол ШАПКИ формы, и collectData() перестаёт отправлять это поле при
+        // сохранении (дата/номер документа «не сохраняются»). Ключ ячейки обязан
+        // быть уникальным cellKey — на него же рассчитывают cell-handler'ы
+        // (controlsMap[key]) и _autoStartSingleRefSelection.
+        cellItem.name = cellKey;
         cellItem.caption = '';
         // inTable: помечаем контрол как ячейку таблицы. Контрол использует это, чтобы
         // НЕ открывать выпадающий список автоматически по клику/фокусу (в таблице список
