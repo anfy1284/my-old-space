@@ -227,6 +227,19 @@ function registerDynamicTableMethods(appName, config = {}) {
                     return n !== 'UID';
                 });
             }
+            // Реквизиты документа `number` и `date` — всегда первые колонки авто-списка
+            // (единая точка для всех динамических таблиц). Если состав/порядок колонок
+            // задан явно (params.fields, напр. relatedList) — порядок не трогаем.
+            const explicitOrder = Array.isArray(params.fields) && params.fields.length;
+            if (Array.isArray(fields) && !explicitOrder) {
+                const nameOf = f => (typeof f === 'string') ? f : (f && (f.name || f.field || f.id || f.key));
+                const head = [];
+                for (const p of ['number', 'date']) {
+                    const idx = fields.findIndex(f => nameOf(f) === p);
+                    if (idx !== -1) head.push(fields.splice(idx, 1)[0]);
+                }
+                fields = head.concat(fields);
+            }
             const columns = normalizeColumnsFromFields(fields, rows);
             await translateColumnsI18n(columns, sessionID);
             try { console.log(`[${appName}/getDynamicTableData] normalized columns=`, columns.map(c => ({ data: c.data, caption: c.caption }))); } catch(e) {}

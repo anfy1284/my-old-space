@@ -2328,6 +2328,44 @@ class DataForm extends Form {
         return this._fkLookupCache[table];
     }
 
+    // Фиксированная ширина контрола ввода по properties.width (число, px).
+    // Ширину задаём на реальном flex-элементе (inputContainer у TextBox), делая его
+    // «0 0 Wpx» — контрол не растягивается и не сжимается. Без width контрол остаётся
+    // 100% (заполняет ячейку). Используется горизонтальными группами полей.
+    // Возвращает true, если фиксированная ширина применена (иначе вызывающий код
+    // сам решает, что делать — напр. оставить контрол на 100%).
+    // Ширина (px) задаётся ВНУТРЕННЕМУ белому боксу (inputContainer), а ВНЕШНЯЯ
+    // обёртка контрола (containerElement: подпись + бокс) переводится в
+    // shrink-to-fit (`width:auto; flex:0 0 auto`) — иначе она остаётся `width:100%`
+    // (из ensureContainer) и как flex-ребёнок горизонтальной группы растягивается
+    // на всю строку, разнося соседние поля гигантскими промежутками.
+    _applyControlWidth(ctrl, properties) {
+        try {
+            const w = properties && properties.width;
+            if (typeof w !== 'number' || !isFinite(w)) return false;
+            const inner = (ctrl && (ctrl.inputContainer || ctrl.element)) || null;
+            if (!inner) return false;
+            inner.style.width = w + 'px';
+            inner.style.flex = '0 0 ' + w + 'px';
+            // Пиним и ВЫСОТУ стандартной высотой контрола (та же переменная, что в
+            // .ui-textbox-box). Без этого кнопка ▾/«…» (aspect-ratio 1:1 + JS-синк
+            // width=offsetHeight) может «раздуть» бокс до квадрата: индефинитная
+            // высота контейнера ↔ квадратная кнопка образуют замкнутую обратную
+            // связь, которая стабилизируется на width, а не на 23px.
+            inner.style.height = 'var(--ui-control-height, 23px)';
+            const outer = ctrl && ctrl.containerElement;
+            if (outer && outer !== inner) {
+                outer.style.width = 'auto';
+                outer.style.flex = '0 0 auto';
+            }
+            // Флаг для адаптивного updateLayout контрола: фиксированную ширину
+            // не пересчитывать (его column-ветка ломает узкие контролы).
+            try { ctrl._fixedWidth = true; } catch (e) {}
+            return true;
+        } catch (e) {}
+        return false;
+    }
+
     // Aligned-field group ("alignFields": true on a group): render the children
     // as a 2-column grid — column 1 holds the field captions (suppressed on the
     // controls themselves), column 2 holds the controls. Each caption+control
@@ -2410,7 +2448,12 @@ class DataForm extends Form {
             try { if (typeof ctrl.setCaption === 'function') ctrl.setCaption(caption); } catch (e) {}
             ctrl.Draw(contentArea);
             try { if (item.data && ctrl.element) { ctrl.element.dataset.field = item.data; } } catch (e) {}
-            try { if (ctrl.element) ctrl.element.style.width = '100%'; } catch (e) {}
+            // Фиксированная ширина контрола: properties.width (число, px) делает контрол
+            // фиксированным flex-элементом (не растягивается) — нужно для горизонтальных
+            // групп (номер+дата, «скидка + единица»). Без width — контрол занимает 100%.
+            if (!this._applyControlWidth(ctrl, properties)) {
+                try { if (ctrl.element) ctrl.element.style.width = '100%'; } catch (e) {}
+            }
             // Keep _dataMap in sync when user types
             try {
                 if (item.data && ctrl.element && ctrl.element.addEventListener) {
@@ -2499,6 +2542,7 @@ class DataForm extends Form {
                 } catch (e) {}
                 try { if (typeof ctrl.setCaption === 'function') ctrl.setCaption(caption); } catch (e) {}
                 ctrl.Draw(contentArea);
+                this._applyControlWidth(ctrl, properties);
 
                 try {
                     if (item.data) {
@@ -4495,7 +4539,9 @@ class TextBox extends FormInput {
                     try {
                         const syncOpenBtn = (b) => {
                             try {
-                                const update = () => { try { const h = Math.round((b.offsetHeight || (b.getBoundingClientRect && b.getBoundingClientRect().height) || 0)); if (h > 0) b.style.width = h + 'px'; } catch (_) {} };
+                                // Меряем КОНТЕЙНЕР, не саму кнопку: самозамер (width=свой offsetHeight)
+                                // вместе с aspect-ratio:1/1 образует петлю, раздувающую бокс до квадрата.
+                                const update = () => { try { const h = Math.round((b.parentElement && b.parentElement.clientHeight) || 0); if (h > 0) b.style.width = h + 'px'; } catch (_) {} };
                                 update();
                                 if (typeof ResizeObserver !== 'undefined') { try { const ro = new ResizeObserver(update); ro.observe(b.parentElement || b); b._ro = ro; } catch(_) {} }
                                 const winHandler = () => update();
@@ -4526,9 +4572,10 @@ class TextBox extends FormInput {
                         try {
                             const syncBtn = (b) => {
                                 try {
+                                    // Меряем КОНТЕЙНЕР, не саму кнопку (см. syncOpenBtn: самозамер + aspect-ratio = петля).
                                     const update = () => {
                                         try {
-                                            const h = Math.round((b.offsetHeight || (b.getBoundingClientRect && b.getBoundingClientRect().height) || 0));
+                                            const h = Math.round((b.parentElement && b.parentElement.clientHeight) || 0);
                                             if (h > 0) b.style.width = h + 'px';
                                         } catch (_) {}
                                     };
@@ -4612,9 +4659,10 @@ class TextBox extends FormInput {
                     try {
                         const syncCalBtn = (b) => {
                             try {
+                                // Меряем КОНТЕЙНЕР, не саму кнопку (см. syncOpenBtn: самозамер + aspect-ratio = петля).
                                 const update = () => {
                                     try {
-                                        const h = Math.round((b.offsetHeight || (b.getBoundingClientRect && b.getBoundingClientRect().height) || 0));
+                                        const h = Math.round((b.parentElement && b.parentElement.clientHeight) || 0);
                                         if (h > 0) b.style.width = h + 'px';
                                     } catch (_) {}
                                 };
@@ -4637,6 +4685,13 @@ class TextBox extends FormInput {
             // If narrow, stack label above input (column).
             const updateLayout = () => {
                 try {
+                    // Стекование существует ТОЛЬКО ради собственной подписи контрола.
+                    // В формах подписи рисует DataForm (label нет) — стековать нечего,
+                    // а ветка column (input: flex 0 0 100%) выталкивает встроенные
+                    // кнопки (▾/…/📅) из inputContainer и ломает контролы с
+                    // фиксированной properties.width (60px < порога 68px).
+                    if (!this.label || !this.label.element) return;
+                    if (this._fixedWidth) return;
                     const cw = (this.containerElement && this.containerElement.clientWidth) || (container && container.clientWidth) || this.width || 0;
                     const lblW = (this.label && this.label.element) ? (this.label.element.scrollWidth || this.label.element.offsetWidth || 0) : 0;
                     const gap = parseInt(this.containerElement.style.gap) || 8;
@@ -4778,9 +4833,10 @@ class TextBox extends FormInput {
                         try {
                             const syncBtn = (b) => {
                                 try {
+                                    // Меряем КОНТЕЙНЕР, не саму кнопку (см. syncOpenBtn: самозамер + aspect-ratio = петля).
                                     const update = () => {
                                         try {
-                                            const h = Math.round((b.offsetHeight || (b.getBoundingClientRect && b.getBoundingClientRect().height) || 0));
+                                            const h = Math.round((b.parentElement && b.parentElement.clientHeight) || 0);
                                             if (h > 0) b.style.width = h + 'px';
                                         } catch (_) {}
                                     };
