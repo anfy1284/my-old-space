@@ -950,9 +950,15 @@ async function generateFormSpec(tableName, params, sessionID) {
             return ctrl;
         });
 
+        // Пустой layout у зарегистрированной записи = «кастомного лейаута нет»: таблица
+        // зарегистрирована только ради extraButtons (см. layoutMemory.saveLayout) —
+        // форма строится автоматически из модели, кнопки вклеиваются в её commandBar ниже.
         let layout;
         if (customLayoutObj) {
-            layout = JSON.parse(JSON.stringify(customLayoutObj.layout || customLayoutObj));
+            const rawCustom = Array.isArray(customLayoutObj.layout) ? customLayoutObj.layout : customLayoutObj;
+            if (!Array.isArray(rawCustom) || rawCustom.length) {
+                layout = JSON.parse(JSON.stringify(rawCustom));
+            }
         }
 
         // Pre-генерация UID для новой записи
@@ -1003,8 +1009,14 @@ async function generateFormSpec(tableName, params, sessionID) {
         }
 
         if (!layout) {
+            // Прикладные кнопки автоформы (layoutMemory.saveLayout({ extraButtons })).
+            // Клонируем: translateLayoutI18n переводит лейаут in-place, а объект пришёл
+            // из кэша layoutMemory — мутировать его нельзя (испортит другие языки).
+            const autoExtraButtons = (customLayoutObj && Array.isArray(customLayoutObj.extraButtons) && customLayoutObj.extraButtons.length)
+                ? JSON.parse(JSON.stringify(customLayoutObj.extraButtons))
+                : null;
             layout = [
-                { type: 'commandBar' },
+                autoExtraButtons ? { type: 'commandBar', extraButtons: autoExtraButtons } : { type: 'commandBar' },
                 // alignFields: captions and controls render as a 2-column grid so labels
                 // and fields line up (same polish as the hand-built booking form).
                 // noBorder + no caption: the record isn't wrapped in a visible frame with a

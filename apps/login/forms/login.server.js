@@ -83,6 +83,56 @@ module.exports = function (modelsDB, Utilities) {
         return { success: true };
     }
 
+    // Сброс пароля ЧУЖОЙ учётной записи администратором (форма записи справочника
+    // «Пользователи»). В отличие от changePassword старый пароль не спрашивается —
+    // администратор его не знает; вместо этого действие доступно только роли admin.
+    //
+    // mustChangePassword по умолчанию взводится: назначенный администратором пароль —
+    // временный, пользователь обязан сменить его при первом входе (админ не должен
+    // знать постоянный пароль сотрудника).
+    async function resetUserPassword(params, ctx) {
+        const sessionID = ctx && ctx.sessionID;
+        const { userId, newPassword } = params || {};
+        // Явное сравнение с false: параметр не передан → поведение по умолчанию (взвести флаг).
+        const mustChange = (params && params.mustChangePassword === false) ? false : true;
+
+        // Роль резолвится сервером в /server-call из сессии — клиент её подделать не может.
+        // Гейт mustChangePassword пропускает всё приложение login (иначе смена своего
+        // пароля была бы невозможна), поэтому здесь проверяем флаг вызывающего отдельно:
+        // пока свой пароль не сменён, администрировать чужие нельзя.
+        if (!ctx || ctx.role !== 'admin' || (ctx.user && ctx.user.mustChangePassword)) {
+            return { success: false, error: await tForSession('Not enough rights', sessionID) };
+        }
+        if (!userId) {
+            return { success: false, error: await tForSession('User not found', sessionID) };
+        }
+        if (!newPassword) {
+            return { success: false, error: await tForSession('New password is required', sessionID) };
+        }
+
+        const user = await modelsDB.Users.scope('withPassword').findOne({ where: { UID: userId } });
+        if (!user) {
+            return { success: false, error: await tForSession('User not found', sessionID) };
+        }
+
+        const hashedPassword = await Utilities.hashPassword(newPassword);
+        await user.update({ password_hash: hashedPassword, mustChangePassword: mustChange });
+
+        // Сбрасываем кэш пользователя во ВСЕХ его сессиях (не в сессии администратора):
+        // гейт mustChangePassword и RLS читают закэшированную копию пользователя, иначе
+        // сотрудник продолжит работать по устаревшему флагу.
+        try {
+            const sessions = await modelsDB.Sessions.findAll({ where: { userId: user.UID }, raw: true });
+            for (const s of (sessions || [])) {
+                await globalCtx.invalidateSessionUser(s.sessionId);
+            }
+        } catch (e) {
+            console.error('[login/resetUserPassword] session cache invalidation failed:', e && e.message || e);
+        }
+
+        return { success: true };
+    }
+
     // Информация для точки входа: авторизован ли пользователь и его роль.
     // По ней autoStart-точка решает, показывать ли форму входа (только для неавторизованных).
     async function getBootInfo(params, ctx) {
@@ -115,5 +165,5 @@ module.exports = function (modelsDB, Utilities) {
         */
     }
 
-    return { login, changePassword, getBootInfo, loginAsGuest };
+    return { login, changePassword, resetUserPassword, getBootInfo, loginAsGuest };
 };

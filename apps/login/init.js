@@ -46,7 +46,11 @@ module.exports = async function (modelsDB) {
         // Лейауты по режимам.
         const layouts = {
             login:          require('./forms/login.layout.json'),
-            changePassword: require('./forms/change_password.layout.json')
+            changePassword: require('./forms/change_password.layout.json'),
+            // Сброс пароля другому пользователю администратором. Право на действие
+            // проверяет сервер (resetUserPassword: ctx.role === 'admin') — лейаут сам
+            // по себе ничего не открывает.
+            resetPassword:  require('./forms/reset_password.layout.json')
         };
 
         // Клиентские обработчики: __SERVER_SCRIPT__ → реальное имя серверного скрипта.
@@ -82,7 +86,31 @@ module.exports = async function (modelsDB) {
             ['public', 'nologged', 'user', 'admin']
         );
 
-        console.log('[login/init] Registered server script + login/changePassword layouts');
+        // ── Кнопка «Сменить пароль» в форме записи справочника «Пользователи» ──────
+        // Лейаут НЕ переопределяем: состав полей users собирают несколько слоёв
+        // (фреймворк + прикладные db.json, напр. organizationId), ручной лейаут их
+        // потерял бы. Регистрируем только кнопку — uniForm вклеит её в commandBar
+        // автогенерируемой формы. Роль admin: сбрасывать чужой пароль может только он.
+        const layoutMemory = require('../../drive_root/layoutMemory');
+        const usersClientSource = fs.readFileSync(path.join(__dirname, 'forms/users.client.js'), 'utf8');
+        const usersClientUID = await loadScript(usersClientSource, 'admin');
+
+        await layoutMemory.saveLayout({
+            appName:   'uniForm',
+            mode:      'record',
+            tableName: 'users',
+            roles:     'admin',
+            extraButtons: [{
+                name:    'btnResetPassword',
+                caption: { i18n: 'cp_btn_open' },
+                icon:    '/apps/general_icons/resources/public/16x16/user.png',
+                events:  { onClick: 'openResetPassword' }
+            }],
+            clientScript: usersClientUID,
+            formIcon:     '/apps/general_icons/resources/public/16x16/user.png'
+        });
+
+        console.log('[login/init] Registered server script + login/changePassword/resetPassword layouts + users password button');
     } catch (e) {
         console.error('[login/init] Failed:', e && e.message || e);
     }

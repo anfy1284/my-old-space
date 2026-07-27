@@ -18,13 +18,18 @@ try {
         // DataForm.Draw() сам вызывает loadLayout() → renderLayout(); loadLayout берёт
         // лейаут из form.getLayoutWithData(). Переопределяем этот метод, чтобы отдать
         // серверный лейаут нашего приложения (getFormSpec) и передать режим (form._mode).
-        async function buildForm(mode, forced) {
+        async function buildForm(mode, forced, params) {
             var isCp = (mode === 'changePassword');
+            var isRp = (mode === 'resetPassword');
             var form = new DataForm('login');
             form._mode = mode;
             // Принудительную смену задаёт вызывающий: после входа (login.client.js) или
             // boot при mustChangePassword. По умолчанию — ручная смена (forced=false).
             form._forcedChange = isCp && !!forced;
+            // Целевой пользователь режима 'resetPassword' (сброс пароля администратором):
+            // задаётся при открытии из формы записи справочника «Пользователи».
+            form._targetUserId   = (params && params.userId)   || null;
+            form._targetUserName = (params && params.userName) || '';
 
             form.getLayoutWithData = async function () {
                 var spec;
@@ -43,7 +48,10 @@ try {
             await form.Draw(document.body); // loadLayout() + renderLayout() выполняются внутри Draw
 
             // __t резолвится статически только для строк-литералов — поэтому без тернарника внутри.
-            form.setTitle(isCp ? __t('cp_app_title') : __t('login_app_title'));
+            var title = __t('login_app_title');
+            if (isCp) title = __t('cp_app_title');
+            if (isRp) title = __t('rp_app_title') + (form._targetUserName ? ' — ' + form._targetUserName : '');
+            form.setTitle(title);
 
             // При принудительной смене старый пароль не нужен — скрываем поле.
             // Окно делаем модальным: оверлей блокирует клики по десктопу, чтобы нельзя
@@ -68,16 +76,27 @@ try {
         app.createInstance = async function (params) {
             var instanceId = this.generateInstanceId();
             var mode = (params && params.mode) || 'login';
-            var form = await buildForm(mode, params && params.forced);
+            var form = await buildForm(mode, params && params.forced, params);
             return {
                 id: instanceId,
                 appName: 'login',
                 form: form,
                 onOpen: async function (openParams) {
                     var m = (openParams && openParams.mode) || 'login';
+                    var alive = !!(this.form && this.form.element && document.contains(this.form.element));
+                    // Открыли в другом режиме (или сброс пароля для ДРУГОГО пользователя) —
+                    // старое окно закрываем: иначе активируется форма с прежней целью.
+                    if (alive) {
+                        var sameTarget = (this.form._mode === m) &&
+                            (m !== 'resetPassword' || this.form._targetUserId === (openParams && openParams.userId));
+                        if (!sameTarget) {
+                            try { this.form._modified = false; this.form.close(); } catch (e) {}
+                            alive = false;
+                        }
+                    }
                     // Окно закрыли — пересоздаём в нужном режиме.
-                    if (!this.form || !this.form.element || !document.contains(this.form.element)) {
-                        this.form = await buildForm(m, openParams && openParams.forced);
+                    if (!alive) {
+                        this.form = await buildForm(m, openParams && openParams.forced, openParams);
                     } else if (typeof this.form.activate === 'function') {
                         try { this.form.activate(); } catch (e) {}
                     }

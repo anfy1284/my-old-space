@@ -96,6 +96,32 @@ async function onSubmitChangePassword(ev, ctx) {
     }
 }
 
+// Сброс пароля ЧУЖОЙ учётной записи администратором (режим 'resetPassword').
+// Целевой пользователь задан при открытии формы (form._targetUserId) — из формы
+// записи справочника «Пользователи». Старый пароль не спрашивается: администратор
+// его не знает, право на действие проверяет сервер по роли сессии.
+async function onSubmitResetPassword(ev, ctx) {
+    var form = ctx.form;
+    var userId = form._targetUserId;
+    if (!userId) { showAlert(__t('rp_err_no_user')); return; }
+
+    var newPassword = _value(form, 'newPassword');
+    var confirm     = _value(form, 'confirmPassword');
+    if (!newPassword)            { showAlert(__t('cp_err_new_required')); return; }
+    if (newPassword !== confirm) { showAlert(__t('login_err_mismatch')); return; }
+
+    var mustCtrl = form.controlsMap && form.controlsMap.mustChangePassword;
+    var mustChange = mustCtrl && typeof mustCtrl.getValue === 'function' ? !!mustCtrl.getValue() : true;
+
+    var res = await callServer('__SERVER_SCRIPT__', 'resetUserPassword', {
+        userId: userId, newPassword: newPassword, mustChangePassword: mustChange
+    });
+    if (!res || !res.success) { showAlert((res && res.error) || __t('login_err_failed')); return; }
+
+    showAlert(__t('cp_success'));
+    try { form._modified = false; form.close(); } catch (e) {}
+}
+
 // ── Гостевой вход временно отключён ───────────────────────────────────────────
 // Чтобы вернуть: верни кнопку btnGuest в forms/login.layout.json
 // (events.onClick: 'onGuest'), включи loginAsGuest в forms/login.server.js
@@ -107,4 +133,4 @@ async function onSubmitChangePassword(ev, ctx) {
 //     else { showAlert((res && res.error) || __t('login_err_failed')); }
 // }
 
-return { onLogin, onSubmitChangePassword };
+return { onLogin, onSubmitChangePassword, onSubmitResetPassword };

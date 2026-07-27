@@ -724,9 +724,20 @@ async function getTableMetadata(modelName) {
     const fields = [];
     const attributes = Model.rawAttributes;
 
+    // Поля, скрытые defaultScope модели (напр. users.password_hash), не читаются обычными
+    // запросами — их нельзя показывать ни колонкой списка, ни полем автоформы: значение
+    // всегда пустое, а редактировать хэш пароля вручную недопустимо.
+    const hiddenByScope = new Set();
+    try {
+        const scopeExclude = modelDef && modelDef.options && modelDef.options.defaultScope
+            && modelDef.options.defaultScope.attributes && modelDef.options.defaultScope.attributes.exclude;
+        if (Array.isArray(scopeExclude)) scopeExclude.forEach(f => hiddenByScope.add(f));
+    } catch (e) { /* нет defaultScope — скрывать нечего */ }
+
     for (const [fieldName, attr] of Object.entries(attributes)) {
         // Skip Sequelize internal fields
         if (['createdAt', 'updatedAt', 'deletedAt'].includes(fieldName)) continue;
+        if (hiddenByScope.has(fieldName)) continue;
 
         // Get caption from db.json or use field name
         let caption = fieldName;

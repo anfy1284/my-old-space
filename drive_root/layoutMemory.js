@@ -100,7 +100,13 @@ function makePrefix(appName, mode, tableName) {
  * @param {string}          [opts.mode]    — 'record' (default) | 'list'
  * @param {string}          opts.tableName — DB table name (e.g. 'hotels')
  * @param {string|string[]} opts.roles     — role name(s) or '*' for any role
- * @param {Array}           opts.layout    — layout JSON array
+ * @param {Array}           [opts.layout]  — layout JSON array. Можно НЕ передавать, если
+ *   задан `extraButtons`: тогда форма остаётся автогенерируемой (uniForm строит её из
+ *   модели), а регистрация добавляет к ней только прикладные кнопки. Это единственный
+ *   способ дополнить автоформу таблицы, состав полей которой дописывают другие слои
+ *   (напр. `users`: фреймворк + `organizationId` из проекта) — ручной лейаут их потерял бы.
+ * @param {Array}           [opts.extraButtons] — прикладные кнопки для `commandBar`
+ *   автогенерируемой формы записи (формат — как `commandBar.extraButtons` в лейауте).
  * @param {object}          [opts.events]  — server-side event handlers, e.g.:
  *   { onBeforeSave: { serverScript: 'myScript', fn: 'onBeforeSave' } }
  * @param {string}          [opts.clientScript] — UID клиентского скрипта (loadScript).
@@ -109,14 +115,17 @@ function makePrefix(appName, mode, tableName) {
  * @param {string|object}   [opts.appCaption] — Человекочитаемое имя формы/приложения.
  *   Строка или объект { i18n: 'key' } — резолвится сервером при выдаче.
  */
-async function saveLayout({ appName, mode, tableName, roles, layout, events, clientScript, formIcon, appCaption, recordCaption, listIcon, windowState }) {
-    if (!appName || !tableName || !Array.isArray(layout)) {
-        throw new Error('[layoutMemory.saveLayout] appName, tableName and layout (Array) are required');
+async function saveLayout({ appName, mode, tableName, roles, layout, extraButtons, events, clientScript, formIcon, appCaption, recordCaption, listIcon, windowState }) {
+    if (!appName || !tableName || (!Array.isArray(layout) && !Array.isArray(extraButtons))) {
+        throw new Error('[layoutMemory.saveLayout] appName, tableName and layout (Array) are required (or extraButtons for an auto-generated form)');
     }
     const effectiveMode = mode || 'record';
     const roleList = Array.isArray(roles) ? roles : (roles ? [String(roles)] : ['*']);
+    // layout всегда пишем массивом (потребители различают «нет кастомного лейаута» по
+    // пустому массиву, а `undefined` сломал бы разбор записи в getLayoutForUser).
+    const storedLayout = Array.isArray(layout) ? layout : [];
     for (const role of roleList) {
-        await memoryStore.set(NAMESPACE, makeKey(appName, effectiveMode, tableName, role), { layout, events: events || null, clientScript: clientScript || null, formIcon: formIcon || null, appCaption: appCaption || null, recordCaption: recordCaption || null, listIcon: listIcon || null, windowState: windowState || null });
+        await memoryStore.set(NAMESPACE, makeKey(appName, effectiveMode, tableName, role), { layout: storedLayout, extraButtons: Array.isArray(extraButtons) ? extraButtons : null, events: events || null, clientScript: clientScript || null, formIcon: formIcon || null, appCaption: appCaption || null, recordCaption: recordCaption || null, listIcon: listIcon || null, windowState: windowState || null });
     }
     // Register prefix so hot-path can skip tables with no layouts at all
     _registeredPrefixes.add(makePrefix(appName, effectiveMode, tableName));

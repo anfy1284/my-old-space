@@ -89,6 +89,42 @@
         "de": "Passwort ändern",
         "pl": "Zmień hasło"
     },
+    "rp_app_title": {
+        "en": "Reset password",
+        "ru": "Сброс пароля",
+        "de": "Passwort zurücksetzen",
+        "pl": "Resetowanie hasła"
+    },
+    "rp_btn_submit": {
+        "en": "Set password",
+        "ru": "Установить пароль",
+        "de": "Passwort setzen",
+        "pl": "Ustaw hasło"
+    },
+    "rp_must_change": {
+        "en": "Require password change at next sign-in",
+        "ru": "Потребовать смену пароля при следующем входе",
+        "de": "Passwortänderung bei der nächsten Anmeldung verlangen",
+        "pl": "Wymagaj zmiany hasła przy następnym logowaniu"
+    },
+    "rp_err_no_user": {
+        "en": "No user selected",
+        "ru": "Пользователь не выбран",
+        "de": "Kein Benutzer ausgewählt",
+        "pl": "Nie wybrano użytkownika"
+    },
+    "rp_err_save_user_first": {
+        "en": "Save the user before setting a password",
+        "ru": "Сначала сохраните пользователя, затем задайте пароль",
+        "de": "Benutzer zuerst speichern, dann Passwort setzen",
+        "pl": "Najpierw zapisz użytkownika, potem ustaw hasło"
+    },
+    "Not enough rights": {
+        "en": "Not enough rights",
+        "ru": "Недостаточно прав",
+        "de": "Nicht genügend Rechte",
+        "pl": "Niewystarczające uprawnienia"
+    },
     "cp_success": {
         "en": "Password changed",
         "ru": "Пароль изменён",
