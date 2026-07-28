@@ -2124,6 +2124,7 @@ class DataForm extends Form {
         this._formEvents = null;   // клиентские form-level события (events лейаута без serverScript)
         this._formReady = false;   // true после первичной отрисовки — гейт для onChange
         this._suppressFormChange = false; // защита от рекурсии при программном изменении данных
+        this._prefilled = null;    // реестр программно заполненных значений (formSpec.prefilled)
     }
 
     // Override setTitle to keep track of the base (non-modified) title
@@ -2263,6 +2264,88 @@ class DataForm extends Form {
             // деталь-таблицы перефильтровываются уже на экране (видимая «дорисовка»).
             try { this._activateFirstRows(); } catch(e) {}
             try { this._setupDefaultButtonHandler(); } catch (e) {}
+            // Программно заполненные значения (prefill/prefillTabular/автозаполнение)
+            // обязаны отработать те же обработчики «при изменении», что и ручной ввод.
+            // НЕ await: обработчики ходят на сервер (дефолтные услуги номера, пересчёт
+            // количеств), а окно не должно ждать их, чтобы показаться.
+            try { this._firePrefilledChangeEvents(); } catch (e) {}
+        }
+    }
+
+    // Собирает из лейаута привязки onChange: отдельно поля формы (по реквизиту
+    // data/name) и колонки табличных частей (по dataKey таблицы → имя колонки).
+    // Используется при «дозапуске» событий на программно заполненных значениях.
+    _collectChangeBindings() {
+        const fieldBindings = {};
+        const columnBindings = {};
+        const onChangeOf = (node) => (node && ((node.events && node.events.onChange) || node.onChange)) || null;
+        const walk = (items) => {
+            if (!Array.isArray(items)) return;
+            for (const item of items) {
+                if (!item) continue;
+                if (item.type === 'table' && item.data && Array.isArray(item.columns)) {
+                    const map = columnBindings[item.data] || (columnBindings[item.data] = {});
+                    for (const col of item.columns) {
+                        const b = onChangeOf(col);
+                        if (b && col.data) map[col.data] = b;
+                    }
+                } else {
+                    const b = onChangeOf(item);
+                    const key = item.data || item.name;
+                    if (b && key) fieldBindings[key] = b;
+                }
+                if (item.layout) walk(item.layout);
+                if (item.tabs) { for (const tab of item.tabs) walk(tab && tab.layout); }
+            }
+        };
+        walk(this.layout);
+        return { fieldBindings, columnBindings };
+    }
+
+    // Прогоняет обработчики «при изменении» по значениям, которые в форму записал
+    // НЕ пользователь, а код (сервер: prefill / prefillTabular / автозаполнение по
+    // умолчаниям — реестр приходит в formSpec.prefilled). Программное заполнение
+    // должно быть неотличимо от ручного ввода: иначе зависимые данные не строятся
+    // (бронь из календаря приходила с выбранной комнатой, но без её услуг).
+    // Сигнатуры обработчиков — те же, что при ручном вводе:
+    //   поле формы  — function(value, display, ctx)
+    //   колонка ТЧ  — function(rowIndex, newVal, displayVal, ctx)  (renderCellElement)
+    async _firePrefilledChangeEvents() {
+        const pf = this._prefilled;
+        if (!pf) return;
+        // Реестр одноразовый: ре-рендер лейаута (смена режима, refresh после
+        // сохранения) не должен повторно дёргать обработчики.
+        this._prefilled = null;
+        const { fieldBindings, columnBindings } = this._collectChangeBindings();
+
+        // Последовательно (await), а не залпом: обработчики читают и дописывают одни
+        // и те же строки ТЧ (услуги номера), параллельный запуск их бы перемешал.
+        for (const name of (pf.fields || [])) {
+            const binding = fieldBindings[name];
+            if (!binding) continue;
+            const entry = this._dataMap && this._dataMap[name];
+            const value   = entry ? entry.value : undefined;
+            const display = (entry && entry.selection) ? entry.selection.display : undefined;
+            try { await this.callClientBinding(binding, [value, display]); } catch (e) {}
+        }
+
+        const tabular = pf.tabular || {};
+        for (const dataKey of Object.keys(tabular)) {
+            const cols = columnBindings[dataKey];
+            if (!cols) continue;
+            const entry = this._dataMap && this._dataMap[dataKey];
+            const rows = (entry && Array.isArray(entry.value)) ? entry.value : [];
+            for (const rowInfo of (tabular[dataKey] || [])) {
+                const row = rows[rowInfo.rowIndex];
+                if (!row) continue;
+                for (const field of (rowInfo.fields || [])) {
+                    const binding = cols[field];
+                    if (!binding) continue;
+                    try {
+                        await this.callClientBinding(binding, [rowInfo.rowIndex, row[field], row['__' + field + '_display']]);
+                    } catch (e) {}
+                }
+            }
         }
     }
 
@@ -3315,6 +3398,7 @@ class DataForm extends Form {
                 try { this._isNew = !!both.isNew; } catch (e) { this._isNew = false; }
                 try { this._clientScript = both.clientScript || null; } catch (e) {}
                 try { this._formEvents = both.events || null; } catch (e) { this._formEvents = null; }
+                try { this._prefilled = both.prefilled || null; } catch (e) { this._prefilled = null; }
                 try { this._windowState = both.windowState || null; } catch (e) {}
                 // Apply app caption (human-readable translated name) and icon
                 try {

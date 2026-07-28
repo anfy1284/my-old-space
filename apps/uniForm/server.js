@@ -261,7 +261,7 @@ async function getLayoutWithData(params, sessionID) {
                     });
                     const spec = await generateFormSpec(resolvedParams.tableName, resolvedParams, sessionID);
                     return { layout: spec.layout, data: spec.data, datasetId: spec.datasetId,
-                             clientScript: spec.clientScript || null, formIcon: spec.formIcon || null, appCaption: spec.appCaption || null, windowState: spec.windowState || null, fkLookups: spec.fkLookups || null, isNew: !!spec.isNew, events: spec.events || null };
+                             clientScript: spec.clientScript || null, formIcon: spec.formIcon || null, appCaption: spec.appCaption || null, windowState: spec.windowState || null, fkLookups: spec.fkLookups || null, isNew: !!spec.isNew, events: spec.events || null, prefilled: spec.prefilled || null };
                 }
             } catch (e) {
                 console.error('[uniForm/getLayoutWithData] datasetId refresh error:', e && e.message || e);
@@ -278,7 +278,7 @@ async function getLayoutWithData(params, sessionID) {
                     table: params.tableName,
                     id: params.recordID || params.recordId || params.id
                 });
-                return { layout: spec.layout, data: spec.data, datasetId, clientScript: spec.clientScript || null, formIcon: spec.formIcon || null, appCaption: spec.appCaption || null, windowState: spec.windowState || null, fkLookups: spec.fkLookups || null, isNew: !!spec.isNew, events: spec.events || null };
+                return { layout: spec.layout, data: spec.data, datasetId, clientScript: spec.clientScript || null, formIcon: spec.formIcon || null, appCaption: spec.appCaption || null, windowState: spec.windowState || null, fkLookups: spec.fkLookups || null, isNew: !!spec.isNew, events: spec.events || null, prefilled: spec.prefilled || null };
             } catch (e) {
                 console.error('[uniForm/getLayoutWithData] generateFormSpec error:', e && e.message || e);
             }
@@ -699,7 +699,11 @@ async function loadUserDefaultValues(sessionID) {
     }
 }
 
+// Возвращает имена полей, которые реально были заполнены — вызывающий код
+// регистрирует их как «программно заполненные» (spec.prefilled.fields), чтобы
+// клиент прогнал по ним обработчики «при изменении».
 function applyAutofillFromFields(data, fields, defaultsMap) {
+    const filled = [];
     for (const f of fields) {
         if (f.inputType !== 'recordSelector') continue;
         const targetTable = (f.foreignKey && f.foreignKey.table) ||
@@ -711,7 +715,9 @@ function applyAutofillFromFields(data, fields, defaultsMap) {
         if (!item || item.value) continue;
         item.value = def.recordId;
         item.selection = { id: def.recordId, display: def.recordLabel };
+        filled.push(f.name);
     }
+    return filled;
 }
 
 function applyAutofillFromLayout(data, layout, defaultsMap) {
@@ -983,10 +989,33 @@ async function generateFormSpec(tableName, params, sessionID) {
             }
         }
 
+        // Реестр ПРОГРАММНО заполненных значений новой записи (автозаполнение по
+        // умолчаниям пользователя, prefill, prefillTabular). Отдаётся клиенту в
+        // spec.prefilled — после отрисовки формы DataForm прогоняет по этим полям
+        // те же обработчики «при изменении», что сработали бы при ручном вводе
+        // (см. DataForm._firePrefilledChangeEvents). Без этого программное
+        // заполнение — «немое»: напр. бронь из календаря приходила с выбранной
+        // комнатой, но без её услуг, т.к. onChange колонки roomId не срабатывал.
+        //   fields  — имена скалярных полей формы
+        //   tabular — dataKey ТЧ → [{ rowIndex, fields: [...] }]
+        const prefilledFields = new Set();
+        const prefilledTabular = {};
+        // Реквизиты строки, реально пришедшие из prefillTabular (UID генерируем мы,
+        // `__<fk>_display` — резолв display, оба «изменением» не являются).
+        const registerPrefilledRows = (dataKey, rows) => {
+            if (!Array.isArray(rows) || !rows.length) return;
+            prefilledTabular[dataKey] = rows.map((r, i) => ({
+                rowIndex: i,
+                fields: Object.keys(r || {}).filter(k => k !== 'UID' && k.indexOf('__') !== 0)
+            })).filter(e => e.fields.length);
+        };
+
         // Автозаполнение для новых записей
         if (isNew) {
             const dfltMap = await loadUserDefaultValues(sessionID);
-            if (Object.keys(dfltMap).length > 0) applyAutofillFromFields(data, fields, dfltMap);
+            if (Object.keys(dfltMap).length > 0) {
+                for (const n of applyAutofillFromFields(data, fields, dfltMap)) prefilledFields.add(n);
+            }
         }
 
         // Prefill: явные начальные значения скалярных полей новой записи
@@ -997,6 +1026,7 @@ async function generateFormSpec(tableName, params, sessionID) {
                 const item = data.find(d => d.name === k);
                 if (!item) continue;
                 item.value = v;
+                prefilledFields.add(k);
                 const sel = item.properties && item.properties.selection;
                 if (sel && sel.table && v != null && v !== '') {
                     try {
@@ -1046,6 +1076,7 @@ async function generateFormSpec(tableName, params, sessionID) {
                                 { UID: (_util && typeof _util.generateUID === 'function') ? _util.generateUID(tsDef.name) : undefined },
                                 r))
                             : null;
+                        if (prefillRows) registerPrefilledRows('__ts_' + tsTableName, prefillRows);
 
                         // Строки ТЧ и метаданные полей независимы → читаем параллельно.
                         const tsRowsP = (effectiveRecordId && !isNew)
@@ -1236,6 +1267,7 @@ async function generateFormSpec(tableName, params, sessionID) {
                         rows = params.prefillTabular[targetTable].map(r => Object.assign(
                             { UID: (_util && typeof _util.generateUID === 'function') ? _util.generateUID(tsModelName) : undefined },
                             r));
+                        registerPrefilledRows(item.data, rows);
                     } catch (e) {
                         console.error('[uniForm/generateFormSpec] tabularFilter prefill error for', targetTable, ':', e && e.message);
                     }
@@ -1326,7 +1358,18 @@ async function generateFormSpec(tableName, params, sessionID) {
             }
         }
 
-        return { data, layout, datasetId, clientScript, formIcon, appCaption: resolvedCaption, windowState: finalWindowState, fkLookups: await fkLookupsPromise, isNew: isNew, events: clientEvents };
+        // Программно заполненные значения — только для НОВОЙ записи (для существующей
+        // «изменения» не было). Пустой реестр на клиент не отдаём.
+        let prefilled = null;
+        if (isNew) {
+            const pfFields = [...prefilledFields];
+            const hasTabular = Object.keys(prefilledTabular).length > 0;
+            if (pfFields.length || hasTabular) {
+                prefilled = { fields: pfFields, tabular: prefilledTabular };
+            }
+        }
+
+        return { data, layout, datasetId, clientScript, formIcon, appCaption: resolvedCaption, windowState: finalWindowState, fkLookups: await fkLookupsPromise, isNew: isNew, events: clientEvents, prefilled };
     } catch (e) {
         console.error('[uniForm/generateFormSpec] failed:', e && e.message || e);
         return { data: [], layout: [] };
