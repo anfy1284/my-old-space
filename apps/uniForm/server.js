@@ -10,6 +10,9 @@ let _util = null;
 try { _util = require('../../drive_root/db/utilites'); } catch(e) { console.warn('[uniForm] util load failed:', e && e.message); }
 
 const memoryStore = require('../../drive_root/memory_store');
+// Пустые значения по типам (NULL только у ссылок) — та же реализация,
+// что применяется к схеме и в шлюзе. Второго набора правил быть не должно.
+const emptyValues = require('../../drive_root/db/emptyValues');
 const { dataApp } = require('../../drive_forms/dataApp');
 const config = require('./config.json');
 const globalServerContext = require('../../drive_root/globalServerContext');
@@ -77,6 +80,11 @@ async function translateLayoutI18n(items, sessionID) {
         if (item.caption && typeof item.caption === 'object' && item.caption.i18n) {
             try { item.caption = await tForSession(item.caption.i18n, sessionID); }
             catch(e) { item.caption = item.caption.i18n; }
+        }
+        // tooltip — та же природа, что и caption (подсказка колонки-значка).
+        if (item.tooltip && typeof item.tooltip === 'object' && item.tooltip.i18n) {
+            try { item.tooltip = await tForSession(item.tooltip.i18n, sessionID); }
+            catch(e) { item.tooltip = item.tooltip.i18n; }
         }
         // Translate options captions (emunList etc.)
         if (Array.isArray(item.options)) {
@@ -293,10 +301,56 @@ async function getLayoutWithData(params, sessionID) {
     }
 }
 
+// ── Человеческий текст ошибки сохранения ──────────────────────────────────────────────────────
+// Sequelize отдаёт «notNull Violation: Bookings.checkIn cannot be null» — английская
+// техническая строка с именами КОЛОНОК БД. Пользователю показывать такое нельзя:
+// он не знает ни английского, ни имён колонок и не понимает, что делать. Переводим
+// в «Заполните обязательные реквизиты: <подписи полей>» на языке сессии. Подписи
+// берём из определения модели (fields[].caption), как их видит форма.
+// Всё, что не распознали, возвращаем как есть — молча терять диагностику нельзя.
+async function humanizeSaveError(err, tableName, sessionID) {
+    const raw = (err && err.message) ? err.message : String(err);
+    try {
+        let paths = [];
+        if (err && Array.isArray(err.errors)) {
+            paths = err.errors
+                .filter(it => it && it.path && (it.type === 'notNull Violation' || it.validatorKey === 'is_null'))
+                .map(it => it.path);
+        }
+        if (!paths.length) {
+            // Ошибка могла прийти уже «расплющенной» в строку (перезаворачивание слоями).
+            const re = /notNull Violation:\s*\S+?\.(\w+)\s+cannot be null/g;
+            let m;
+            while ((m = re.exec(raw)) !== null) paths.push(m[1]);
+        }
+        if (!paths.length) return raw;
+
+        let fields = {};
+        try {
+            const gCtx = require('../../drive_root/globalServerContext');
+            const def = (gCtx.collectAllModelDefs().models || []).find(m => m.tableName === tableName);
+            fields = (def && def.fields) || {};
+        } catch (e) {}
+
+        const labels = [];
+        for (const p of [...new Set(paths)]) {
+            const cap = fields[p] && fields[p].caption;
+            let label = p;
+            if (cap && typeof cap === 'object' && cap.i18n) label = await tForSession(cap.i18n, sessionID);
+            else if (typeof cap === 'string' && cap) label = cap;
+            if (labels.indexOf(label) < 0) labels.push(label);
+        }
+        return await tfForSession('required_fields_missing', sessionID, { fields: labels.join(', ') });
+    } catch (e) {
+        return raw;
+    }
+}
+
 // ── applyChanges ──────────────────────────────────────────────────────────────────────────────
 async function applyChanges(payload, sessionID) {
     let datasetId = payload;
     let changes = null;
+    let errTableName = null;
     try {
         console.log('[uniForm] applyChanges called.');
         if (payload && typeof payload === 'object' && (payload.datasetId !== undefined || payload.changes !== undefined)) {
@@ -312,7 +366,12 @@ async function applyChanges(payload, sessionID) {
         if (!datasetId) {
             return { ok: false, error: await tForSession('missing_datasetId', sessionID) };
         } else if (!dsObj) {
-            return { ok: false, error: 'unknown datasetId: ' + datasetId };
+            // Серверный контекст формы (датасет) не найден — обычно форма провисела
+            // открытой дольше жизни датасета. Пользователю нельзя показывать
+            // «unknown datasetId: 9737c264...»: он не понимает ни текста, ни что
+            // делать. Технический идентификатор оставляем в логе.
+            console.error('[uniForm] applyChanges: unknown datasetId:', datasetId);
+            return { ok: false, error: await tForSession('form_context_expired', sessionID) };
         }
 
         const tableName = dsObj.table || (dsObj.params && (dsObj.params.tableName || dsObj.params.dbTable || dsObj.params.table));
@@ -321,6 +380,7 @@ async function applyChanges(payload, sessionID) {
         if (!tableName) {
             return { ok: false, error: await tForSession('no_table_context', sessionID) };
         }
+        errTableName = tableName; // нужен в catch для подписей полей в тексте ошибки
 
         // ── onSave: кастомный серверный скрипт (EAV и другие виртуальные таблицы) ──
         try {
@@ -440,19 +500,29 @@ async function applyChanges(payload, sessionID) {
                             const rowData = Object.assign({}, row);
                             rowData[parentField] = parentUID;
 
-                            // Числовые поля: стёртое значение ("") всегда → 0 (пользователь
-                            // очистил поле); отсутствующее (undefined) → defaultValue из схемы
-                            // или null. Postgres не принимает "" для числовых типов.
+                            // Пустые значения строк ТЧ приводятся ЕДИНЫМ правилом:
+                            // NULL допустим только у полей-ссылок, у остальных типов
+                            // своё пустое значение (число 0, строка "", булево false,
+                            // дата 0001-01-01). Реализация — `drive_root/db/emptyValues`,
+                            // применяется здесь и в `sanitizeData` шлюза.
+                            //
+                            // Раньше на этом месте была своя логика для чисел, и она
+                            // разошлась со шлюзом: тот писал 0, этот — NULL. Строка
+                            // прайс-листа с границами возраста NULL/NULL и строка с 0/0
+                            // становились РАЗНЫМИ позициями, новая цена не заменяла
+                            // старую, и услуга молча давала ноль. Второго набора правил
+                            // быть не должно — только этот вызов.
                             for (const [fn, fd] of Object.entries(sectFields)) {
-                                const t = (fd.type || '').toUpperCase();
-                                const isNum = (t === 'INTEGER' || t === 'BIGINT' || t === 'FLOAT' || t === 'DECIMAL' || t === 'DOUBLE' || t === 'NUMBER' || t === 'REAL' || t === 'SMALLINT');
-                                if (!isNum) continue;
-                                const v = rowData[fn];
-                                // Стёртое значение ("" или null) → 0 (пользователь очистил поле).
-                                if (v === '' || v === null) rowData[fn] = 0;
-                                // Отсутствующее (undefined) → defaultValue из схемы, иначе 0 для
-                                // notNull-полей / null для nullable.
-                                else if (v === undefined) rowData[fn] = fd.defaultValue != null ? fd.defaultValue : (fd.allowNull === false ? 0 : null);
+                                if (!emptyValues.isEmptyValue(rowData[fn])) continue;
+                                if (emptyValues.isReferenceField(fd)) {
+                                    if (rowData[fn] === '') rowData[fn] = null;
+                                    continue;
+                                }
+                                const empty = emptyValues.emptyValueFor(fd);
+                                if (empty === undefined) continue;
+                                rowData[fn] = (rowData[fn] === undefined && fd.defaultValue != null)
+                                    ? fd.defaultValue
+                                    : empty;
                             }
 
                             // Серверная валидация безопасности: межсекционные FK
@@ -525,7 +595,7 @@ async function applyChanges(payload, sessionID) {
             : { ok: true, recordId: parentUID };
     } catch (e) {
         console.error('[uniForm] applyChanges error:', e);
-        return { ok: false, error: (e && e.message) ? e.message : String(e) };
+        return { ok: false, error: await humanizeSaveError(e, errTableName, sessionID) };
     }
 }
 
@@ -536,6 +606,26 @@ function buildTableFields(params) {
     const tableName = params && (params.tableName || params.dbTable || params.table);
     if (!tableName) return null;
     return buildTableFieldsFromModel(tableName);
+}
+
+// Подписи допустимых значений полей (db.json → options[].caption = { i18n }) —
+// перевести ДО того, как поля разойдутся по потребителям формы: и в data-записи
+// (`item.options`), и в автоконтролы (`ctrl.options`). Клиент подставляет caption
+// как есть — непереведённый `{ i18n: ... }` печатается как «[object Object]»
+// (так сломалось поле «Статус» формы счёта, когда список значений переехал в модель).
+// Это тот же набор ветвей, что переводит translateColumnsI18n для колонок списков.
+async function translateFieldOptions(fields, sessionID) {
+    if (!sessionID || !Array.isArray(fields)) return fields;
+    for (const f of fields) {
+        if (!f || !Array.isArray(f.options)) continue;
+        for (const opt of f.options) {
+            if (opt && opt.caption && typeof opt.caption === 'object' && opt.caption.i18n) {
+                try { opt.caption = await tForSession(opt.caption.i18n, sessionID); }
+                catch (e) { opt.caption = opt.caption.i18n; }
+            }
+        }
+    }
+    return fields;
 }
 
 // Build table fields from global model metadata (единственная копия для uniForm)
@@ -568,6 +658,12 @@ async function buildTableFieldsFromModel(tableName) {
                 source: 'field',
                 editable: !!f.editable
             };
+
+            // Набор допустимых значений поля (db.json → options) едет до колонки
+            // списка и до автоформы: без него ячейка печатает сырое значение из БД
+            // («issued» вместо «Ausgestellt»), потому что расшифровка жила только
+            // в ручном лейауте формы записи.
+            if (Array.isArray(f.options)) field.options = f.options;
 
             if (f.foreignKey) {
                 field.foreignKey = f.foreignKey;
@@ -892,6 +988,7 @@ async function generateFormSpec(tableName, params, sessionID) {
 
         const fields = await buildTableFieldsFromModel(tableName);
         if (!Array.isArray(fields)) return { data: [], layout: [] };
+        await translateFieldOptions(fields, sessionID);
 
         let record = null;
         const recordId = params && (params.recordID || params.recordId || params.id);
@@ -1098,6 +1195,7 @@ async function generateFormSpec(tableName, params, sessionID) {
                         const tsFieldsP = (async () => {
                             try {
                                 const tsFields = await buildTableFieldsFromModel(tsTableName);
+                                await translateFieldOptions(tsFields, sessionID);
                                 return Array.isArray(tsFields) ? tsFields : [];
                             } catch (e) {
                                 console.error('[uniForm/generateFormSpec] TS fields error for', tsTableName, ':', e && e.message);

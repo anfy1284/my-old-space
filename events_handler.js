@@ -13,6 +13,8 @@
 
 const { injectEntityNumbers } = require('./drive_root/db/entityNumber');
 const { injectEntityDates } = require('./drive_root/db/entityDate');
+const { injectEntityNames } = require('./drive_root/db/entityName');
+const { injectEmptyDefaults } = require('./drive_root/db/emptyValues');
 
 module.exports = {
     /**
@@ -28,6 +30,18 @@ module.exports = {
         if (!Array.isArray(mergedModelsDef)) return;
         const n = injectEntityNumbers(mergedModelsDef);
         const d = injectEntityDates(mergedModelsDef);
-        console.log(`[my-old-space:events_handler] "number" + autonumber injected into ${n} entity model(s), "date" into ${d} document(s).`);
+        // «name» (представление) — полноценное поле модели, а не колонка,
+        // навешиваемая после миграции. Иначе перестройка таблицы теряет
+        // представления всех записей: см. drive_root/db/entityName.js.
+        const nm = injectEntityNames(mergedModelsDef);
+        console.log(`[my-old-space:events_handler] "number" + autonumber injected into ${n} entity model(s), "date" into ${d} document(s), "name" into ${nm} model(s).`);
+
+        // Пустые значения по типам вместо NULL (NULL остаётся только у
+        // полей-ссылок). enforceNotNull пока выключен намеренно: ограничение
+        // NOT NULL ставится ОТДЕЛЬНЫМ шагом, уже после того как существующие
+        // NULL-ы вычищены миграцией — иначе первый же старт сервера начнёт
+        // ронять запись там, где сегодня всё работает.
+        const e = injectEmptyDefaults(mergedModelsDef, { enforceNotNull: false });
+        console.log(`[my-old-space:events_handler] empty-value defaults set on ${e.fields} field(s), ${e.validators} validator(s) made empty-safe.`);
     }
 };

@@ -242,9 +242,21 @@ function collectAllModelDefs() {
     try {
         const { injectEntityNumber } = require('./db/entityNumber');
         const { injectEntityDate } = require('./db/entityDate');
-        for (const def of defs) { injectEntityNumber(def); injectEntityDate(def); }
+        // `name` (представление) — тоже системное поле модели. Без него
+        // перестройка таблицы при миграции теряет представления всех
+        // записей: колонку раньше навешивали отдельно, уже после переноса
+        // данных. Подробности — drive_root/db/entityName.js.
+        const { injectEntityName } = require('./db/entityName');
+        for (const def of defs) { injectEntityNumber(def); injectEntityDate(def); injectEntityName(def); }
+
+        // Умолчания пустых значений (число 0, строка "", булево false, дата
+        // 0001-01-01; NULL только у ссылок) нужны и в РАНТАЙМЕ, а не только
+        // при миграции: иначе запись, созданная напрямую через модель (напр.
+        // сессия при входе), уходит в базу с NULL в обход правила.
+        const { injectEmptyDefaults } = require('./db/emptyValues');
+        injectEmptyDefaults(defs, { enforceNotNull: false });
     } catch (e) {
-        console.error('[globalModels] entity number/date injection failed:', e && e.message || e);
+        console.error('[globalModels] entity number/date/name injection failed:', e && e.message || e);
     }
 
     return { models: defs, associations };
@@ -788,6 +800,16 @@ async function getTableMetadata(modelName) {
         // контрол (напр. "color" для пикера цвета), не завязываясь на тип Sequelize.
         const explicitInputType = (modelDef && modelDef.fields && modelDef.fields[fieldName] && modelDef.fields[fieldName].inputType) || null;
 
+        // Набор допустимых значений поля (`options: [{ value, caption }]` в db.json) —
+        // свойство САМОГО поля, а не одной конкретной формы. Раньше список жил только
+        // в ручном лейауте формы записи: форма счёта показывала «Ausgestellt», а любой
+        // список той же таблицы (вкладка «Счета» брони, журнал) печатал сырое «issued».
+        // Метаданные несут его всем потребителям — колонкам списков и автоформам.
+        const explicitOptions = (modelDef && modelDef.fields && modelDef.fields[fieldName]
+            && Array.isArray(modelDef.fields[fieldName].options))
+            ? JSON.parse(JSON.stringify(modelDef.fields[fieldName].options))
+            : null;
+
         fields.push({
             name: fieldName,
             caption: caption,
@@ -798,7 +820,8 @@ async function getTableMetadata(modelName) {
             isUID: fieldName === 'UID',
             editable: false,  // All fields readonly for now
             isAddress: !!(modelDef && modelDef.fields && modelDef.fields[fieldName] && modelDef.fields[fieldName].isAddress),
-            inputType: explicitInputType
+            inputType: explicitInputType,
+            options: explicitOptions
         });
     }
 

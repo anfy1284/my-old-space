@@ -1,4 +1,27 @@
 ﻿
+// ─────────────────────────────────────────────────────────────────────
+// Пустая дата.
+//
+// Правило проекта: NULL в базе допустим только у полей-ссылок, поэтому
+// незаполненная дата хранится как 0001-01-01, а не как NULL (серверная
+// сторона — drive_root/db/emptyValues.js, там же обоснование).
+//
+// Для интерфейса такая дата — НЕ значение, а «не заполнено»: показывать
+// её нельзя. Без этой проверки в списках и полях печаталось «01.01.1» —
+// в том числе в колонке «Срок оплаты» журнала счетов.
+//
+// Порог по году, а не сравнение с конкретным моментом: часовые пояса и
+// формат хранения (DATE / TIMESTAMP) сдвигают 0001-01-01 на считанные
+// часы, и точное равенство здесь ненадёжно.
+const EMPTY_DATE_MAX_YEAR = 1;
+
+function isEmptyDateValue(v) {
+    if (v == null || v === '') return true;
+    const d = (v instanceof Date) ? v : new Date(v);
+    if (isNaN(d.getTime())) return true;
+    return d.getFullYear() <= EMPTY_DATE_MAX_YEAR;
+}
+
 class UIObject {
     constructor() {
         this.element = null;
@@ -266,6 +289,25 @@ class FormInput extends UIObject {
                 }
             }
         }
+    }
+
+    // ЖИВОЙ «двойник» контрола: тот, кто сейчас занимает моё место на форме.
+    // Возвращает не-null ТОЛЬКО если мой элемент уже оторван от документа, а по
+    // моему адресу (`_ownerForm.controlsMap[_ownerKey]`, см. DataForm.registerControl)
+    // стоит другой, живой контрол. Так бывает у ячеек табличной части: перерисовка
+    // тела ТЧ пересоздаёт контролы, и всё, что стартовало до перерисовки (окно
+    // выбора из справочника), возвращается в уже мёртвый экземпляр — значение
+    // уходило «в никуда», а слушатель ячейки читал ПУСТОЙ новый контрол и записывал
+    // в строку пустоту. Отсюда «+ в услугах даёт пустую безымянную строку».
+    _liveTwin() {
+        try {
+            if (this.element && document.contains(this.element)) return null; // я и есть живой
+            const form = this._ownerForm, key = this._ownerKey;
+            if (!form || !key || !form.controlsMap) return null;
+            const twin = form.controlsMap[key];
+            if (twin && twin !== this && twin.element && document.contains(twin.element)) return twin;
+        } catch (e) {}
+        return null;
     }
 
     // Create a simple container similar to TextBox's container when needed
@@ -2159,6 +2201,20 @@ class DataForm extends Form {
         }
     }
 
+    // Регистрация контрола в controlsMap + ПРОСТАВЛЕНИЕ ЕГО АДРЕСА НА ФОРМЕ.
+    // Адрес (`_ownerForm` + `_ownerKey`) нужен потому, что экземпляр контрола
+    // живёт меньше, чем его место в форме: перерисовка тела табличной части
+    // (`_invokeRenderBodyRows`) уничтожает контрол ячейки и создаёт новый под тем
+    // же ключом. Всё, что стартовало ДО перерисовки и возвращает результат ПОСЛЕ
+    // (окно выбора из справочника), обязано доставить результат в ЖИВОЙ контрол,
+    // а не в свой захваченный экземпляр — см. FormInput._liveTwin.
+    registerControl(key, ctrl) {
+        if (!key || !ctrl) return ctrl;
+        try { ctrl._ownerForm = this; ctrl._ownerKey = key; } catch (e) {}
+        this.controlsMap[key] = ctrl;
+        return ctrl;
+    }
+
     // Нужно ли сохранить форму перед действием, требующим запись в БД
     // (печать, «создать на основании», серверный пересчёт по recordID).
     // true, если есть несохранённые правки ИЛИ запись ещё НЕ в БД (_isNew).
@@ -2555,7 +2611,7 @@ class DataForm extends Form {
                 }
             } catch (_) {}
             const ctrlKey = item.name || item.data;
-            if (ctrlKey) this.controlsMap[ctrlKey] = ctrl;
+            if (ctrlKey) this.registerControl(ctrlKey, ctrl);
             return ctrl;
         };
 
@@ -2740,7 +2796,7 @@ class DataForm extends Form {
                 } catch (_) {}
 
                 try { if (item.data && ctrl.element) ctrl.element.dataset.field = item.data; } catch (e) {}
-                { const ctrlKey = item.name || item.data; if (ctrlKey) this.controlsMap[ctrlKey] = ctrl; }
+                { const ctrlKey = item.name || item.data; if (ctrlKey) this.registerControl(ctrlKey, ctrl); }
                 break;
             }
             case 'checkbox': {
@@ -4380,6 +4436,7 @@ class TextBox extends FormInput {
         this._yyyy = '';      // year part (0-4 digits as string)
         this._dateSection = 0; // 0=day, 1=month, 2=year
         this._sectionFresh = true; // when true, next digit overwrites the section (Windows-style manual entry)
+        this._dateAutoAdvanced = false; // секцию только что переключила МАСКА → следующий набранный разделитель проглатывается
         this._calYear = null;
         this._calMonth = null;
         // Address autocomplete mode
@@ -4517,10 +4574,19 @@ class TextBox extends FormInput {
             if (this.isDate) {
                 // For date mode, render current date parts (may already be set via setValue before Draw)
                 this.element.readOnly = false;
-                const dd = (this._dd || '').padEnd(2, ' ');
-                const mm = (this._mm || '').padEnd(2, ' ');
-                const yyyy = (this._yyyy || '').padEnd(4, ' ');
-                this.element.value = dd + '.' + mm + '.' + yyyy;
+                // Незаполненная дата рисуется ПУСТОЙ, а не маской «  .  .    »:
+                // та же логика, что в _updateDateDisplay. Здесь она нужна
+                // отдельно, потому что Draw() формирует значение сам, минуя
+                // _updateDateDisplay, — и без этой ветки журнал документов
+                // рябил точками в каждой строке с пустым сроком оплаты.
+                if (!this._dd && !this._mm && !this._yyyy) {
+                    this.element.value = '';
+                } else {
+                    const dd = (this._dd || '').padEnd(2, ' ');
+                    const mm = (this._mm || '').padEnd(2, ' ');
+                    const yyyy = (this._yyyy || '').padEnd(4, ' ');
+                    this.element.value = dd + '.' + mm + '.' + yyyy;
+                }
             } else {
                 try { this.setText(this.text); } catch (_) { try { this.element.value = this.text; } catch (_) {} }
                 this.element.placeholder = this.placeholder;
@@ -4604,7 +4670,10 @@ class TextBox extends FormInput {
                     obtn.type = 'button';
                     obtn.tabIndex = -1;
                     obtn.dataset.role = 'open';
-                    obtn.title = (typeof __t === 'function') ? __t('Open record (F2)') : 'Open record (F2)';
+                    // Статический ключ — маркер подменяется на сервере; проверка
+                    // `typeof __t === 'function'` дала бы английский запасной
+                    // вариант (рантайм-функции `__t` на клиенте нет).
+                    obtn.title = __t('Open record (F2)');
                     try { obtn.classList.add('input-field-button'); } catch (e) {}
                     try {
                         const oimg = document.createElement('img');
@@ -4976,6 +5045,20 @@ class TextBox extends FormInput {
                                     row.addEventListener('mouseleave', () => { row.style.backgroundColor = ''; });
                                     row.addEventListener('click', (e) => {
                                         try {
+                                            // Тот же случай, что в handleSelection: пока выпадашка была
+                                            // открыта, контрол мог быть пересоздан перерисовкой ТЧ —
+                                            // тогда выбор доставляем живому контролу на том же месте.
+                                            const twin = (typeof this._liveTwin === 'function') ? this._liveTwin() : null;
+                                            if (twin) {
+                                                twin.rawValue = it.value;
+                                                try { twin.setText(it.value); } catch (_) {}
+                                                const dsp = (typeof it.caption !== 'undefined' && it.caption !== null) ? String(it.caption) : String(it.value);
+                                                try { if (twin.element) twin.element.dispatchEvent(new Event('input', { bubbles: true })); } catch (_) {}
+                                                try { if (typeof twin.onChange === 'function') twin.onChange(it.value, dsp); } catch (_) {}
+                                                try { if (twin.element) twin.element.dispatchEvent(new Event('change', { bubbles: true })); } catch (_) {}
+                                                try { this._closeList && this._closeList(); } catch (_) {}
+                                                return;
+                                            }
                                             // store raw value so getValue() returns code, not caption
                                             this.rawValue = it.value;
                                             // set underlying value; setText will display caption when available
@@ -5813,6 +5896,13 @@ class TextBox extends FormInput {
                     if (this.isDate) {
                         // Arm overwrite so the first typed digit replaces the section.
                         this._sectionFresh = true;
+                        // Пустое поле вне фокуса показывается пустым (см.
+                        // _updateDateDisplay). По фокусу маску надо вернуть —
+                        // иначе пользователю некуда печатать и непонятно,
+                        // что поле вообще для даты.
+                        if (!this._dd && !this._mm && !this._yyyy && this.element.value === '') {
+                            this.element.value = '  .  .    ';
+                        }
                         // Defer section selection to a microtask: by then the browser has
                         // finalized the caret (Tab-focus selects all → section 0 / day;
                         // mouse focus → the clicked section). Doing it synchronously here
@@ -5960,6 +6050,11 @@ class TextBox extends FormInput {
     _setDateFromAny(val) {
         this._dd = ''; this._mm = ''; this._yyyy = '';
         if (!val && val !== 0) { if (this.element) this._updateDateDisplay(); return; }
+        // Пустая дата (0001-01-01) — это «не заполнено», а не значение:
+        // правило проекта хранит незаполненную дату так, потому что NULL
+        // допустим только у ссылок. Показывать её нельзя — поле должно
+        // выглядеть пустым, иначе пользователь видит «01.01.1».
+        if (isEmptyDateValue(val)) { if (this.element) this._updateDateDisplay(); return; }
         try {
             let d, m, y;
             if (val instanceof Date) {
@@ -5998,6 +6093,17 @@ class TextBox extends FormInput {
         const dd = (this._dd || '').padEnd(2, ' ');
         const mm = (this._mm || '').padEnd(2, ' ');
         const yyyy = (this._yyyy || '').padEnd(4, ' ');
+        // Полностью незаполненная дата вне фокуса показывается ПУСТОЙ, а не
+        // маской «  .  .    ». Пустых дат стало много: правило проекта хранит
+        // «не заполнено» как 0001-01-01, и в журналах документов колонки
+        // вроде «Срок оплаты» иначе рябят точками у каждой строки.
+        // При фокусе маска остаётся — она нужна для ввода.
+        const isBlank = !this._dd && !this._mm && !this._yyyy;
+        if (isBlank && document.activeElement !== this.element) {
+            this.element.value = '';
+            try { this.element.dispatchEvent(new Event('input', { bubbles: true })); } catch (_) {}
+            return;
+        }
         this.element.value = dd + '.' + mm + '.' + yyyy;
         this._setDateSection(sec);
         // Notify listeners so dirty-tracking / dataMap updates fire on every keystroke
@@ -6026,6 +6132,14 @@ class TextBox extends FormInput {
         }
     }
 
+    // Первая НЕ до конца заполненная секция даты (0=день, 1=месяц, 2=год).
+    // Если заполнены все — возвращает 2 (ограничения нет).
+    _firstIncompleteDateSection() {
+        if ((this._dd || '').length < 2) return 0;
+        if ((this._mm || '').length < 2) return 1;
+        return 2;
+    }
+
     // Pick the date section from the current caret position and highlight it.
     // Must be called deferred (setTimeout 0) from click/focus: the browser only
     // finalizes the caret position from a mouse click after the event handler
@@ -6038,8 +6152,17 @@ class TextBox extends FormInput {
         if (pos <= 2) sec = 0;
         else if (pos <= 5) sec = 1;
         else sec = 2;
+        // Нельзя встать в секцию ПОЗЖЕ первой незаполненной. Маска показывает пустые
+        // секции пробелами («  .  .    »), поэтому клик в пустое поле почти всегда
+        // попадает в конец строки — и курсор оказывался в ГОДУ ещё до первой цифры:
+        // набранное «03.08.2026» целиком уходило в год и давало « . .0308».
+        // Правило маски: заполнение идёт слева направо, значит клик правее пустого
+        // места приводит к первой незаполненной секции (у полностью заполненной даты
+        // ограничения нет — там можно править любую часть).
+        sec = Math.min(sec, this._firstIncompleteDateSection());
         this._dateSection = sec;
         this._sectionFresh = true; // arm overwrite + highlight the chosen section
+        this._dateAutoAdvanced = false; // секцию выбрал пользователь, а не маска
         this._setDateSection(sec);
     }
 
@@ -6059,6 +6182,7 @@ class TextBox extends FormInput {
             // user retype an already-filled date manually, like the Windows date picker.
             let cur = this._sectionFresh ? '' : getPart(sec);
             this._sectionFresh = false;
+            this._dateAutoAdvanced = false;
             if (cur.length < sectionMaxLen[sec]) {
                 const next = cur + k;
                 setPart(sec, next);
@@ -6074,7 +6198,13 @@ class TextBox extends FormInput {
                     } else if (sec === 1) {
                         if (val < 1 || val > 12) { setPart(1, cur); this._updateDateDisplay(); return; }
                     }
-                    if (sec < 2) { this._dateSection = sec + 1; this._sectionFresh = true; }
+                    if (sec < 2) {
+                        this._dateSection = sec + 1;
+                        this._sectionFresh = true;
+                        // Пометка «секцию переключила маска, а не пользователь»:
+                        // следующий набранный разделитель нужно проглотить (см. ветвь '.').
+                        this._dateAutoAdvanced = true;
+                    }
                 }
             }
             this._updateDateDisplay();
@@ -6095,8 +6225,22 @@ class TextBox extends FormInput {
             }
         } else if (k === 'ArrowLeft') {
             if (sec > 0) { this._dateSection = sec - 1; this._sectionFresh = true; this._updateDateDisplay(); }
-        } else if (k === 'ArrowRight' || k === '.') {
+        } else if (k === 'ArrowRight') {
             if (sec < 2) { this._dateSection = sec + 1; this._sectionFresh = true; this._updateDateDisplay(); }
+        } else if (k === '.' || k === ',' || k === '/' || k === '-') {
+            // Разделитель, НАБРАННЫЙ пользователем. Раньше он вёл себя как ArrowRight
+            // и всегда переводил на следующую секцию — из-за этого обычный ввод
+            // «03.08.2026» ломался: после двух цифр дня секция переключалась САМА,
+            // а набранная следом точка переключала ЕЩЁ раз, и цифры месяца уходили
+            // в год. Правило: разделитель сразу после АВТОперехода — это тот самый
+            // разделитель, который маска уже поставила, он поглощается один раз.
+            // В остальных случаях («3.» — короткий ввод дня) он завершает секцию,
+            // как и раньше. ',', '/', '-' — те же привычки/раскладки.
+            if (this._dateAutoAdvanced) {
+                this._dateAutoAdvanced = false;
+            } else if (sec < 2) {
+                this._dateSection = sec + 1; this._sectionFresh = true; this._updateDateDisplay();
+            }
         } else if (k === 'Tab') {
             if (!e.shiftKey) {
                 if (sec < 2) { this._dateSection = sec + 1; this._sectionFresh = true; this._updateDateDisplay(); }
@@ -6497,6 +6641,16 @@ class TextBox extends FormInput {
     // Selection handler ("Обработка выбора") — default implementation: apply selection to the field
     handleSelection(selectedRecord, uniFormInstance) {
         try {
+            // Пока окно выбора было открыто, мой контрол мог быть уничтожен
+            // перерисовкой (напр. пересчёт количеств услуг перерисовывает ТЧ
+            // брони сразу после добавления строки). Тогда выбор доставляем
+            // ЖИВОМУ контролу на том же месте формы — иначе значение уходит в
+            // оторванный от DOM input, а строка ТЧ остаётся пустой.
+            const twin = this._liveTwin();
+            if (twin && typeof twin.handleSelection === 'function') {
+                twin.handleSelection(selectedRecord, uniFormInstance);
+                return;
+            }
             const textBoxId = this.element ? this.element.id : 'unknown';
             console.log('[TextBox.handleSelection] Called for TextBox:', textBoxId, 'with record:', selectedRecord);
             const selMeta = this.selection || {};
@@ -7420,20 +7574,79 @@ class AlertForm extends ModalForm {
         this.onOk = onOk;
     }
 
+    // Высота текста при заданной ширине — меряем скрытым пробником с теми же
+    // переносами и размером шрифта, что и у подписи. Гадать по длине строки
+    // нельзя: перенос зависит от шрифта и от языка.
+    static _measureTextHeight(text, width, fontSize) {
+        let probe = null;
+        try {
+            probe = document.createElement('div');
+            probe.style.cssText = 'position:absolute;visibility:hidden;left:-9999px;top:0;white-space:pre-wrap;word-wrap:break-word;';
+            probe.style.width = width + 'px';
+            probe.style.fontSize = fontSize + 'px';
+            probe.textContent = (text == null) ? '' : String(text);
+            document.body.appendChild(probe);
+            return Math.ceil(probe.offsetHeight) + 4;
+        } catch (e) {
+            return 70;
+        } finally {
+            try { if (probe && probe.parentNode) probe.parentNode.removeChild(probe); } catch (e) {}
+        }
+    }
+
     Draw(container) {
         super.Draw(container);
+
+        // ── Размер окна — ПО СОДЕРЖИМОМУ ────────────────────────────────────
+        // Раньше окно было жёстко 300×150, а подпись — фиксированной высоты
+        // (height − 80). Сообщение длиннее пяти строк молча обрезалось: начало
+        // уходило под заголовок, конец — под кнопку OK. Текст сюда приходит
+        // прикладной и переменной длины (разбор услуг счёта, ошибки сохранения),
+        // и на разных языках он разной длины — окно обязано считать свой размер.
+        const msg = (this.message == null) ? '' : String(this.message);
+        const multiline = msg.indexOf('\n') >= 0;
+
+        const PAD = 10, GAP = 12, FONT = 14;
+        const btnWidth = 80, btnHeight = 26;
+
+        const viewW = (typeof window !== 'undefined' ? window.innerWidth : 800);
+        const viewH = (typeof window !== 'undefined' ? window.innerHeight : 600);
+        // Длинное/многострочное сообщение получает широкое окно: узкая колонка
+        // из 15 строк читается хуже, чем 5 строк нормальной ширины.
+        const wantWide = multiline || msg.length > 90;
+        const width = wantWide ? Math.max(300, Math.min(560, viewW - 80)) : 300;
+        this.setWidth(width);
+
+        const titleH = this.titleBar ? (this.titleBar.offsetHeight || 22) : 22;
+        const textW = width - PAD * 2;
+        let textH = AlertForm._measureTextHeight(msg, textW, FONT);
+
+        const maxFormH = Math.max(150, viewH - Form.topOffset - Form.bottomOffset - 40);
+        const maxTextH = maxFormH - titleH - PAD * 2 - GAP - btnHeight;
+        const scrolls = textH > maxTextH;
+        if (scrolls) textH = maxTextH;
+        // Нижняя граница — прежние 150 px, чтобы короткое «Готово» не схлопывалось.
+        const formH = Math.max(150, titleH + PAD * 2 + textH + GAP + btnHeight);
+        this.setHeight(formH);
+        if (formH > titleH + PAD * 2 + textH + GAP + btnHeight) {
+            textH = formH - titleH - PAD * 2 - GAP - btnHeight;
+        }
 
         const lblMessage = new Label(this.contentArea);
         lblMessage.setText(this.message);
         lblMessage.Draw(this.contentArea);
         if (lblMessage.element) {
-            lblMessage.element.style.textAlign = 'center';
+            // Многострочный текст (перечисление) читается по левому краю;
+            // короткую фразу оставляем по центру, как было.
+            lblMessage.element.style.textAlign = multiline ? 'left' : 'center';
             lblMessage.element.style.whiteSpace = 'pre-wrap';
+            lblMessage.element.style.wordWrap = 'break-word';
             lblMessage.element.style.display = 'flex';
-            lblMessage.element.style.alignItems = 'center';
-            lblMessage.element.style.justifyContent = 'center';
+            lblMessage.element.style.alignItems = (multiline || scrolls) ? 'flex-start' : 'center';
+            lblMessage.element.style.justifyContent = multiline ? 'flex-start' : 'center';
+            if (scrolls) lblMessage.element.style.overflowY = 'auto';
         }
-        UIObject.styleElement(lblMessage, 10, 10, this.width - 20, this.height - 80, 14);
+        UIObject.styleElement(lblMessage, PAD, PAD, textW, textH, FONT);
 
         const btnOk = new Button(this.contentArea);
         btnOk.setCaption(__t('OK'));
@@ -7443,11 +7656,12 @@ class AlertForm extends ModalForm {
             try { if (typeof this.onOk === 'function') this.onOk(); } catch (e) { console.error('AlertForm onOk callback error', e); }
         };
 
-        const btnWidth = 80;
-        const btnHeight = 26;
-        const btnX = (this.width - btnWidth) / 2;
-        const btnY = this.height - 40 - 20;
+        const btnX = (width - btnWidth) / 2;
+        const btnY = PAD + textH + GAP;
         UIObject.styleElement(btnOk, btnX, btnY, btnWidth, btnHeight, 12);
+
+        // Размеры изменились после центрирования в ModalForm.Draw — центрируем заново.
+        try { this.updatePositionOnResize(); } catch (e) {}
 
         // store reference so callers can access if needed
         this.okButton = btnOk;
@@ -8290,6 +8504,10 @@ class DatePicker extends FormInput {
             date = new Date(date);
         }
         if (isNaN(date.getTime())) return '';
+        // Пустая дата (0001-01-01) — не значение, а «не заполнено»: правило
+        // проекта «NULL только у ссылок» хранит незаполненную дату именно так.
+        // Без этой проверки в списках и полях печаталось «01.01.1».
+        if (isEmptyDateValue(date)) return '';
 
         const dd = String(date.getDate()).padStart(2, '0');
         const mm = String(date.getMonth() + 1).padStart(2, '0');
@@ -8586,6 +8804,49 @@ class DatePicker extends FormInput {
     }
 }
 
+// ── Всплывающая подсказка Win95 на произвольном элементе ──────────────────
+// Своя подсказка, а НЕ атрибут `title`: нативную подсказку рисует сам браузер,
+// её нет в DOM (её не видно ни на скриншоте, ни автоматизации), она приходит
+// с большой задержкой и выглядит чужеродно рядом с Win95-интерфейсом. Внешний
+// вид — тот же жёлтый прямоугольник, что у Button.showTooltip.
+// Используется для колонок таблицы с `col.tooltip` (заголовок + ячейки).
+function attachHoverTip(el, text) {
+    if (!el || !text) return;
+    let tipEl = null, timer = null;
+    const hide = () => {
+        if (timer) { clearTimeout(timer); timer = null; }
+        if (tipEl) { try { tipEl.remove(); } catch (e) {} tipEl = null; }
+    };
+    const show = (ev) => {
+        hide();
+        tipEl = document.createElement('div');
+        tipEl.className = 'ui-hover-tip';
+        tipEl.textContent = String(text);
+        tipEl.style.position = 'fixed';
+        tipEl.style.backgroundColor = '#ffffcc';
+        tipEl.style.border = '1px solid #000';
+        tipEl.style.padding = '4px 8px';
+        tipEl.style.fontSize = '11px';
+        tipEl.style.fontFamily = 'MS Sans Serif, sans-serif';
+        // Длинные пояснения переносим: подсказка-предложение шире экрана бесполезна.
+        tipEl.style.maxWidth = '320px';
+        tipEl.style.whiteSpace = 'normal';
+        tipEl.style.zIndex = '10000';
+        tipEl.style.pointerEvents = 'none';
+        document.body.appendChild(tipEl);
+        const x = Math.min((ev && ev.clientX != null ? ev.clientX : 0) + 12, window.innerWidth - tipEl.offsetWidth - 4);
+        const y = (ev && ev.clientY != null ? ev.clientY : 0) + 18;
+        tipEl.style.left = Math.max(2, x) + 'px';
+        tipEl.style.top = y + 'px';
+    };
+    el.addEventListener('mouseenter', (ev) => {
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(() => { timer = null; show(ev); }, 400);
+    });
+    el.addEventListener('mouseleave', hide);
+    el.addEventListener('mousedown', hide);
+}
+
 // DynamicTable class for displaying tabular data with virtual scrolling
 // Lightweight Table class: simpler than DynamicTable. Renders all rows at once
 // and uses `appForm.renderItem` to create cell editors/viewers (one control per cell).
@@ -8677,6 +8938,12 @@ class Table extends UIObject {
     }
 
     doToolbarAction(action) {
+        // «Обновить» списка: перечитать данные с сервера. Кнопка ставится только
+        // у таблиц, умеющих refresh (DynamicTable), — см. dynamicOnly в тулбаре.
+        if (action === 'listRefresh') {
+            try { if (typeof this.refresh === 'function') this.refresh(); } catch (e) { console.error('[Table] listRefresh error:', e); }
+            return true;
+        }
         if (action === 'recordAdd' && this.isTabularSection) {
             // Запрашиваем UID с сервера, затем добавляем строку
             const self = this;
@@ -8781,6 +9048,10 @@ class Table extends UIObject {
                         parentArr[rowIndex][dispKey] = displayVal;
                     }
                 }
+                // Правка ячейки — единственная точка изменения данных строки:
+                // отсюда обновляем итоговую строку. Строки НЕ перерисовываем
+                // (потерялся бы фокус ввода), только итог.
+                try { if (this._totalsBody) this._renderTotalsRow(parentArr); } catch (e) {}
             }
         } catch (e) {}
     }
@@ -8840,6 +9111,21 @@ class Table extends UIObject {
                 : (col.caption || '');
             titleSpan.textContent = _colCap0 + (curSort ? (curSort.order === 'asc' ? ' ▲' : ' ▼') : '');
             th.appendChild(titleSpan);
+
+            // Подсказка колонки (`col.tooltip`, допускается { i18n }). Нужна прежде
+            // всего узким колонкам-значкам («✓», «🔄»), где заголовок ничего не
+            // объясняет: пользователь не понимает смысла галочки и молча получает
+            // не тот результат. Без tooltip поведение не меняется.
+            try {
+                const _tipRaw = col.tooltip;
+                const _tip = (_tipRaw && typeof _tipRaw === 'object' && _tipRaw.i18n)
+                    ? (typeof __t === 'function' ? __t(_tipRaw.i18n) : _tipRaw.i18n)
+                    : _tipRaw;
+                // Своя Win95-подсказка, а не атрибут `title`: нативную рисует браузер
+                // мимо DOM — её не видно ни на скриншоте, ни в проверке, и появляется
+                // она с секундной задержкой. Ровно поэтому подсказку «не нашли».
+                if (_tip) attachHoverTip(th, _tip);
+            } catch (e) {}
 
             th.addEventListener('mousedown', () => {
                 this._resizeOccurred = false;
@@ -8905,16 +9191,24 @@ class Table extends UIObject {
                     const headerThs = Array.from(htr.children);
                     const startWidths = headerThs.map(th => th.offsetWidth);
                     
+                    // Подвал — ТРЕТЬЯ таблица с теми же колонками: его colgroup
+                    // обязан двигаться вместе с шапкой и телом, иначе после
+                    // перетаскивания границы итоги съезжают относительно данных.
+                    const fcolgroup = self._dtFcolgroup;
+                    const footerTable = self._dtFooterTable;
+
                     for (let k = 0; k < hcolgroup.children.length; k++) {
                         const colW = startWidths[k] + 'px';
                         if (hcolgroup.children[k]) hcolgroup.children[k].style.width = colW;
                         if (bcolgroup && bcolgroup.children[k]) bcolgroup.children[k].style.width = colW;
+                        if (fcolgroup && fcolgroup.children[k]) fcolgroup.children[k].style.width = colW;
                     }
 
                     // Set explicit pixel widths for both tables based on their current actual size
                     const startTableWidth = headerTable.offsetWidth;
                     headerTable.style.width = startTableWidth + 'px';
                     if (bodyTable) bodyTable.style.width = bodyTable.offsetWidth + 'px';
+                    if (footerTable) footerTable.style.width = startTableWidth + 'px';
 
                     const startW = startWidths[index];
                     self.resizeState.startWidth = startW;
@@ -8928,12 +9222,15 @@ class Table extends UIObject {
                         
                         const newTableWidthPixels = (startTableWidth + actualDelta) + 'px';
 
-                        try { 
-                            if (hcolgroup.children[index]) hcolgroup.children[index].style.width = newW + 'px'; 
+                        try {
+                            if (hcolgroup.children[index]) hcolgroup.children[index].style.width = newW + 'px';
                             headerTable.style.width = newTableWidthPixels;
-                            
+
                             if (bcolgroup && bcolgroup.children[index]) bcolgroup.children[index].style.width = newW + 'px';
                             if (bodyTable) bodyTable.style.width = newTableWidthPixels;
+
+                            if (fcolgroup && fcolgroup.children[index]) fcolgroup.children[index].style.width = newW + 'px';
+                            if (footerTable) footerTable.style.width = newTableWidthPixels;
                         } catch (e) {}
                         
                         try { self.columns[index].width = newW; } catch (e) {}
@@ -9011,14 +9308,17 @@ class Table extends UIObject {
 
             // Замораживаем ОБА colgroup побайтно одинаково и ОБЕ таблицы на одной явной ширине —
             // ни одна не перераспределяет место, выравнивание заголовка и тела гарантировано.
+            const fcg = this._dtFcolgroup; // подвал: третья таблица с теми же колонками
             for (let k = 0; k < n; k++) {
                 const px = widths[k] + 'px';
                 if (hcg.children[k]) hcg.children[k].style.width = px;
                 if (bcg.children[k]) bcg.children[k].style.width = px;
+                if (fcg && fcg.children[k]) fcg.children[k].style.width = px;
             }
             const tw = sum + 'px';
             if (hTable) hTable.style.width = tw;
             if (bTable) bTable.style.width = tw;
+            if (this._dtFooterTable) this._dtFooterTable.style.width = tw;
         } catch (e) {}
     }
 
@@ -9249,6 +9549,14 @@ class Table extends UIObject {
         cellContainer.style.display = 'flex';
         cellContainer.style.alignItems = 'center';
         if (isCheckboxCell) cellContainer.style.justifyContent = 'center';
+        // Подсказка колонки (`col.tooltip`) вешается и на ЯЧЕЙКУ, а не только на
+        // заголовок: у колонки-значка («✓», «🔄») заголовок шириной 28 px, и
+        // пользователь наводит мышь на саму галочку, а не на её шапку. Строка уже
+        // переведена на сервере ({ i18n } резолвится в layoutMemory/uniForm).
+        try {
+            const _cTip = (col && col.tooltip && typeof col.tooltip === 'object') ? col.tooltip.i18n : (col && col.tooltip);
+            if (_cTip) attachHoverTip(td, _cTip);
+        } catch (e) {}
         td.appendChild(cellContainer);
 
         const cellKey = (this.dataKey ? (this.dataKey + '__r' + rowIndex + '__' + (col.data || c)) : ('table_' + Math.random().toString(36).slice(2)));
@@ -9268,6 +9576,17 @@ class Table extends UIObject {
         // (controlsMap[key]) и _autoStartSingleRefSelection.
         cellItem.name = cellKey;
         cellItem.caption = '';
+        // Колоночные события (`col.events.onChange` и top-level onXxx) диспетчеризует
+        // ТОЛЬКО обработчик ячейки ниже — с правильной сигнатурой
+        // (rowIndex, newVal, displayVal, ctx). Если оставить их в cellItem, renderItem
+        // повесит ту же привязку ещё и на сам контрол (_wireItemEvents), и она будет
+        // вызвана вторым разом как объектный колбэк — с (value, display) вместо
+        // (rowIndex, ...): обработчик падал на `ctx.form` (undefined) при выборе услуги
+        // в строке счёта. Двойной вызов одного и того же binding'а недопустим и сам по себе.
+        delete cellItem.events;
+        for (const k of Object.keys(cellItem)) {
+            if (k.length > 2 && k[0] === 'o' && k[1] === 'n' && k[2] === k[2].toUpperCase() && k !== 'options') delete cellItem[k];
+        }
         // inTable: помечаем контрол как ячейку таблицы. Контрол использует это, чтобы
         // НЕ открывать выпадающий список автоматически по клику/фокусу (в таблице список
         // открывается только по кнопке выпадашки). На обычных полях формы (вне таблицы)
@@ -9880,15 +10199,167 @@ class Table extends UIObject {
             }
         };
 
+        // Итоги живут в ОТДЕЛЬНОМ закреплённом подвале (buildFooter), а не в
+        // <tfoot> внутри прокручиваемого тела: подвал не должен уезжать вместе
+        // со строками. Здесь только перерисовка значений.
+        const renderAll = () => {
+            renderBodyRows();
+            try { this._renderTotalsRow(rows); } catch (e) {}
+        };
+
         // Initial render
-        renderBodyRows();
+        renderAll();
         // expose renderer so header/sort code can invoke it
-        try { this._invokeRenderBodyRows = renderBodyRows; } catch (e) {}
+        try { this._invokeRenderBodyRows = renderAll; } catch (e) {}
+        // Пересчёт только итога — для точечных правок ячеек (без перерисовки строк,
+        // чтобы не терять фокус ввода).
+        try { this._totalsRows = rows; } catch (e) {}
 
         bodyTable.appendChild(tbody);
         bodyContainer.appendChild(bodyTable);
 
-        return { bodyTable: bodyTable, bcolgroup: bcolgroup, tbody: tbody, renderBodyRows: renderBodyRows };
+        return { bodyTable: bodyTable, bcolgroup: bcolgroup, tbody: tbody, renderBodyRows: renderAll };
+    }
+
+    // ── Подвал таблицы ───────────────────────────────────────────────────
+    // Сделан по фактическому устройству подвала в 1С (проверено по источникам
+    // и скриншоту, а НЕ по памяти — первая редакция была выдумана «по мотивам»
+    // и переделывалась целиком, см. ИНСТРУКЦИИ_ДЛЯ_AI.md, «Сначала посмотри»).
+    //
+    // Как в 1С:
+    //   · подписи «Итого» НЕТ — значение стоит в своей колонке и больше нигде;
+    //   · выравнивание в подвале — отдельное свойство, по умолчанию ЛЕВОЕ,
+    //     даже если данные колонки прижаты вправо;
+    //   · фон и линии — как у сетки, не как у шапки; высота — одна строка;
+    //   · итог считается по ВИДИМЫМ (отфильтрованным) строкам.
+    //
+    // Настройка в лейауте, у колонки:
+    //   "total": "sum" | "count" | "min" | "max" | "avg"  — агрегат
+    //   "totalText": "..." | { "i18n": "..." }            — текст вместо агрегата
+    //   "totalAlign": "left" | "right" | "center"         — по умолчанию left
+    //   "totalDecimals": 2                                — знаков после запятой
+    buildFooter(footerContainer) {
+        const table = document.createElement('table');
+        table.style.width = '100%';
+        table.style.borderCollapse = 'separate';
+        table.style.borderSpacing = '0';
+        table.style.tableLayout = 'fixed';
+
+        const colgroup = document.createElement('colgroup');
+        for (let i = 0; i < this.columns.length; i++) colgroup.appendChild(document.createElement('col'));
+        table.appendChild(colgroup);
+
+        const tbody = document.createElement('tbody');
+        table.appendChild(tbody);
+        footerContainer.appendChild(table);
+
+        this._dtFooterTable = table;
+        this._dtFcolgroup = colgroup;
+        this._totalsBody = tbody;
+        return { footerTable: table, fcolgroup: colgroup };
+    }
+
+    // Ширины колонок подвала повторяют тело: своя логика ширин привела бы к
+    // расхождению при перетаскивании границ колонок.
+    _syncFooterColumns() {
+        try {
+            const fg = this._dtFcolgroup, bg = this._dtBcolgroup || this._bcolgroupRef;
+            if (!fg || !bg) return;
+            for (let i = 0; i < fg.children.length && i < bg.children.length; i++) {
+                fg.children[i].style.width = bg.children[i].style.width;
+            }
+            if (this._dtFooterTable && this._dtBodyTable) {
+                this._dtFooterTable.style.width = this._dtBodyTable.style.width || '100%';
+            }
+        } catch (e) {}
+    }
+
+    // Агрегат по колонке. Пустые и нечисловые значения пропускаются, а не
+    // считаются нулём: иначе среднее и минимум врут.
+    _aggregate(kind, rows, field) {
+        const nums = [];
+        for (const row of (rows || [])) {
+            if (!row) continue;
+            const v = Number(row[field]);
+            if (isFinite(v)) nums.push(v);
+        }
+        switch (kind) {
+            case 'count': return rows ? rows.length : 0;
+            case 'min':   return nums.length ? Math.min(...nums) : null;
+            case 'max':   return nums.length ? Math.max(...nums) : null;
+            case 'avg':   return nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : null;
+            case 'sum':
+            default:      return nums.reduce((a, b) => a + b, 0);
+        }
+    }
+
+    _renderTotalsRow(rows) {
+        const tbody = this._totalsBody;
+        if (!tbody) return;
+        // Итог считается по ВИДИМЫМ строкам: если включён отбор, значение
+        // обязано меняться вместе с ним (в 1С именно так). Явно переданный
+        // массив имеет приоритет — его передают точки, которые уже знают
+        // актуальный набор строк.
+        const data = Array.isArray(rows) ? rows : this._visibleRowsForTotals();
+        tbody.innerHTML = '';
+        const tr = document.createElement('tr');
+
+        for (let i = 0; i < this.columns.length; i++) {
+            const col = this.columns[i] || {};
+            const td = document.createElement('td');
+            // Оформление ячейки подвала — ОДИН В ОДИН с ячейкой шапки (см.
+            // buildHeader): в 1С шапка и подвал визуально идентичны. Любое
+            // расхождение — фон, рамка, начертание — читается как чужеродная
+            // полоска под таблицей. Если меняешь стиль шапки, меняй и здесь.
+            const _isCbCol = !!(col && (col.inputType === 'checkbox' || col.type === 'checkbox'));
+            td.style.boxSizing = 'border-box';
+            td.style.padding = _isCbCol ? '4px 2px' : '4px 8px';
+            td.style.backgroundColor = '#c0c0c0';
+            td.style.borderTop = '2px solid #ffffff';
+            td.style.borderLeft = '2px solid #ffffff';
+            td.style.borderRight = '2px solid #808080';
+            td.style.borderBottom = '2px solid #808080';
+            td.style.fontWeight = 'bold';
+            td.style.whiteSpace = 'nowrap';
+            td.style.overflow = 'hidden';
+            td.style.textOverflow = 'ellipsis';
+            td.style.userSelect = 'none';
+            // Выравнивание в подвале — СВОЁ, по умолчанию левое, независимо от
+            // выравнивания данных колонки.
+            td.style.textAlign = col.totalAlign || 'left';
+
+            const text = col.totalText;
+            if (text) {
+                td.textContent = (text && typeof text === 'object' && text.i18n) ? String(text.i18n) : String(text);
+            } else if (col.total) {
+                const val = this._aggregate(String(col.total), data, col.data);
+                if (val == null) {
+                    td.textContent = '';
+                } else {
+                    const dec = (col.totalDecimals != null) ? Number(col.totalDecimals)
+                              : (String(col.total) === 'count' ? 0 : 2);
+                    td.textContent = Number(val).toFixed(dec);
+                }
+            }
+            // Никакой автоматической подписи «Итого»: в 1С её нет, значение
+            // стоит только в своей колонке.
+            tr.appendChild(td);
+        }
+        tbody.appendChild(tr);
+        this._syncFooterColumns();
+    }
+
+    // Строки, по которым считается подвал: видимые (с учётом отбора), а не все.
+    // Если механизма отбора у таблицы нет — это весь набор строк.
+    _visibleRowsForTotals() {
+        try {
+            if (typeof this.getVisibleRows === 'function') {
+                const v = this.getVisibleRows();
+                if (Array.isArray(v)) return v;
+            }
+            if (Array.isArray(this.filteredRows)) return this.filteredRows;
+        } catch (e) {}
+        return this._totalsRows || [];
     }
 
     setCaption(c) {
@@ -10023,6 +10494,12 @@ class Table extends UIObject {
                     { action: 'cancel',       caption: __t('Cancel'),   icon: '/apps/general_icons/resources/public/16x16/cancel.png',   selectModeOnly: true },
                     { action: 'recordAdd',    caption: __t('Add'),      icon: '/apps/general_icons/resources/public/16x16/add.png' },
                     { action: 'recordOpen',   caption: __t('Open'),     icon: '/apps/general_icons/resources/public/16x16/open.png' },
+                    // «Обновить» — только у динамических списков (у табличной части
+                    // формы обновлять нечего, её данные живут в форме). Список должен
+                    // обновляться сам по SSE; кнопка — то, что пользователь ищет
+                    // руками, когда автообновление не сработало (шестерёнка, которую
+                    // он принимает за неё, открывает настройки фильтров).
+                    { action: 'listRefresh',  caption: __t('Refresh'),  icon: '/apps/general_icons/resources/public/16x16/refresh.png', dynamicOnly: true },
                     { action: 'listSettings', caption: __t('Settings'), icon: '/apps/general_icons/resources/public/16x16/settings.png' },
                     { action: 'recordDelete', caption: __t('Delete'),   icon: '/apps/general_icons/resources/public/16x16/delete.png' }
                 ];
@@ -10030,6 +10507,7 @@ class Table extends UIObject {
                 for (const btnDef of toolbarButtons) {
                     if (btnDef.selectModeOnly && !isSelectMode) continue;
                     if (btnDef.hideInSelectMode && isSelectMode) continue;
+                    if (btnDef.dynamicOnly && typeof this.refresh !== 'function') continue;
                     if (hiddenButtons.includes(btnDef.action)) continue;
                     const btn = new Button(toolbarContainer, { caption: btnDef.caption, tooltip: btnDef.caption, icon: btnDef.icon, showIcon: !!btnDef.icon, showText: false });
                     btn.Draw(toolbarContainer);
@@ -10178,6 +10656,43 @@ class Table extends UIObject {
             const bcolgroup = bodyResult.bcolgroup;
             const renderBodyRows = bodyResult.renderBodyRows;
             _bcolgroup_ref = bcolgroup;
+            this._dtBcolgroup = bcolgroup;
+            this._dtBodyTable = bodyTable;
+
+            // Подвал таблицы (итоги по колонкам) — ЗАКРЕПЛЁННЫЙ блок под телом,
+            // как в 1С: строки прокручиваются, подвал остаётся на месте.
+            // Создаётся только если хоть у одной колонки задан итог или своя
+            // подпись подвала — иначе таблица выглядит как раньше.
+            this._totalsBody = null;
+            this._dtFooterTable = null;
+            this._dtFcolgroup = null;
+            const hasTotals = (this.columns || []).some(c => c && (c.total || c.totalText));
+            let footerContainer = null;
+            if (hasTotals) {
+                footerContainer = document.createElement('div');
+                footerContainer.className = 'ui-table-footer';
+                footerContainer.style.flex = '0 0 auto';
+                footerContainer.style.width = '100%';
+                footerContainer.style.boxSizing = 'border-box';
+                // Контейнер оформляется как контейнер ШАПКИ: в 1С шапка и подвал
+                // визуально идентичны, и отличие сразу читается как чужеродная
+                // полоска. Рамок у контейнера нет — объём дают сами ячейки.
+                footerContainer.style.position = 'relative';
+                footerContainer.style.backgroundColor = '#c0c0c0';
+                footerContainer.style.overflowX = 'hidden';
+                footerContainer.style.userSelect = 'none';
+                footerContainer.style.borderTop = '0';
+                wrapper.appendChild(footerContainer);
+                this.buildFooter(footerContainer);
+                this._dtFooterContainer = footerContainer;
+                // Тело больше не рисует нижнюю рамку — под ним сразу подвал,
+                // как под шапкой сразу тело.
+                bodyContainer.style.borderBottom = '0';
+                // Первая отрисовка итогов идёт из buildBody, а она отработала ВЫШЕ,
+                // когда подвала ещё не существовало. Поэтому рисуем его здесь явно —
+                // иначе подвал остаётся пустым до первой правки ячейки.
+                try { this._renderTotalsRow(rows); } catch (e) {}
+            }
 
             // Sync horizontal scroll and adjust header width for vertical scrollbar
             const adjustHeaderForScrollbar = () => {
@@ -10189,6 +10704,12 @@ class Table extends UIObject {
                     } else {
                         headerContainer.style.paddingRight = '0';
                     }
+                    // Подвал резервирует место под вертикальный скроллбар так же,
+                    // как шапка, иначе его колонки съезжают относительно строк.
+                    if (footerContainer) {
+                        footerContainer.style.paddingRight = scrollBarWidth > 0 ? (scrollBarWidth - 1) + 'px' : '0';
+                    }
+                    this._syncFooterColumns();
                 } catch (e) {}
             };
             // Доступно методам ре-рендера (_syncColumnWidthsToHeader зовёт его ПЕРЕД замером
@@ -10197,6 +10718,9 @@ class Table extends UIObject {
 
             bodyContainer.addEventListener('scroll', () => {
                 headerContainer.scrollLeft = bodyContainer.scrollLeft;
+                // Подвал прокручивается по горизонтали синхронно с телом и
+                // шапкой; по вертикали он неподвижен — в этом и смысл.
+                if (footerContainer) footerContainer.scrollLeft = bodyContainer.scrollLeft;
                 adjustHeaderForScrollbar();
             });
             // Also adjust on window resize and once now
@@ -11857,6 +12381,35 @@ class DynamicTable extends Table {
         // If destroyed or scheduled to be destroyed, do not (re)connect
         if (this._sseDestroyed) return;
 
+        // Сторож живости потока. На `onerror` полагаться НЕЛЬЗЯ: браузер не всегда
+        // доставляет событие ошибки на уже закрытый поток (проверено — поток лежал
+        // в состоянии CLOSED, а onerror не срабатывал и переподключение не
+        // планировалось). Поэтому раз в 15 с проверяем состояние сами и поднимаем
+        // соединение заново. Один интервал на страницу.
+        try {
+            if (typeof window !== 'undefined' && !window.__sseWatchdog) {
+                window.__sseWatchdog = setInterval(() => {
+                    try {
+                        const reg = window._dynamicTableEventSources;
+                        const subsReg = window._dynamicTableSubscribers;
+                        if (!reg || !subsReg) return;
+                        for (const key of Array.from(reg.keys())) {
+                            const entry = reg.get(key);
+                            if (!entry || !entry.es || entry.es.readyState !== 2) continue;
+                            const subs = subsReg.get(key);
+                            reg.delete(key);
+                            const list = subs ? Array.from(subs) : [];
+                            if (subs && subs.clear) subs.clear();
+                            console.warn('[DynamicTable] SSE watchdog: dead stream', key, '— reconnecting', list.length, 'subscribers');
+                            list.forEach(s => {
+                                try { if (s && !s._sseDestroyed && typeof s.connectSSE === 'function') s.connectSSE(); } catch (e) {}
+                            });
+                        }
+                    } catch (e) {}
+                }, 15000);
+            }
+        } catch (e) {}
+
         // Ensure global registries
         try {
             if (typeof window !== 'undefined') {
@@ -11872,7 +12425,13 @@ class DynamicTable extends Table {
 
         // First try session-level SSE
         try {
-            const existingSession = (typeof window !== 'undefined' && window._dynamicTableEventSources) ? window._dynamicTableEventSources.get(sessionSharedKey) : null;
+            let existingSession = (typeof window !== 'undefined' && window._dynamicTableEventSources) ? window._dynamicTableEventSources.get(sessionSharedKey) : null;
+            // Мёртвый (CLOSED) поток переиспользовать нельзя — иначе новый список
+            // молча подписывается на труп и никогда не обновляется.
+            if (existingSession && existingSession.es && existingSession.es.readyState === 2) {
+                try { window._dynamicTableEventSources.delete(sessionSharedKey); } catch (e) {}
+                existingSession = null;
+            }
             if (existingSession && existingSession.es) {
                 this.eventSource = existingSession.es;
                 this._sseSharedKey = sessionSharedKey;
@@ -11934,20 +12493,31 @@ class DynamicTable extends Table {
                     };
 
                     ses.onerror = () => {
-                        console.warn('[DynamicTable] session SSE error/closed for', this.appName, this.tableName);
-                        try { ses.close(); } catch (e) {}
-                        // cleanup registry if needed
+                        // ВАЖНО: не закрывать поток в onerror. EventSource переподключается
+                        // САМ при обрыве (readyState 0 = CONNECTING); `close()` это
+                        // автопереподключение убивает НАВСЕГДА. Именно поэтому «списки
+                        // не обновляются сами»: после первого же разрыва (сон машины,
+                        // таймаут прокси, перезапуск сервера) сессионный поток окна
+                        // умирал молча, а каждый новый список «переиспользовал» труп из
+                        // реестра — до перезагрузки страницы живое обновление больше не
+                        // работало нигде. Реагируем ТОЛЬКО на окончательно закрытый поток.
+                        if (ses.readyState !== 2) return; // переподключается сам
+                        console.warn('[DynamicTable] session SSE closed, reconnecting soon');
                         try {
                             const subs = window._dynamicTableSubscribers.get(sessionSharedKey);
-                            if (subs && subs.delete) subs.delete(this);
-                            const remaining = subs ? subs.size : 0;
-                            if (remaining === 0) {
-                                try { window._dynamicTableEventSources.delete(sessionSharedKey); } catch(e){}
-                            }
+                            window._dynamicTableEventSources.delete(sessionSharedKey);
+                            if (window.__sessionSseRetryTimer) clearTimeout(window.__sessionSseRetryTimer);
+                            window.__sessionSseRetryTimer = setTimeout(() => {
+                                window.__sessionSseRetryTimer = null;
+                                const list = subs ? Array.from(subs) : [];
+                                if (subs && subs.clear) subs.clear();
+                                // Первый живой подписчик поднимет общий поток, остальные
+                                // переиспользуют его штатной веткой connectSSE.
+                                list.forEach(s => {
+                                    try { if (s && !s._sseDestroyed && typeof s.connectSSE === 'function') s.connectSSE(); } catch (e) {}
+                                });
+                            }, 3000);
                         } catch (e) {}
-                        // fallback to per-table SSE
-                        this._sseSharedKey = perTableSharedKey;
-                        try { if (typeof this.connectSSE === 'function') { /* will not re-enter */ } } catch(e){}
                     };
                 } catch (e) {
                     console.warn('[DynamicTable] session SSE failed, will fallback to per-table SSE', e);
@@ -12028,22 +12598,24 @@ class DynamicTable extends Table {
         };
 
         es.onerror = () => {
-            console.warn('[DynamicTable] SSE error/closed for', this.appName, this.tableName);
+            // То же правило, что и для сессионного потока: обрыв EventSource
+            // восстанавливает сам браузер, `close()` в onerror это ломает.
+            // Действуем только когда поток закрыт окончательно.
+            if (es.readyState !== 2) return;
+            console.warn('[DynamicTable] SSE closed for', this.appName, this.tableName, '— reconnecting soon');
             try {
-                // Remove this instance from subscribers
                 const subs = (typeof window !== 'undefined' && window._dynamicTableSubscribers) ? window._dynamicTableSubscribers.get(sharedKey) : null;
-                if (subs && subs.delete) subs.delete(this);
-                const remaining = subs ? subs.size : 0;
-                if (typeof window !== 'undefined' && window._dynamicTableSubscribers) window._dynamicTableSubscribers.set(sharedKey, subs || new Set());
-                try { es.close(); } catch (e) {}
-                try { if (this._sseReconnectTimer) { clearTimeout(this._sseReconnectTimer); this._sseReconnectTimer = null; } } catch (e) {}
-                // If no subscribers left, remove shared source entry
-                if (remaining === 0) {
-                    try { if (typeof window !== 'undefined' && window._dynamicTableEventSources) window._dynamicTableEventSources.delete(sharedKey); } catch (e) {}
-                }
-            } catch (e) {
-                try { es.close(); } catch (e2) {}
-            }
+                try { if (typeof window !== 'undefined' && window._dynamicTableEventSources) window._dynamicTableEventSources.delete(sharedKey); } catch (e) {}
+                try { if (this._sseReconnectTimer) clearTimeout(this._sseReconnectTimer); } catch (e) {}
+                this._sseReconnectTimer = setTimeout(() => {
+                    this._sseReconnectTimer = null;
+                    const list = subs ? Array.from(subs) : [];
+                    if (subs && subs.clear) subs.clear();
+                    list.forEach(s => {
+                        try { if (s && !s._sseDestroyed && typeof s.connectSSE === 'function') s.connectSSE(); } catch (e) {}
+                    });
+                }, 3000);
+            } catch (e) {}
         };
     }
 

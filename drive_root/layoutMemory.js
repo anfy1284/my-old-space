@@ -155,6 +155,10 @@ function translateLayoutCaptions(nodes, tFn) {
         if (node.caption && typeof node.caption === 'object' && node.caption.i18n) {
             node.caption = tFn(node.caption.i18n);
         }
+        // tooltip — та же природа, что и caption (подпись колонки-значка и т.п.).
+        if (node.tooltip && typeof node.tooltip === 'object' && node.tooltip.i18n) {
+            node.tooltip = tFn(node.tooltip.i18n);
+        }
         if (Array.isArray(node.layout))       translateLayoutCaptions(node.layout, tFn);
         if (Array.isArray(node.columns))       translateLayoutCaptions(node.columns, tFn);
         if (Array.isArray(node.options))       translateLayoutCaptions(node.options, tFn);

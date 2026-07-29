@@ -215,6 +215,18 @@
         "de": "Einstellungen",
         "pl": "Ustawienia"
     },
+    "Refresh": {
+        "en": "Refresh",
+        "ru": "Обновить",
+        "de": "Aktualisieren",
+        "pl": "Odśwież"
+    },
+    "Total": {
+        "en": "Total",
+        "ru": "Итого",
+        "de": "Gesamt",
+        "pl": "Razem"
+    },
     "Enable / disable filter": {
         "en": "Enable / disable filter",
         "ru": "Включить / выключить фильтр",

@@ -40,6 +40,16 @@ async function translateColumnsI18n(columns, sessionID) {
         if (col && col.caption && typeof col.caption === 'object' && col.caption.i18n) {
             try { col.caption = await tForSession(col.caption.i18n, sessionID); } catch (e) {}
         }
+        // Подписи допустимых значений (`options` поля модели) — той же природы, что
+        // и caption колонки. Без перевода ячейка показала бы ключ i18n вместо слова,
+        // а без самого списка — сырое значение из БД («issued» вместо «Ausgestellt»).
+        if (col && Array.isArray(col.options)) {
+            for (const opt of col.options) {
+                if (opt && opt.caption && typeof opt.caption === 'object' && opt.caption.i18n) {
+                    try { opt.caption = await tForSession(opt.caption.i18n, sessionID); } catch (e) {}
+                }
+            }
+        }
     }
 }
 

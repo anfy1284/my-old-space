@@ -7,7 +7,15 @@
  * @param {string} dialect - Диалект БД (postgres, sqlite)
  * @returns {string} - Нормализованный тип (например, "STRING")
  */
-function normalizeType(t, dialect = 'postgres') {
+/**
+ * Привести тип к сопоставимому виду.
+ * @param {string} t       — тип (из описания колонки БД или из определения модели)
+ * @param {string} dialect — 'postgres' | 'sqlite'
+ * @param {string} origin  — 'db' (описание колонки, по умолчанию) | 'model'
+ *                           Нужен из-за слова «DATE»: в модели это момент
+ *                           времени, в postgres — календарная дата.
+ */
+function normalizeType(t, dialect = 'postgres', origin = 'db') {
   if (!t) return '';
   const s = String(t).toUpperCase();
 
@@ -27,7 +35,31 @@ function normalizeType(t, dialect = 'postgres') {
   if (s === 'BIGINT' || s === 'INT8') return 'BIGINT';
   if (s === 'SMALLINT' || s === 'INT2') return 'SMALLINT';
   if (s === 'BOOLEAN' || s === 'BOOL') return 'BOOLEAN';
-  if (s.includes('DATE') || s.includes('TIMESTAMP')) return 'DATE';
+
+  // Даты: календарная дата и момент времени — РАЗНЫЕ типы, схлопывать их
+  // в один нельзя (иначе настоящая смена типа пройдёт незамеченной).
+  //   Sequelize DATEONLY ←→ postgres `date`
+  //   Sequelize DATE     ←→ postgres `timestamp with time zone`
+  //
+  // ВНИМАНИЕ: слово «DATE» означает РАЗНОЕ с двух сторон — в определении
+  // модели это момент времени, в описании колонки postgres это календарная
+  // дата. Поэтому нормализация обязана знать источник типа; без этого
+  // сравнение либо путает типы, либо считает совпадающие поля разными.
+  if (origin === 'model') {
+    if (s === 'DATEONLY') return 'DATEONLY';
+    if (s === 'DATE' || s === 'DATETIME') return 'DATE';
+  } else {
+    if (s === 'DATE') return 'DATEONLY';
+    if (s.includes('TIMESTAMP') || s === 'DATETIME') return 'DATE';
+  }
+
+  // Числа с плавающей точкой: Sequelize FLOAT в postgres — это
+  // `double precision`. Без этой пары сравнение схем считало поле
+  // изменившимся ВСЕГДА.
+  if (s === 'FLOAT' || s === 'FLOAT8' || s === 'FLOAT4' || s === 'REAL' || s.includes('DOUBLE')) return 'FLOAT';
+  // DECIMAL/NUMERIC — отдельный тип (деньги), с FLOAT не смешивать.
+  if (s === 'DECIMAL' || s === 'NUMERIC') return 'DECIMAL';
+
   if (s.includes('JSON')) return 'JSON';
 
   return s;
@@ -48,7 +80,18 @@ async function compareSchemas(currentSchema, desiredSchema, dialect = 'postgres'
 
       // 1. Проверка типа
       const currentTypeNorm = normalizeType(dbCol.type, dialect);
-      const desiredTypeNorm = (Sequelize.DataTypes[fieldDef.type].key || fieldDef.type).toUpperCase();
+      // Желаемый тип ОБЯЗАН проходить через ту же нормализацию, что и тип из
+      // базы. Раньше он брался как есть, и `DATEONLY` (модель) сравнивался с
+      // `DATE` (колонка postgres) как разные типы, а `FLOAT` — с
+      // `DOUBLE PRECISION`. Итог: 12 таблиц считались изменившимися при
+      // КАЖДОМ старте сервера и каждый раз дропались с восстановлением из
+      // временной копии. Именно эта перестройка и обнуляла представления
+      // записей и отметки времени.
+      const desiredTypeNorm = normalizeType(
+        (Sequelize.DataTypes[fieldDef.type] && Sequelize.DataTypes[fieldDef.type].key) || fieldDef.type,
+        dialect,
+        'model'
+      );
 
       let desiredAllowNull = fieldDef.allowNull === undefined ? true : !!fieldDef.allowNull;
       if (fieldDef.primaryKey) desiredAllowNull = false;

@@ -56,7 +56,10 @@ const poolConfig = Object.assign({}, poolDefaults, settings.pool || {});
 if (isProduction && process.env.DATABASE_URL) {
   sequelize = new Sequelize(process.env.DATABASE_URL, {
     dialect: 'postgres',
-    logging: false,
+    // Диагностика: SQL_LOG=1 включает печать всех запросов. Нужен, когда
+    // надо понять, кто и что делает с данными при старте (напр. поиск
+    // источника перезаписи `updatedAt`/`name` — бэклог B1).
+    logging: process.env.SQL_LOG === '1' ? console.log : false,
     pool: poolConfig,
     dialectOptions: {
       keepAlive: true,
@@ -71,14 +74,20 @@ if (isProduction && process.env.DATABASE_URL) {
   sequelize = new Sequelize({
     dialect: 'sqlite',
     storage: settings.storage || path.join(process.cwd(), 'database.sqlite'),
-    logging: false,
+    // Диагностика: SQL_LOG=1 включает печать всех запросов. Нужен, когда
+    // надо понять, кто и что делает с данными при старте (напр. поиск
+    // источника перезаписи `updatedAt`/`name` — бэклог B1).
+    logging: process.env.SQL_LOG === '1' ? console.log : false,
   });
 } else {
   sequelize = new Sequelize(settings.database, settings.username, settings.password, {
     host: settings.host,
     port: settings.port,
     dialect: settings.dialect,
-    logging: false,
+    // Диагностика: SQL_LOG=1 включает печать всех запросов. Нужен, когда
+    // надо понять, кто и что делает с данными при старте (напр. поиск
+    // источника перезаписи `updatedAt`/`name` — бэклог B1).
+    logging: process.env.SQL_LOG === '1' ? console.log : false,
     pool: poolConfig,
     dialectOptions: {
       charset: 'utf8',

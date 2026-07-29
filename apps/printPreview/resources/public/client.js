@@ -103,7 +103,13 @@ try {
                 }
                 if (btnClose && btnClose.element) {
                     btnClose.element.addEventListener('click', function () {
-                        if (typeof appForm.Close === 'function') appForm.Close();
+                        // Закрытие окна — ТОЛЬКО Form.close(): она снимает элемент окна
+                        // с экрана, убирает форму из реестра и сама зовёт destroy().
+                        // Здесь стояло `appForm.Close()` с заглавной C — такого метода
+                        // нет, условие всегда было ложным, и управление уходило в
+                        // `destroy()`, который освобождает ресурсы, но окно НЕ убирает:
+                        // кнопка «Закрыть» визуально не делала ничего.
+                        if (typeof appForm.close === 'function') appForm.close();
                         else if (typeof appForm.destroy === 'function') appForm.destroy();
                     });
                 }

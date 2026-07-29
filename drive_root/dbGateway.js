@@ -13,28 +13,25 @@
 
 const LEVELS = ['app', 'forms', 'root'];
 
-// Числовые типы Sequelize — для них пустая строка трактуется как 0 (см. sanitizeData).
-const _NUMERIC_TYPE_KEYS = new Set([
-    'INTEGER', 'BIGINT', 'FLOAT', 'DOUBLE', 'DOUBLE PRECISION',
-    'DECIMAL', 'REAL', 'NUMBER', 'SMALLINT', 'TINYINT', 'MEDIUMINT'
-]);
-
-function _isNumericAttr(attr) {
-    const k = attr && attr.type && (attr.type.key
-        || (attr.type.constructor && attr.type.constructor.key));
-    return !!k && _NUMERIC_TYPE_KEYS.has(String(k).toUpperCase());
-}
+// Пустые значения по типам (NULL только у ссылок) — единая реализация,
+// та же, что применяется к схеме до sequelize.define.
+const emptyValues = require('./db/emptyValues');
 
 /**
  * Нормализация значений перед записью (create/update). Мутирует data in-place.
- *  - Пустая строка "" → null для внешних ключей (Postgres падает на FK-ограничении)
- *    и для nullable-полей с валидаторами (напр. email с isEmail: Sequelize пропускает
- *    валидаторы только при null, а на "" гоняет isEmail и роняет сохранение).
- *  - Пустая строка "" → 0 для числовых полей (INTEGER/FLOAT/…): стёртое пользователем
- *    числовое поле всегда воспринимается как 0 (Postgres не принимает "" для чисел).
- *  - null → 0 для НЕ-nullable числовых полей: очищенное числовое поле часто приходит
- *    как null (а не ""), а notNull-колонка (напр. booking_guests.count) на null падает
- *    с "notNull Violation". Nullable числовые поля null сохраняют (там null осмыслен).
+ *
+ * ПРАВИЛО: NULL в базе допустим ТОЛЬКО у полей-ссылок. У каждого остального
+ * типа своё пустое значение — число 0, строка "", булево false, дата
+ * 0001-01-01. Обоснование и константы — `drive_root/db/emptyValues.js`.
+ *
+ * Это вторая половина механизма: схема задаёт умолчание для НОВЫХ строк
+ * (инъекция в `events_handler.js#onModelsPostCollect`), а здесь ловятся
+ * значения, пришедшие с формы, из скрипта или из внешнего вызова — там
+ * пустое поле приезжает как "" либо как null и до умолчания схемы не
+ * доходит, потому что ключ в объекте присутствует.
+ *
+ * Ссылки: "" → null. Postgres не принимает пустую строку в FK-колонке, а
+ * «ссылки нет» — это и есть NULL, единственный законный случай.
  */
 function sanitizeData(Model, data) {
     if (!Model || !Model.rawAttributes || !data) return;
@@ -42,15 +39,30 @@ function sanitizeData(Model, data) {
         const attr = Model.rawAttributes[k];
         if (!attr) return;
         const v = data[k];
-        if (v === '') {
-            if (attr.references || (attr.allowNull && attr.validate)) {
-                data[k] = null;
-            } else if (_isNumericAttr(attr)) {
-                data[k] = 0;
-            }
-        } else if (v === null && attr.allowNull === false && _isNumericAttr(attr)) {
-            data[k] = 0;
+        if (!emptyValues.isEmptyValue(v)) return;
+
+        // Поле-ссылка — единственное место, где NULL законен.
+        if (emptyValues.isReferenceField(attr)) {
+            if (v === '') data[k] = null;
+            return;
         }
+
+        const empty = emptyValues.emptyValueFor(attr);
+        // Тип не распознан — не трогаем: лучше оставить как есть, чем
+        // записать выдуманное значение в поле, устройства которого мы
+        // не поняли.
+        if (empty === undefined) return;
+
+        // defaultValue из схемы важнее общего пустого значения типа: если
+        // автор поля объявил своё умолчание, оно и есть «пусто» для него.
+        // Но только когда значение вообще не передали (undefined). Пустая
+        // строка и null — это осознанная очистка поля пользователем, и она
+        // обязана давать пустое значение типа, а не умолчание автора.
+        if (v === undefined && attr.defaultValue !== undefined && attr.defaultValue !== null) {
+            data[k] = attr.defaultValue;
+            return;
+        }
+        data[k] = empty;
     });
 }
 

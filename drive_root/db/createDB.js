@@ -44,6 +44,28 @@ if (projectRoot) {
 }
 
 const dbConfig = require('./db.json');
+const emptyValues = require('./emptyValues');
+
+// Пересев defaultValues идёт напрямую через Sequelize, минуя dbGateway, —
+// значит и мимо sanitizeData. Без этой нормализации сев возвращает в базу
+// NULL-ы, только что вычищенные миграцией: правило «NULL только у ссылок»
+// держится ровно до первой смены схемы.
+function normalizeEmptyForModel(Model, data) {
+  if (!Model || !Model.rawAttributes || !data) return data;
+  for (const k of Object.keys(data)) {
+    const attr = Model.rawAttributes[k];
+    if (!attr) continue;
+    if (!emptyValues.isEmptyValue(data[k])) continue;
+    if (emptyValues.isReferenceField(attr)) {
+      if (data[k] === '') data[k] = null;
+      continue;
+    }
+    const empty = emptyValues.emptyValueFor(attr);
+    if (empty !== undefined) data[k] = empty;
+  }
+  return data;
+}
+
 const modelsDef = dbConfig.models;
 const { DEFAULT_VALUES_TABLE } = dbConfig;
 const { hashPassword } = require('./utilites');
@@ -192,12 +214,16 @@ async function ensureDatabase() {
   await adminClient.end();
 }
 
+// Диагностика: SQL_LOG=1 печатает запросы миграции. У createDB СВОЙ экземпляр
+// Sequelize — при поиске «кто портит данные на старте» логировать только
+// drive_root/db/sequelize_instance.js недостаточно: миграция пройдёт мимо лога
+// незамеченной (на это уже потрачен один заход).
 function getSequelizeInstance() {
   const isProduction = process.env.NODE_ENV === 'production';
   if (isProduction && process.env.DATABASE_URL) {
     return new Sequelize(process.env.DATABASE_URL, {
       dialect: 'postgres',
-      logging: false,
+      logging: process.env.SQL_LOG === '1' ? console.log : false,
       dialectOptions: {
         ssl: {
           require: true,
@@ -212,7 +238,7 @@ function getSequelizeInstance() {
     return new Sequelize({
       dialect: 'sqlite',
       storage: dbPath,
-      logging: false,
+      logging: process.env.SQL_LOG === '1' ? console.log : false,
     });
   }
 
@@ -637,6 +663,17 @@ async function createAll() {
 
         const commonFields = Object.keys(desiredSchema).filter(field => currentSchema[field]);
 
+        // Служебные отметки времени Sequelize добавляет сам и в `def.fields`
+        // их нет — значит в commonFields они не попадали и при перестройке
+        // таблицы ТЕРЯЛИСЬ: все восстановленные строки получали `createdAt` и
+        // `updatedAt` равными моменту миграции. Для документов это уничтожало
+        // единственный след происхождения записи («когда заведён», «когда
+        // последний раз менялся») — журнала изменений в системе пока нет.
+        // Переносим их наравне с прикладными полями.
+        for (const ts of ['createdAt', 'updatedAt']) {
+          if (currentSchema[ts] && !commonFields.includes(ts)) commonFields.push(ts);
+        }
+
         if (commonFields.length > 0) {
           const totalRowsRes = await sequelize.query(`SELECT COUNT(*) as count FROM "${tempTableName}"`, {
             transaction,
@@ -673,11 +710,16 @@ async function createAll() {
               });
 
               // ignoreDuplicates помогает с уникальными ключами, но не с FK
+              for (const d of dataToInsert) normalizeEmptyForModel(models[def.name], d);
               await models[def.name].bulkCreate(dataToInsert, {
                 transaction,
                 ignoreDuplicates: true,
                 validate: false,
-                hooks: false
+                hooks: false,
+                // silent: перенос строки при перестройке таблицы — не правка
+                // пользователя. Без этого Sequelize подменил бы `updatedAt`
+                // моментом миграции.
+                silent: true
               });
 
               await sequelize.query(`RELEASE SAVEPOINT chunk_${offset}`, { transaction });
@@ -694,7 +736,8 @@ async function createAll() {
 
                 try {
                   await sequelize.query('SAVEPOINT restore_row', { transaction });
-                  await models[def.name].create(data, { transaction, hooks: false });
+                  normalizeEmptyForModel(models[def.name], data);
+                  await models[def.name].create(data, { transaction, hooks: false, silent: true });
                   await sequelize.query('RELEASE SAVEPOINT restore_row', { transaction });
                   successCount++;
                 } catch (rowErr) {
@@ -821,6 +864,7 @@ async function createAll() {
 
             try {
               await sequelize.query('SAVEPOINT fill_default', { transaction });
+              normalizeEmptyForModel(Model, data);
               const newRecord = await Model.create(data, { transaction });
               await DefaultValuesModel.create({
                 level: lvlName,
@@ -930,8 +974,14 @@ async function createAll() {
               // Record exists - update ONLY fields from defaultValues config
               const updateData = { ...data };
               delete updateData.UID; // Don't update ID
+              normalizeEmptyForModel(Model, updateData);
 
-              await existingRecord.update(updateData, { transaction });
+              // silent: служебный пересев — НЕ действие пользователя, и он не
+              // должен подменять `updatedAt`. Иначе «когда документ последний
+              // раз менялся» затирается при каждой смене схемы, а это
+              // единственный след происхождения записи (журнала изменений в
+              // системе пока нет). Бэклог B1.
+              await existingRecord.update(updateData, { transaction, silent: true });
               console.log(`[MIGRATION] Updated predefined fields in: ${entity}[${existingRecord.UID}] (defaultValueId=${defaultValueId}, level=${lvlName})`);
 
               // Register in DefaultValues table

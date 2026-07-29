@@ -52,5 +52,17 @@
         "ru": "Строка {{row}} секции «{{section}}»: ошибка сохранения — {{error}}",
         "de": "Zeile {{row}} der Sektion «{{section}}»: Speicherfehler — {{error}}",
         "pl": "Wiersz {{row}} sekcji «{{section}}»: błąd zapisu — {{error}}"
+    },
+    "form_context_expired": {
+        "en": "The form has been open too long and its session on the server has expired. Please copy anything you have not saved, close the window and open the record again.",
+        "ru": "Форма была открыта слишком долго, и её сеанс на сервере устарел. Перепишите несохранённое, закройте окно и откройте запись заново.",
+        "de": "Das Formular war zu lange geöffnet, seine Sitzung auf dem Server ist abgelaufen. Bitte notieren Sie nicht gespeicherte Eingaben, schließen Sie das Fenster und öffnen Sie den Datensatz erneut.",
+        "pl": "Formularz był otwarty zbyt długo i jego sesja na serwerze wygasła. Zapisz sobie niezapisane dane, zamknij okno i otwórz rekord ponownie."
+    },
+    "required_fields_missing": {
+        "en": "Please fill in the required fields: {{fields}}",
+        "ru": "Заполните обязательные поля: {{fields}}",
+        "de": "Bitte füllen Sie die Pflichtfelder aus: {{fields}}",
+        "pl": "Uzupełnij pola obowiązkowe: {{fields}}"
     }
 }
