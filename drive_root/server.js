@@ -207,12 +207,8 @@ async function handleRequest(req, res) {
                 const fileStore = require('./fileStore');
                 const ext = path.extname(filePath).slice(1).toLowerCase();
                 if (ext === 'js') {
-                    let sessionID = null;
-                    if (req.headers && req.headers.cookie) {
-                        const m = req.headers.cookie.match(/(?:^|; )sessionID=([^;]+)/i);
-                        if (m) sessionID = decodeURIComponent(m[1]);
-                    }
                     (async () => {
+                        const sessionID = await require('./globalServerContext').getSessionIdFromRequest(req);
                         let language = null;
                         if (sessionID) {
                             try {
@@ -251,12 +247,8 @@ async function handleRequest(req, res) {
                     res.end('404 Not Found');
                     return;
                 }
-                // Check access by sessionId (from cookie)
-                let sessionId = null;
-                if (req.headers && req.headers.cookie) {
-                    const match = req.headers.cookie.match(/(?:^|; )sessionId=([^;]+)/i);
-                    if (match) sessionId = decodeURIComponent(match[1]);
-                }
+                // Сессия — только через единую точку (гейт служебных сессий)
+                const sessionId = await require('./globalServerContext').getSessionIdFromRequest(req);
                 if (!checkProtectedAccess(sessionId, filePath)) {
                     res.writeHead(403, { 'Content-Type': 'text/plain' });
                     res.end('Forbidden');
@@ -304,11 +296,7 @@ async function handleRequest(req, res) {
             if (resType === 'public') {
                 const fileStore = require('./fileStore');
                 const serveAppFile = async (resolvedPath) => {
-                    let sessionID = null;
-                    if (req.headers && req.headers.cookie) {
-                        const m = req.headers.cookie.match(/(?:^|; )sessionID=([^;]+)/i);
-                        if (m) sessionID = decodeURIComponent(m[1]);
-                    }
+                    const sessionID = await require('./globalServerContext').getSessionIdFromRequest(req);
                     let language = null;
                     if (sessionID) {
                         try {
@@ -375,12 +363,8 @@ async function handleRequest(req, res) {
             return;
         }
 
-        // Извлечь sessionID из cookie
-        let sessionID = null;
-        if (req.headers && req.headers.cookie) {
-            const match = req.headers.cookie.match(/(?:^|; )sessionID=([^;]+)/);
-            if (match) sessionID = decodeURIComponent(match[1]);
-        }
+        // Сессия — только через единую точку (гейт служебных сессий, см. globalServerContext)
+        const sessionID = await require('./globalServerContext').getSessionIdFromRequest(req);
 
         const fileStore = require('./fileStore');
         const formsCtx = require('../drive_forms/globalServerContext');
@@ -453,12 +437,8 @@ async function handleRequest(req, res) {
                 return;
             }
 
-            // Извлечь sessionID из cookie
-            let sessionID = null;
-            if (req.headers && req.headers.cookie) {
-                const match = req.headers.cookie.match(/(?:^|; )sessionID=([^;]+)/);
-                if (match) sessionID = decodeURIComponent(match[1]);
-            }
+            // Сессия — только через единую точку (гейт служебных сессий)
+            const sessionID = await require('./globalServerContext').getSessionIdFromRequest(req);
 
             const serverScriptStore = require('./serverScriptStore');
             const formsCtx = require('../drive_forms/globalServerContext');
@@ -522,7 +502,10 @@ async function handleRequest(req, res) {
     } else if (req.url.startsWith(`/${appAlias}`)) {
         try {
             if (typeof appHandler.handleRequest === 'function') {
-                appHandler.handleRequest(req, res, appDir, appAlias);
+                // handleRequest асинхронен (единая точка извлечения сессии ходит в БД) —
+                // ловим отказ промиса, иначе он всплывёт как unhandledRejection.
+                Promise.resolve(appHandler.handleRequest(req, res, appDir, appAlias))
+                    .catch(e => console.error('[server] handleRequest rejected:', e && e.message || e));
             } else {
                 res.writeHead(500, { 'Content-Type': 'text/plain' });
                 console.error('Error: appHandler.handleRequest is not a function');

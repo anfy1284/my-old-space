@@ -1,0 +1,565 @@
+{
+  "scheduler_app_caption": {
+    "en": "Scheduled tasks",
+    "ru": "Регламентные задания",
+    "de": "Regelmäßige Aufgaben",
+    "pl": "Zadania regulaminowe"
+  },
+  "scheduler_task_record_caption": {
+    "en": "Scheduled task",
+    "ru": "Регламентное задание",
+    "de": "Regelmäßige Aufgabe",
+    "pl": "Zadanie regulaminowe"
+  },
+  "scheduler_runs_app_caption": {
+    "en": "Task run history",
+    "ru": "История выполнения заданий",
+    "de": "Ausführungsverlauf",
+    "pl": "Historia wykonania zadań"
+  },
+  "scheduler_runs_record_caption": {
+    "en": "Task run",
+    "ru": "Запуск задания",
+    "de": "Aufgabenlauf",
+    "pl": "Uruchomienie zadania"
+  },
+
+  "sched_task_caption_field": {
+    "en": "Task name",
+    "ru": "Наименование задания",
+    "de": "Bezeichnung der Aufgabe",
+    "pl": "Nazwa zadania"
+  },
+  "sched_handler_field": {
+    "en": "Task type",
+    "ru": "Тип задачи",
+    "de": "Aufgabentyp",
+    "pl": "Typ zadania"
+  },
+  "sched_enabled_field": {
+    "en": "Enabled",
+    "ru": "Включено",
+    "de": "Aktiv",
+    "pl": "Włączone"
+  },
+  "sched_owner_field": {
+    "en": "Owner",
+    "ru": "Владелец",
+    "de": "Eigentümer",
+    "pl": "Właściciel"
+  },
+  "sched_organization_field": {
+    "en": "Organization",
+    "ru": "Организация",
+    "de": "Organisation",
+    "pl": "Organizacja"
+  },
+  "sched_hotel_field": {
+    "en": "Hotel",
+    "ru": "Отель",
+    "de": "Hotel",
+    "pl": "Hotel"
+  },
+  "sched_status_field": {
+    "en": "Status",
+    "ru": "Статус",
+    "de": "Status",
+    "pl": "Status"
+  },
+  "sched_task_field": {
+    "en": "Task",
+    "ru": "Задание",
+    "de": "Aufgabe",
+    "pl": "Zadanie"
+  },
+
+  "sched_mode_field": {
+    "en": "Schedule",
+    "ru": "Расписание",
+    "de": "Zeitplan",
+    "pl": "Harmonogram"
+  },
+  "sched_mode_interval": {
+    "en": "Every N minutes",
+    "ru": "Каждые N минут",
+    "de": "Alle N Minuten",
+    "pl": "Co N minut"
+  },
+  "sched_mode_daily": {
+    "en": "Daily",
+    "ru": "Ежедневно",
+    "de": "Täglich",
+    "pl": "Codziennie"
+  },
+  "sched_mode_weekly": {
+    "en": "On weekdays",
+    "ru": "По дням недели",
+    "de": "An Wochentagen",
+    "pl": "W dni tygodnia"
+  },
+  "sched_mode_monthly": {
+    "en": "Monthly",
+    "ru": "Ежемесячно",
+    "de": "Monatlich",
+    "pl": "Co miesiąc"
+  },
+  "sched_mode_cron": {
+    "en": "Advanced (cron)",
+    "ru": "Расширенно (cron)",
+    "de": "Erweitert (cron)",
+    "pl": "Zaawansowane (cron)"
+  },
+  "sched_interval_minutes_field": {
+    "en": "Interval, min",
+    "ru": "Интервал, мин",
+    "de": "Intervall, Min.",
+    "pl": "Interwał, min"
+  },
+  "sched_time_of_day_field": {
+    "en": "Time",
+    "ru": "Время",
+    "de": "Uhrzeit",
+    "pl": "Godzina"
+  },
+  "sched_week_days_field": {
+    "en": "Weekdays (1 = Mon)",
+    "ru": "Дни недели (1 = пн)",
+    "de": "Wochentage (1 = Mo)",
+    "pl": "Dni tygodnia (1 = pon)"
+  },
+  "sched_month_day_field": {
+    "en": "Day of month",
+    "ru": "День месяца",
+    "de": "Tag des Monats",
+    "pl": "Dzień miesiąca"
+  },
+  "sched_cron_field": {
+    "en": "Cron expression",
+    "ru": "Выражение cron",
+    "de": "Cron-Ausdruck",
+    "pl": "Wyrażenie cron"
+  },
+  "sched_timezone_field": {
+    "en": "Time zone",
+    "ru": "Часовой пояс",
+    "de": "Zeitzone",
+    "pl": "Strefa czasowa"
+  },
+  "sched_schedule_description": {
+    "en": "In words",
+    "ru": "Расшифровка",
+    "de": "Im Klartext",
+    "pl": "Opis słowny"
+  },
+  "sched_schedule_group": {
+    "en": "Schedule",
+    "ru": "Расписание",
+    "de": "Zeitplan",
+    "pl": "Harmonogram"
+  },
+  "sched_execution_group": {
+    "en": "Execution",
+    "ru": "Выполнение",
+    "de": "Ausführung",
+    "pl": "Wykonanie"
+  },
+  "sched_schedule_tab": {
+    "en": "Schedule",
+    "ru": "Расписание",
+    "de": "Zeitplan",
+    "pl": "Harmonogram"
+  },
+  "sched_params_tab": {
+    "en": "Parameters",
+    "ru": "Параметры",
+    "de": "Parameter",
+    "pl": "Parametry"
+  },
+  "sched_runs_tab": {
+    "en": "Run history",
+    "ru": "История запусков",
+    "de": "Ausführungsverlauf",
+    "pl": "Historia uruchomień"
+  },
+  "sched_param_key_field": {
+    "en": "Parameter",
+    "ru": "Параметр",
+    "de": "Parameter",
+    "pl": "Parametr"
+  },
+  "sched_param_value_field": {
+    "en": "Value",
+    "ru": "Значение",
+    "de": "Wert",
+    "pl": "Wartość"
+  },
+
+  "sched_misfire_field": {
+    "en": "Missed runs",
+    "ru": "Пропущенные запуски",
+    "de": "Verpasste Läufe",
+    "pl": "Pominięte uruchomienia"
+  },
+  "sched_misfire_run_once": {
+    "en": "Run once to catch up",
+    "ru": "Догнать один раз",
+    "de": "Einmal nachholen",
+    "pl": "Nadrobić jeden raz"
+  },
+  "sched_misfire_skip": {
+    "en": "Skip",
+    "ru": "Пропустить",
+    "de": "Überspringen",
+    "pl": "Pominąć"
+  },
+  "sched_timeout_field": {
+    "en": "Timeout, sec",
+    "ru": "Таймаут, с",
+    "de": "Zeitlimit, Sek.",
+    "pl": "Limit czasu, s"
+  },
+  "sched_max_retries_field": {
+    "en": "Retries",
+    "ru": "Повторов при ошибке",
+    "de": "Wiederholungen",
+    "pl": "Ponowienia"
+  },
+  "sched_retry_delay_field": {
+    "en": "Retry delay, sec",
+    "ru": "Пауза перед повтором, с",
+    "de": "Wartezeit vor Wiederholung, Sek.",
+    "pl": "Przerwa przed ponowieniem, s"
+  },
+  "sched_next_run_field": {
+    "en": "Next run",
+    "ru": "Следующий запуск",
+    "de": "Nächster Lauf",
+    "pl": "Następne uruchomienie"
+  },
+  "sched_last_run_field": {
+    "en": "Last run",
+    "ru": "Последний запуск",
+    "de": "Letzter Lauf",
+    "pl": "Ostatnie uruchomienie"
+  },
+  "sched_last_status_field": {
+    "en": "Last status",
+    "ru": "Статус последнего запуска",
+    "de": "Letzter Status",
+    "pl": "Status ostatniego uruchomienia"
+  },
+  "sched_running_run_field": {
+    "en": "Current run",
+    "ru": "Текущий запуск",
+    "de": "Aktueller Lauf",
+    "pl": "Bieżące uruchomienie"
+  },
+
+  "sched_started_at_field": {
+    "en": "Started",
+    "ru": "Начало",
+    "de": "Beginn",
+    "pl": "Początek"
+  },
+  "sched_finished_at_field": {
+    "en": "Finished",
+    "ru": "Окончание",
+    "de": "Ende",
+    "pl": "Koniec"
+  },
+  "sched_duration_field": {
+    "en": "Duration, ms",
+    "ru": "Длительность, мс",
+    "de": "Dauer, ms",
+    "pl": "Czas trwania, ms"
+  },
+  "sched_triggered_by_field": {
+    "en": "Triggered by",
+    "ru": "Инициировано",
+    "de": "Ausgelöst durch",
+    "pl": "Zainicjowane przez"
+  },
+  "sched_trigger_schedule": {
+    "en": "Schedule",
+    "ru": "Расписание",
+    "de": "Zeitplan",
+    "pl": "Harmonogram"
+  },
+  "sched_trigger_manual": {
+    "en": "Manually",
+    "ru": "Вручную",
+    "de": "Manuell",
+    "pl": "Ręcznie"
+  },
+  "sched_trigger_catchup": {
+    "en": "Catch-up",
+    "ru": "Догоняющий",
+    "de": "Nachholung",
+    "pl": "Nadrobienie"
+  },
+  "sched_attempt_field": {
+    "en": "Attempt",
+    "ru": "Попытка",
+    "de": "Versuch",
+    "pl": "Próba"
+  },
+  "sched_result_field": {
+    "en": "Result",
+    "ru": "Результат",
+    "de": "Ergebnis",
+    "pl": "Wynik"
+  },
+  "sched_error_field": {
+    "en": "Error",
+    "ru": "Ошибка",
+    "de": "Fehler",
+    "pl": "Błąd"
+  },
+  "sched_service_session_field": {
+    "en": "Service session",
+    "ru": "Служебная сессия",
+    "de": "Dienstsitzung",
+    "pl": "Sesja serwisowa"
+  },
+  "sched_heartbeat_field": {
+    "en": "Last heartbeat",
+    "ru": "Последний сигнал жизни",
+    "de": "Letztes Lebenszeichen",
+    "pl": "Ostatni sygnał życia"
+  },
+
+  "sched_status_running": {
+    "en": "Running",
+    "ru": "Выполняется",
+    "de": "Läuft",
+    "pl": "Wykonywane"
+  },
+  "sched_status_success": {
+    "en": "Success",
+    "ru": "Успешно",
+    "de": "Erfolgreich",
+    "pl": "Powodzenie"
+  },
+  "sched_status_error": {
+    "en": "Error",
+    "ru": "Ошибка",
+    "de": "Fehler",
+    "pl": "Błąd"
+  },
+  "sched_status_timeout": {
+    "en": "Timeout",
+    "ru": "Таймаут",
+    "de": "Zeitüberschreitung",
+    "pl": "Przekroczenie czasu"
+  },
+  "sched_status_cancelled": {
+    "en": "Cancelled",
+    "ru": "Отменено",
+    "de": "Abgebrochen",
+    "pl": "Anulowane"
+  },
+
+  "sched_run_now_btn": {
+    "en": "Run now",
+    "ru": "Выполнить сейчас",
+    "de": "Jetzt ausführen",
+    "pl": "Wykonaj teraz"
+  },
+  "sched_stop_btn": {
+    "en": "Stop",
+    "ru": "Остановить",
+    "de": "Anhalten",
+    "pl": "Zatrzymaj"
+  },
+  "sched_history_btn": {
+    "en": "Run history",
+    "ru": "История запусков",
+    "de": "Ausführungsverlauf",
+    "pl": "Historia uruchomień"
+  },
+
+  "sched_desc_interval": {
+    "en": "every {{minutes}} min ({{tz}})",
+    "ru": "каждые {{minutes}} мин ({{tz}})",
+    "de": "alle {{minutes}} Min. ({{tz}})",
+    "pl": "co {{minutes}} min ({{tz}})"
+  },
+  "sched_desc_daily": {
+    "en": "every day at {{time}} ({{tz}})",
+    "ru": "каждый день в {{time}} ({{tz}})",
+    "de": "täglich um {{time}} ({{tz}})",
+    "pl": "codziennie o {{time}} ({{tz}})"
+  },
+  "sched_desc_weekly": {
+    "en": "on {{days}} at {{time}} ({{tz}})",
+    "ru": "по {{days}} в {{time}} ({{tz}})",
+    "de": "{{days}} um {{time}} ({{tz}})",
+    "pl": "w {{days}} o {{time}} ({{tz}})"
+  },
+  "sched_desc_monthly": {
+    "en": "on day {{day}} of every month at {{time}} ({{tz}})",
+    "ru": "{{day}} числа каждого месяца в {{time}} ({{tz}})",
+    "de": "am {{day}}. jedes Monats um {{time}} ({{tz}})",
+    "pl": "{{day}} dnia każdego miesiąca o {{time}} ({{tz}})"
+  },
+  "sched_desc_cron": {
+    "en": "by cron expression {{expression}} ({{tz}})",
+    "ru": "по выражению cron {{expression}} ({{tz}})",
+    "de": "nach Cron-Ausdruck {{expression}} ({{tz}})",
+    "pl": "według wyrażenia cron {{expression}} ({{tz}})"
+  },
+  "sched_desc_not_set": {
+    "en": "schedule is not set",
+    "ru": "расписание не задано",
+    "de": "Zeitplan ist nicht festgelegt",
+    "pl": "harmonogram nie jest ustawiony"
+  },
+  "sched_dow_1": { "en": "Mon", "ru": "понедельникам", "de": "Mo", "pl": "poniedziałki" },
+  "sched_dow_2": { "en": "Tue", "ru": "вторникам", "de": "Di", "pl": "wtorki" },
+  "sched_dow_3": { "en": "Wed", "ru": "средам", "de": "Mi", "pl": "środy" },
+  "sched_dow_4": { "en": "Thu", "ru": "четвергам", "de": "Do", "pl": "czwartki" },
+  "sched_dow_5": { "en": "Fri", "ru": "пятницам", "de": "Fr", "pl": "piątki" },
+  "sched_dow_6": { "en": "Sat", "ru": "субботам", "de": "Sa", "pl": "soboty" },
+  "sched_dow_7": { "en": "Sun", "ru": "воскресеньям", "de": "So", "pl": "niedziele" },
+
+  "sched_handler_cleanup_runs": {
+    "en": "Clean up run history",
+    "ru": "Очистка истории запусков",
+    "de": "Ausführungsverlauf bereinigen",
+    "pl": "Czyszczenie historii uruchomień"
+  },
+
+  "sched_run_started_msg": {
+    "en": "Task started",
+    "ru": "Задание запущено",
+    "de": "Aufgabe gestartet",
+    "pl": "Zadanie uruchomione"
+  },
+  "sched_cancel_requested_msg": {
+    "en": "Stop requested",
+    "ru": "Запрошена остановка",
+    "de": "Abbruch angefordert",
+    "pl": "Zażądano zatrzymania"
+  },
+  "sched_save_first_msg": {
+    "en": "Please save the task first",
+    "ru": "Сначала сохраните задание",
+    "de": "Bitte speichern Sie die Aufgabe zuerst",
+    "pl": "Najpierw zapisz zadanie"
+  },
+  "sched_save_before_run_msg": {
+    "en": "Save the task before running it?",
+    "ru": "Сохранить задание перед запуском?",
+    "de": "Aufgabe vor dem Ausführen speichern?",
+    "pl": "Zapisać zadanie przed uruchomieniem?"
+  },
+
+  "sched_err_unknown_handler": {
+    "en": "Unknown task type: {{handler}}",
+    "ru": "Неизвестный тип задачи: {{handler}}",
+    "de": "Unbekannter Aufgabentyp: {{handler}}",
+    "pl": "Nieznany typ zadania: {{handler}}"
+  },
+  "sched_err_handler_required": {
+    "en": "Task type is required",
+    "ru": "Не выбран тип задачи",
+    "de": "Aufgabentyp ist erforderlich",
+    "pl": "Typ zadania jest wymagany"
+  },
+  "sched_err_unknown_param": {
+    "en": "Unknown parameter: {{key}}",
+    "ru": "Неизвестный параметр: {{key}}",
+    "de": "Unbekannter Parameter: {{key}}",
+    "pl": "Nieznany parametr: {{key}}"
+  },
+  "sched_err_param_required": {
+    "en": "Parameter is required: {{key}}",
+    "ru": "Не заполнен обязательный параметр: {{key}}",
+    "de": "Pflichtparameter fehlt: {{key}}",
+    "pl": "Brak wymaganego parametru: {{key}}"
+  },
+  "sched_err_param_number": {
+    "en": "Parameter must be a number: {{key}}",
+    "ru": "Параметр должен быть числом: {{key}}",
+    "de": "Parameter muss eine Zahl sein: {{key}}",
+    "pl": "Parametr musi być liczbą: {{key}}"
+  },
+  "sched_err_cron_empty": {
+    "en": "Cron expression is empty",
+    "ru": "Не задано выражение cron",
+    "de": "Cron-Ausdruck ist leer",
+    "pl": "Wyrażenie cron jest puste"
+  },
+  "sched_err_cron_invalid": {
+    "en": "Invalid cron expression: {{message}}",
+    "ru": "Ошибка в выражении cron: {{message}}",
+    "de": "Ungültiger Cron-Ausdruck: {{message}}",
+    "pl": "Błędne wyrażenie cron: {{message}}"
+  },
+  "sched_err_cron_unavailable": {
+    "en": "Advanced (cron) mode is unavailable: the cron-parser package is not installed",
+    "ru": "Режим «расширенно (cron)» недоступен: не установлен пакет cron-parser",
+    "de": "Modus „Erweitert (cron)“ nicht verfügbar: Paket cron-parser fehlt",
+    "pl": "Tryb „zaawansowany (cron)” niedostępny: brak pakietu cron-parser"
+  },
+  "sched_err_already_running": {
+    "en": "The task is already running",
+    "ru": "Задание уже выполняется",
+    "de": "Die Aufgabe läuft bereits",
+    "pl": "Zadanie już jest wykonywane"
+  },
+  "sched_err_not_running": {
+    "en": "The task is not running",
+    "ru": "Задание сейчас не выполняется",
+    "de": "Die Aufgabe läuft derzeit nicht",
+    "pl": "Zadanie nie jest obecnie wykonywane"
+  },
+  "sched_err_cancel_foreign": {
+    "en": "The run is handled by another server process and cannot be stopped from here",
+    "ru": "Запуск ведёт другой процесс сервера — отсюда его остановить нельзя",
+    "de": "Der Lauf wird von einem anderen Serverprozess geführt und kann hier nicht angehalten werden",
+    "pl": "Uruchomienie prowadzi inny proces serwera — nie można go tu zatrzymać"
+  },
+  "sched_err_task_not_found": {
+    "en": "Task not found",
+    "ru": "Задание не найдено",
+    "de": "Aufgabe nicht gefunden",
+    "pl": "Nie znaleziono zadania"
+  },
+  "sched_err_not_started": {
+    "en": "The scheduler is not running on this server",
+    "ru": "Планировщик на этом сервере не запущен",
+    "de": "Der Planer läuft auf diesem Server nicht",
+    "pl": "Planer nie jest uruchomiony na tym serwerze"
+  },
+  "sched_err_dispatch_failed": {
+    "en": "Failed to start the task",
+    "ru": "Не удалось запустить задание",
+    "de": "Aufgabe konnte nicht gestartet werden",
+    "pl": "Nie udało się uruchomić zadania"
+  },
+  "sched_err_org_required": {
+    "en": "Organization is required for a task of a regular user",
+    "ru": "Для задания обычного пользователя нужно указать организацию",
+    "de": "Für die Aufgabe eines normalen Benutzers ist eine Organisation erforderlich",
+    "pl": "Zadanie zwykłego użytkownika wymaga wskazania organizacji"
+  },
+  "sched_err_org_forbidden": {
+    "en": "The selected organization is not available to you",
+    "ru": "Выбранная организация вам недоступна",
+    "de": "Die gewählte Organisation ist für Sie nicht verfügbar",
+    "pl": "Wybrana organizacja jest dla Ciebie niedostępna"
+  },
+  "sched_err_scope_system": {
+    "en": "This task type is system-wide: leave the organization empty",
+    "ru": "Этот тип задачи — системный: организация должна быть пустой",
+    "de": "Dieser Aufgabentyp ist systemweit: Organisation leer lassen",
+    "pl": "Ten typ zadania jest systemowy: pozostaw organizację pustą"
+  },
+  "sched_err_scope_organization": {
+    "en": "This task type requires an organization",
+    "ru": "Этот тип задачи требует указания организации",
+    "de": "Dieser Aufgabentyp erfordert eine Organisation",
+    "pl": "Ten typ zadania wymaga wskazania organizacji"
+  }
+}

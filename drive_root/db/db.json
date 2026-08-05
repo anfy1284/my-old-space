@@ -122,6 +122,35 @@
                     "type": "BOOLEAN",
                     "allowNull": false,
                     "defaultValue": false
+                },
+                "kind": {
+                    "type": "STRING",
+                    "allowNull": false,
+                    "defaultValue": "user",
+                    "caption": {
+                        "i18n": "session_kind_field"
+                    }
+                },
+                "expiresAt": {
+                    "type": "DATE",
+                    "allowNull": true,
+                    "caption": {
+                        "i18n": "session_expires_at_field"
+                    }
+                },
+                "scopeOrganizationId": {
+                    "type": "STRING",
+                    "allowNull": true,
+                    "caption": {
+                        "i18n": "session_scope_organization_field"
+                    }
+                },
+                "taskRunId": {
+                    "type": "STRING",
+                    "allowNull": true,
+                    "caption": {
+                        "i18n": "session_task_run_field"
+                    }
                 }
             },
             "options": {
@@ -389,7 +418,10 @@
                 "userId": {
                     "type": "STRING",
                     "allowNull": false,
-                    "references": { "model": "users", "key": "UID" }
+                    "references": {
+                        "model": "users",
+                        "key": "UID"
+                    }
                 },
                 "tableName": {
                     "type": "STRING",
@@ -413,7 +445,10 @@
                 "indexes": [
                     {
                         "unique": true,
-                        "fields": ["userId", "tableName"]
+                        "fields": [
+                            "userId",
+                            "tableName"
+                        ]
                     }
                 ]
             }
@@ -422,24 +457,541 @@
             "name": "Translations",
             "tableName": "translations",
             "fields": {
-                "recordId":  { "type": "STRING", "allowNull": false },
-                "tableName": { "type": "STRING", "allowNull": false },
-                "fieldName": { "type": "STRING", "allowNull": false },
-                "language":  { "type": "STRING", "allowNull": false },
-                "value":     { "type": "TEXT",   "allowNull": true }
+                "recordId": {
+                    "type": "STRING",
+                    "allowNull": false
+                },
+                "tableName": {
+                    "type": "STRING",
+                    "allowNull": false
+                },
+                "fieldName": {
+                    "type": "STRING",
+                    "allowNull": false
+                },
+                "language": {
+                    "type": "STRING",
+                    "allowNull": false
+                },
+                "value": {
+                    "type": "TEXT",
+                    "allowNull": true
+                }
             },
             "options": {
                 "timestamps": false,
                 "indexes": [
                     {
                         "unique": true,
-                        "fields": ["tableName", "language", "fieldName", "recordId"]
+                        "fields": [
+                            "tableName",
+                            "language",
+                            "fieldName",
+                            "recordId"
+                        ]
                     }
                 ]
+            }
+        },
+        {
+            "name": "SchedulerTasks",
+            "tableName": "scheduler_tasks",
+            "entityConfig": {
+                "entityType": "directory"
+            },
+            "fields": {
+                "caption": {
+                    "type": "STRING",
+                    "allowNull": false,
+                    "caption": {
+                        "i18n": "sched_task_caption_field"
+                    }
+                },
+                "handler": {
+                    "type": "STRING",
+                    "allowNull": false,
+                    "caption": {
+                        "i18n": "sched_handler_field"
+                    }
+                },
+                "enabled": {
+                    "type": "BOOLEAN",
+                    "allowNull": false,
+                    "defaultValue": false,
+                    "caption": {
+                        "i18n": "sched_enabled_field"
+                    }
+                },
+                "organizationId": {
+                    "type": "STRING",
+                    "allowNull": true,
+                    "caption": {
+                        "i18n": "sched_organization_field"
+                    }
+                },
+                "hotelId": {
+                    "type": "STRING",
+                    "allowNull": true,
+                    "caption": {
+                        "i18n": "sched_hotel_field"
+                    }
+                },
+                "userId": {
+                    "type": "STRING",
+                    "allowNull": true,
+                    "references": {
+                        "model": "users",
+                        "key": "UID"
+                    },
+                    "onUpdate": "CASCADE",
+                    "onDelete": "CASCADE",
+                    "caption": {
+                        "i18n": "sched_owner_field"
+                    }
+                },
+                "scheduleMode": {
+                    "type": "STRING",
+                    "allowNull": false,
+                    "defaultValue": "daily",
+                    "caption": {
+                        "i18n": "sched_mode_field"
+                    },
+                    "inputType": "emunList",
+                    "options": [
+                        {
+                            "value": "interval",
+                            "caption": {
+                                "i18n": "sched_mode_interval"
+                            }
+                        },
+                        {
+                            "value": "daily",
+                            "caption": {
+                                "i18n": "sched_mode_daily"
+                            }
+                        },
+                        {
+                            "value": "weekly",
+                            "caption": {
+                                "i18n": "sched_mode_weekly"
+                            }
+                        },
+                        {
+                            "value": "monthly",
+                            "caption": {
+                                "i18n": "sched_mode_monthly"
+                            }
+                        },
+                        {
+                            "value": "cron",
+                            "caption": {
+                                "i18n": "sched_mode_cron"
+                            }
+                        }
+                    ]
+                },
+                "intervalMinutes": {
+                    "type": "INTEGER",
+                    "allowNull": true,
+                    "caption": {
+                        "i18n": "sched_interval_minutes_field"
+                    }
+                },
+                "timeOfDay": {
+                    "type": "STRING",
+                    "allowNull": true,
+                    "caption": {
+                        "i18n": "sched_time_of_day_field"
+                    }
+                },
+                "weekDays": {
+                    "type": "STRING",
+                    "allowNull": true,
+                    "caption": {
+                        "i18n": "sched_week_days_field"
+                    }
+                },
+                "monthDay": {
+                    "type": "INTEGER",
+                    "allowNull": true,
+                    "caption": {
+                        "i18n": "sched_month_day_field"
+                    }
+                },
+                "cronExpression": {
+                    "type": "STRING",
+                    "allowNull": true,
+                    "caption": {
+                        "i18n": "sched_cron_field"
+                    }
+                },
+                "timezone": {
+                    "type": "STRING",
+                    "allowNull": false,
+                    "defaultValue": "Europe/Berlin",
+                    "caption": {
+                        "i18n": "sched_timezone_field"
+                    }
+                },
+                "misfirePolicy": {
+                    "type": "STRING",
+                    "allowNull": false,
+                    "defaultValue": "runOnce",
+                    "caption": {
+                        "i18n": "sched_misfire_field"
+                    },
+                    "inputType": "emunList",
+                    "options": [
+                        {
+                            "value": "runOnce",
+                            "caption": {
+                                "i18n": "sched_misfire_run_once"
+                            }
+                        },
+                        {
+                            "value": "skip",
+                            "caption": {
+                                "i18n": "sched_misfire_skip"
+                            }
+                        }
+                    ]
+                },
+                "timeoutSec": {
+                    "type": "INTEGER",
+                    "allowNull": false,
+                    "defaultValue": 3600,
+                    "caption": {
+                        "i18n": "sched_timeout_field"
+                    }
+                },
+                "maxRetries": {
+                    "type": "INTEGER",
+                    "allowNull": false,
+                    "defaultValue": 0,
+                    "caption": {
+                        "i18n": "sched_max_retries_field"
+                    }
+                },
+                "retryDelaySec": {
+                    "type": "INTEGER",
+                    "allowNull": false,
+                    "defaultValue": 300,
+                    "caption": {
+                        "i18n": "sched_retry_delay_field"
+                    }
+                },
+                "nextRunAt": {
+                    "type": "DATE",
+                    "allowNull": true,
+                    "caption": {
+                        "i18n": "sched_next_run_field"
+                    }
+                },
+                "lastRunAt": {
+                    "type": "DATE",
+                    "allowNull": true,
+                    "caption": {
+                        "i18n": "sched_last_run_field"
+                    }
+                },
+                "lastStatus": {
+                    "type": "STRING",
+                    "allowNull": true,
+                    "caption": {
+                        "i18n": "sched_last_status_field"
+                    }
+                },
+                "runningRunId": {
+                    "type": "STRING",
+                    "allowNull": true,
+                    "caption": {
+                        "i18n": "sched_running_run_field"
+                    }
+                }
+            },
+            "options": {
+                "timestamps": true
+            }
+        },
+        {
+            "name": "SchedulerTaskParams",
+            "tableName": "scheduler_task_params",
+            "fields": {
+                "taskId": {
+                    "type": "STRING",
+                    "allowNull": false,
+                    "references": {
+                        "model": "scheduler_tasks",
+                        "key": "UID"
+                    },
+                    "onUpdate": "CASCADE",
+                    "onDelete": "CASCADE",
+                    "caption": {
+                        "i18n": "sched_task_field"
+                    }
+                },
+                "organizationId": {
+                    "type": "STRING",
+                    "allowNull": true,
+                    "caption": {
+                        "i18n": "sched_organization_field"
+                    }
+                },
+                "key": {
+                    "type": "STRING",
+                    "allowNull": false,
+                    "caption": {
+                        "i18n": "sched_param_key_field"
+                    }
+                },
+                "value": {
+                    "type": "TEXT",
+                    "allowNull": true,
+                    "caption": {
+                        "i18n": "sched_param_value_field"
+                    }
+                }
+            },
+            "tabularSection": {
+                "parentTable": "scheduler_tasks",
+                "parentField": "taskId",
+                "caption": {
+                    "i18n": "sched_params_tab"
+                }
+            },
+            "options": {
+                "timestamps": false
+            }
+        },
+        {
+            "name": "SchedulerRuns",
+            "tableName": "scheduler_runs",
+            "entityConfig": {
+                "entityType": "document"
+            },
+            "fields": {
+                "taskId": {
+                    "type": "STRING",
+                    "allowNull": false,
+                    "references": {
+                        "model": "scheduler_tasks",
+                        "key": "UID"
+                    },
+                    "onUpdate": "CASCADE",
+                    "onDelete": "CASCADE",
+                    "caption": {
+                        "i18n": "sched_task_field"
+                    }
+                },
+                "organizationId": {
+                    "type": "STRING",
+                    "allowNull": true,
+                    "caption": {
+                        "i18n": "sched_organization_field"
+                    }
+                },
+                "userId": {
+                    "type": "STRING",
+                    "allowNull": true,
+                    "references": {
+                        "model": "users",
+                        "key": "UID"
+                    },
+                    "onUpdate": "CASCADE",
+                    "onDelete": "CASCADE",
+                    "caption": {
+                        "i18n": "sched_owner_field"
+                    }
+                },
+                "startedAt": {
+                    "type": "DATE",
+                    "allowNull": true,
+                    "caption": {
+                        "i18n": "sched_started_at_field"
+                    }
+                },
+                "finishedAt": {
+                    "type": "DATE",
+                    "allowNull": true,
+                    "caption": {
+                        "i18n": "sched_finished_at_field"
+                    }
+                },
+                "durationMs": {
+                    "type": "INTEGER",
+                    "allowNull": false,
+                    "defaultValue": 0,
+                    "caption": {
+                        "i18n": "sched_duration_field"
+                    }
+                },
+                "status": {
+                    "type": "STRING",
+                    "allowNull": false,
+                    "defaultValue": "running",
+                    "caption": {
+                        "i18n": "sched_status_field"
+                    },
+                    "inputType": "emunList",
+                    "options": [
+                        {
+                            "value": "running",
+                            "caption": {
+                                "i18n": "sched_status_running"
+                            }
+                        },
+                        {
+                            "value": "success",
+                            "caption": {
+                                "i18n": "sched_status_success"
+                            }
+                        },
+                        {
+                            "value": "error",
+                            "caption": {
+                                "i18n": "sched_status_error"
+                            }
+                        },
+                        {
+                            "value": "timeout",
+                            "caption": {
+                                "i18n": "sched_status_timeout"
+                            }
+                        },
+                        {
+                            "value": "cancelled",
+                            "caption": {
+                                "i18n": "sched_status_cancelled"
+                            }
+                        }
+                    ]
+                },
+                "triggeredBy": {
+                    "type": "STRING",
+                    "allowNull": false,
+                    "defaultValue": "schedule",
+                    "caption": {
+                        "i18n": "sched_triggered_by_field"
+                    },
+                    "inputType": "emunList",
+                    "options": [
+                        {
+                            "value": "schedule",
+                            "caption": {
+                                "i18n": "sched_trigger_schedule"
+                            }
+                        },
+                        {
+                            "value": "manual",
+                            "caption": {
+                                "i18n": "sched_trigger_manual"
+                            }
+                        },
+                        {
+                            "value": "catchup",
+                            "caption": {
+                                "i18n": "sched_trigger_catchup"
+                            }
+                        }
+                    ]
+                },
+                "attempt": {
+                    "type": "INTEGER",
+                    "allowNull": false,
+                    "defaultValue": 1,
+                    "caption": {
+                        "i18n": "sched_attempt_field"
+                    }
+                },
+                "resultText": {
+                    "type": "TEXT",
+                    "allowNull": true,
+                    "caption": {
+                        "i18n": "sched_result_field"
+                    }
+                },
+                "errorText": {
+                    "type": "TEXT",
+                    "allowNull": true,
+                    "caption": {
+                        "i18n": "sched_error_field"
+                    }
+                },
+                "serviceSessionId": {
+                    "type": "STRING",
+                    "allowNull": true,
+                    "caption": {
+                        "i18n": "sched_service_session_field"
+                    }
+                },
+                "lastHeartbeatAt": {
+                    "type": "DATE",
+                    "allowNull": true,
+                    "caption": {
+                        "i18n": "sched_heartbeat_field"
+                    }
+                }
+            },
+            "options": {
+                "timestamps": true
             }
         }
     ],
     "associations": [
+        {
+            "source": "Users",
+            "target": "SchedulerTasks",
+            "type": "hasMany",
+            "options": {
+                "foreignKey": "userId",
+                "as": "schedulerTasks"
+            }
+        },
+        {
+            "source": "SchedulerTasks",
+            "target": "Users",
+            "type": "belongsTo",
+            "options": {
+                "foreignKey": "userId",
+                "as": "owner"
+            }
+        },
+        {
+            "source": "SchedulerTasks",
+            "target": "SchedulerTaskParams",
+            "type": "hasMany",
+            "options": {
+                "foreignKey": "taskId",
+                "as": "params"
+            }
+        },
+        {
+            "source": "SchedulerTaskParams",
+            "target": "SchedulerTasks",
+            "type": "belongsTo",
+            "options": {
+                "foreignKey": "taskId",
+                "as": "task"
+            }
+        },
+        {
+            "source": "SchedulerTasks",
+            "target": "SchedulerRuns",
+            "type": "hasMany",
+            "options": {
+                "foreignKey": "taskId",
+                "as": "runs"
+            }
+        },
+        {
+            "source": "SchedulerRuns",
+            "target": "SchedulerTasks",
+            "type": "belongsTo",
+            "options": {
+                "foreignKey": "taskId",
+                "as": "task"
+            }
+        },
         {
             "source": "UserSettingsTypes",
             "target": "UserSettingsFields",

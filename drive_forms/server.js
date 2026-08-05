@@ -158,19 +158,17 @@ function denyPasswordChange(res) {
 	res.end(JSON.stringify({ error: 'PASSWORD_CHANGE_REQUIRED' }));
 }
 
-function handleRequest(req, res, appDir, appAlias) {
+// async: сессия из запроса извлекается ЕДИНОЙ точкой globalRoot.getSessionIdFromRequest,
+// которая проверяет вид сессии в БД (гейт служебных сессий) и потому асинхронна.
+// Всё тело обёрнуто в try/catch — отклонённых промисов наружу не уходит.
+async function handleRequest(req, res, appDir, appAlias) {
 	// Processing resources and API endpoints
 	log.debug('[drive_forms/handleRequest] Request:', req.method, req.url, 'appAlias:', appAlias);
 	try {
 		// --- Endpoint for GET requests with parameters (for SSE) - CHECK FIRST ---
 		// --- Global SSE endpoint for session-scoped events (one EventSource per session) ---
 		if (req.method === 'GET' && req.url === `/${appAlias}/events`) {
-			// Extract sessionID from cookie
-			let sessionID = null;
-			if (req.headers && req.headers.cookie) {
-				const match = req.headers.cookie.match(/(?:^|; )sessionID=([^;]+)/);
-				if (match) sessionID = decodeURIComponent(match[1]);
-			}
+			const sessionID = await globalRoot.getSessionIdFromRequest(req);
 			// Verify user
 			globalRoot.getUserBySessionID(sessionID).then(async user => {
 				if (!user) {
@@ -227,12 +225,7 @@ function handleRequest(req, res, appDir, appAlias) {
 					params[key] = value;
 				});
 
-				// Extract sessionID from cookie
-				let sessionID = null;
-				if (req.headers && req.headers.cookie) {
-					const match = req.headers.cookie.match(/(?:^|; )sessionID=([^;]+)/);
-					if (match) sessionID = decodeURIComponent(match[1]);
-				}
+				const sessionID = await globalRoot.getSessionIdFromRequest(req);
 
 				invokeAppMethod(appName, methodName, params, sessionID, async (err, result) => {
 						if (err) {
@@ -256,11 +249,7 @@ function handleRequest(req, res, appDir, appAlias) {
 
 		// Universal resource serving: /<appAlias>/res/public/..., /<appAlias>/res/protected/...
 		if (req.url.startsWith(`/${appAlias}/res/`)) {
-			let sessionID = null;
-			if (req.headers && req.headers.cookie) {
-				const m = req.headers.cookie.match(/(?:^|; )sessionID=([^;]+)/);
-				if (m) sessionID = decodeURIComponent(m[1]);
-			}
+			const sessionID = await globalRoot.getSessionIdFromRequest(req);
 			const parts = req.url.split('/').filter(Boolean); // ['', appAlias, 'res', 'public', ...] => ['appAlias', 'res', 'public', ...]
 			if (parts.length >= 4) {
 				const resType = parts[2]; // public or protected
@@ -315,12 +304,7 @@ function handleRequest(req, res, appDir, appAlias) {
 						res.end('404 Not Found');
 						return;
 					}
-					// Check access by sessionID (stub)
-					let sessionID = null;
-					if (req.headers && req.headers.cookie) {
-						const match = req.headers.cookie.match(/(?:^|; )sessionID=([^;]+)/);
-						if (match) sessionID = decodeURIComponent(match[1]);
-					}
+					// Доступ проверяется по sessionID, извлечённому выше единой точкой.
 					// TODO: Implement real access check
 					// Currently access is always forbidden
 					const checkProtectedAccess = (sessionId, filePath) => false;
@@ -349,11 +333,7 @@ function handleRequest(req, res, appDir, appAlias) {
 		// --- Endpoint for loading available apps client scripts ---
 		if ((req.method === 'POST' || req.method === 'GET') && req.url === `/${appAlias}/loadApps`) {
 			// Get user by sessionID
-			let sessionID = null;
-			if (req.headers && req.headers.cookie) {
-				const match = req.headers.cookie.match(/(?:^|; )sessionID=([^;]+)/);
-				if (match) sessionID = decodeURIComponent(match[1]);
-			}
+			const sessionID = await globalRoot.getSessionIdFromRequest(req);
 			globalRoot.getUserBySessionID(sessionID).then(user => {
 				return formsGlobal.loadApps(user, sessionID);
 			}).then(result => {
@@ -378,7 +358,7 @@ function handleRequest(req, res, appDir, appAlias) {
 			// Expect multipart/form-data with app, method, file and other fields
 			const multer = require('multer');
 			const upload = multer({ storage: multer.memoryStorage() }); // In memory to pass to method
-			upload.single('file')(req, res, (err) => {
+			upload.single('file')(req, res, async (err) => {
 				if (err) {
 					res.writeHead(400, { 'Content-Type': 'application/json' });
 					res.end(JSON.stringify({ error: t('Upload error:', 'en') + ' ' + err.message }));
@@ -390,12 +370,7 @@ function handleRequest(req, res, appDir, appAlias) {
 					res.end(JSON.stringify({ error: t('Missing app or method', 'en') }));
 					return;
 				}
-				// Извлекаем sessionID из cookie
-				let sessionID = null;
-				if (req.headers && req.headers.cookie) {
-					const match = req.headers.cookie.match(/(?:^|; )sessionID=([^;]+)/i);
-					if (match) sessionID = decodeURIComponent(match[1]);
-				}
+				const sessionID = await globalRoot.getSessionIdFromRequest(req);
 				isPasswordChangePending(sessionID).then(pending => {
 					if (pending) { denyPasswordChange(res); return; }
 					invokeAppMethod(app, method, req.body, sessionID, async (err, result) => {
@@ -416,7 +391,7 @@ function handleRequest(req, res, appDir, appAlias) {
 		if (req.method === 'POST' && req.url === `/${appAlias}/call`) {
 			let body = '';
 			req.on('data', chunk => { body += chunk; });
-			req.on('end', () => {
+			req.on('end', async () => {
 				let data;
 				try {
 					data = JSON.parse(body);
@@ -431,12 +406,7 @@ function handleRequest(req, res, appDir, appAlias) {
 					res.end(JSON.stringify({ error: t('Missing app or method', 'en') }));
 					return;
 				}
-				// Извлекаем sessionID из cookie
-				let sessionID = null;
-				if (req.headers && req.headers.cookie) {
-					const match = req.headers.cookie.match(/(?:^|; )sessionID=([^;]+)/);
-					if (match) sessionID = decodeURIComponent(match[1]);
-				}
+				const sessionID = await globalRoot.getSessionIdFromRequest(req);
 				log.debug('[drive_forms/call] Cookie header:', req.headers.cookie);
 				log.debug('[drive_forms/call] Extracted sessionID:', sessionID);
 				isPasswordChangePending(sessionID).then(pending => {

@@ -15,6 +15,7 @@ const { injectEntityNumbers } = require('./drive_root/db/entityNumber');
 const { injectEntityDates } = require('./drive_root/db/entityDate');
 const { injectEntityNames } = require('./drive_root/db/entityName');
 const { injectEmptyDefaults } = require('./drive_root/db/emptyValues');
+const { injectIndexNames } = require('./drive_root/db/indexNames');
 
 module.exports = {
     /**
@@ -43,5 +44,10 @@ module.exports = {
         // ронять запись там, где сегодня всё работает.
         const e = injectEmptyDefaults(mergedModelsDef, { enforceNotNull: false });
         console.log(`[my-old-space:events_handler] empty-value defaults set on ${e.fields} field(s), ${e.validators} validator(s) made empty-safe.`);
+
+        // Явные имена индексов: без них СУБД обрезает длинное имя по своему пределу,
+        // и `sync()` на каждом старте пытается создать индекс заново (drive_root/db/indexNames.js).
+        const ix = injectIndexNames(mergedModelsDef);
+        if (ix) console.log(`[my-old-space:events_handler] explicit names assigned to ${ix} index(es).`);
     }
 };

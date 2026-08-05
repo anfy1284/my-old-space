@@ -845,13 +845,39 @@ class Form extends UIObject {
 
     setAnchorToWindow(anchor) {
         this.anchorToWindow = anchor;
-        if (anchor && !this.windowResizeHandler) {
-            this.windowResizeHandler = () => this.updatePositionOnResize();
-            window.addEventListener('resize', this.windowResizeHandler);
-        } else if (!anchor && this.windowResizeHandler) {
-            window.removeEventListener('resize', this.windowResizeHandler);
-            this.windowResizeHandler = null;
-        }
+        if (anchor) this._ensureWindowResizeHandler();
+        // Слушатель НЕ снимаем при сбросе якоря: он же обслуживает развёрнутое окно
+        // (см. _onWindowResize). Снимается только в destroy().
+    }
+
+    /** Единственный слушатель resize на форму. Идемпотентен. */
+    _ensureWindowResizeHandler() {
+        if (this.windowResizeHandler) return;
+        this.windowResizeHandler = () => { try { this._onWindowResize(); } catch (e) {} };
+        window.addEventListener('resize', this.windowResizeHandler);
+    }
+
+    /**
+     * Изменился размер вьюпорта.
+     *
+     * Развёрнутое окно обязано ПЕРЕСЧИТАТЬСЯ, а не остаться прежним: иначе при любом
+     * изменении высоты окна браузера (F11, панель уведомлений расширения, открытие
+     * DevTools, смена масштаба, адресная строка на мобильном) снизу вылезала полоса
+     * рабочего стола, а при уменьшении вьюпорта окно наползало на панель задач.
+     * Раньше слушатель вешался ТОЛЬКО на окна с якорем (`anchorToWindow`), а у
+     * развёрнутого окна якоря нет — реакции не было вовсе.
+     */
+    _onWindowResize() {
+        if (this.isMaximized) { this._applyMaximizedGeometry(); return; }
+        if (this.anchorToWindow) this.updatePositionOnResize();
+    }
+
+    /** Геометрия развёрнутого окна — одно определение на всех потребителей. */
+    _applyMaximizedGeometry() {
+        this.setX(0);
+        this.setY(Form.topOffset);
+        this.setWidth(window.innerWidth);
+        this.setHeight(window.innerHeight - Form.topOffset - Form.bottomOffset);
     }
 
     getAnchorToWindow() {
@@ -864,6 +890,13 @@ class Form extends UIObject {
 
     // Clean up form and child controls (invoke destroy on known children)
     destroy() {
+        // Слушатель resize живёт на window и переживает удаление формы — снимаем явно.
+        try {
+            if (this.windowResizeHandler) {
+                window.removeEventListener('resize', this.windowResizeHandler);
+                this.windowResizeHandler = null;
+            }
+        } catch (e) {}
         try {
             // If the form has a DynamicTable or other control assigned to common properties, destroy them
             try { if (this.table && typeof this.table.destroy === 'function') this.table.destroy(); } catch (e) {}
@@ -1616,11 +1649,10 @@ class Form extends UIObject {
             this.restoreWidth = this.width;
             this.restoreHeight = this.height;
 
-            this.setX(0);
-            this.setY(Form.topOffset);
-            this.setWidth(window.innerWidth);
-            this.setHeight(window.innerHeight - Form.topOffset - Form.bottomOffset);
+            this._applyMaximizedGeometry();
             this.isMaximized = true;
+            // Развёрнутое окно обязано следить за размером вьюпорта (см. _onWindowResize).
+            this._ensureWindowResizeHandler();
         }
         // Иконка кнопки должна отражать текущее состояние (развернуть / восстановить).
         this._updateMaximizeIcon();
@@ -2956,7 +2988,10 @@ class DataForm extends Form {
                         tooltip: exBtn.tooltip || exCaption,
                         icon: exBtn.icon || null,
                         showIcon: !!(exBtn.icon),
-                        showText: true
+                        showText: true,
+                        // Стартовая доступность кнопки; дальше — btn.setEnabled() из
+                        // клиентского скрипта («Остановить» активна только при запуске).
+                        enabled: (exBtn.enabled !== undefined) ? !!exBtn.enabled : true
                     };
                     let btn;
                     if (exBtn.type === 'splitButton') {
@@ -3049,6 +3084,7 @@ class DataForm extends Form {
                         initialFilter,
                         extraWatchTables: extraWatch,
                         serverFields: Array.isArray(props.fields) ? props.fields : null,
+                        columnOverrides: props.columnOverrides || null,
                         hiddenButtons: props.hiddenButtons || []
                     };
                     const rel = new DynamicTable(relConf);
@@ -3084,6 +3120,13 @@ class DataForm extends Form {
                         const dtConf = Object.assign({}, tblProps);
                         if (properties && properties.appName) dtConf.appName = properties.appName;
                         if (properties && properties.tableName) dtConf.tableName = properties.tableName;
+                        // `fields` — выбор видимых колонок, как у relatedList (см. case 'relatedList').
+                        // Раньше работало только там, и кастомный лейаут СПИСКА не мог урезать
+                        // набор колонок иначе как через внутреннее имя serverFields.
+                        if (properties && Array.isArray(properties.fields)) dtConf.serverFields = properties.fields;
+                        // `columnOverrides` — точечные свойства-представления колонок
+                        // ({ startedAt: { showTime: true } }), см. DynamicTable.
+                        if (properties && properties.columnOverrides) dtConf.columnOverrides = properties.columnOverrides;
                         dtConf.rowHeight = dtConf.rowHeight || 25;
                         dtConf.multiSelect = dtConf.multiSelect || false;
                         dtConf.editable = (dtConf.editable === undefined) ? true : dtConf.editable;
@@ -3420,6 +3463,14 @@ class DataForm extends Form {
         } catch(e) {}
         // Форма полностью отрисована — с этого момента разрешаем form-level onChange.
         this._formReady = true;
+        // Form-level событие «форма готова» (events.onReady в saveLayout). Нужно там,
+        // где стартовое состояние формы вычисляется клиентом: показать/скрыть поля по
+        // режиму, заполнить справочную строку. Раньше для этого приходилось
+        // «прицепляться» к onChange, и до первой правки форма стояла недонастроенной.
+        try {
+            const readyBinding = this._formEvents && this._formEvents.onReady;
+            if (readyBinding && !readyBinding.serverScript) this.callClientBinding(readyBinding, []);
+        } catch (e) { console.error('[DataForm] onReady handler error:', e); }
     }
 
     async loadData() {
@@ -3825,9 +3876,29 @@ class Button extends UIObject {
         this.width = properties.width || 0;
         this.height = properties.height || 0;
 
+        // Доступность кнопки. Нужна там, где действие имеет смысл не всегда
+        // («Остановить» — только пока задание выполняется). Прятать такую кнопку
+        // нельзя: командная панель прыгала бы, а пользователь не понимал, куда делось
+        // действие. Недоступная кнопка видна, но не нажимается.
+        this.enabled = (properties.enabled !== undefined) ? !!properties.enabled : true;
+
         this.tooltipTimeout = null;
         this.tooltipElement = null;
         this.parentElement = parentElement || null;
+    }
+
+    /** Включить/выключить кнопку (визуально + блокировка нажатия). */
+    setEnabled(enabled) {
+        this.enabled = !!enabled;
+        if (this.element) {
+            this.element.disabled = !this.enabled;
+            this.element.classList.toggle('ui-button-disabled', !this.enabled);
+        }
+        return this;
+    }
+
+    isEnabled() {
+        return this.enabled !== false;
     }
 
     setCaption(caption) {
@@ -3944,7 +4015,12 @@ class Button extends UIObject {
         if (!this.element) {
             this.element = document.createElement('button');
             this.element.classList.add('ui-button');
-            
+            // Стартовое состояние доступности (свойство enabled лейаута/конструктора).
+            if (this.enabled === false) {
+                this.element.disabled = true;
+                this.element.classList.add('ui-button-disabled');
+            }
+
             // Update button content (icon and/or text)
             this.updateButtonContent();
 
@@ -4028,10 +4104,12 @@ class Button extends UIObject {
             });
 
             this.element.addEventListener('click', (e) => {
+                if (this.enabled === false) return;
                 this.onClick(e);
             });
 
             this.element.addEventListener('dblclick', (e) => {
+                if (this.enabled === false) return;
                 this.onDoubleClick(e);
             });
 
@@ -4431,10 +4509,18 @@ class TextBox extends FormInput {
         this._dateBtn = null;
         this._calPopup = null;
         this._calOpen = false;
+        // Показывать ли время. Реквизит ДАННЫХ, а не формы: у одних дат время есть
+        // по смыслу (момент запуска задания, отметка времени), у других его нет вовсе
+        // (дата документа, срок оплаты). Поэтому умолчание — выключено, а включается
+        // осознанно: полем модели (`showTime` в db.json, едет метаданными до всех
+        // потребителей) либо properties элемента лейаута.
+        if (typeof this.showTime === 'undefined') this.showTime = !!(properties && properties.showTime);
         this._dd = '';        // day part (0-2 digits as string)
         this._mm = '';        // month part (0-2 digits as string)
         this._yyyy = '';      // year part (0-4 digits as string)
-        this._dateSection = 0; // 0=day, 1=month, 2=year
+        this._HH = '';        // hours part (0-2 digits as string), только при showTime
+        this._MI = '';        // minutes part (0-2 digits as string), только при showTime
+        this._dateSection = 0; // 0=day, 1=month, 2=year, 3=hours, 4=minutes
         this._sectionFresh = true; // when true, next digit overwrites the section (Windows-style manual entry)
         this._dateAutoAdvanced = false; // секцию только что переключила МАСКА → следующий набранный разделитель проглатывается
         this._calYear = null;
@@ -4579,13 +4665,10 @@ class TextBox extends FormInput {
                 // отдельно, потому что Draw() формирует значение сам, минуя
                 // _updateDateDisplay, — и без этой ветки журнал документов
                 // рябил точками в каждой строке с пустым сроком оплаты.
-                if (!this._dd && !this._mm && !this._yyyy) {
+                if (!this._dd && !this._mm && !this._yyyy && !this._HH && !this._MI) {
                     this.element.value = '';
                 } else {
-                    const dd = (this._dd || '').padEnd(2, ' ');
-                    const mm = (this._mm || '').padEnd(2, ' ');
-                    const yyyy = (this._yyyy || '').padEnd(4, ' ');
-                    this.element.value = dd + '.' + mm + '.' + yyyy;
+                    this.element.value = this._getDateDisplay();
                 }
             } else {
                 try { this.setText(this.text); } catch (_) { try { this.element.value = this.text; } catch (_) {} }
@@ -5900,8 +5983,8 @@ class TextBox extends FormInput {
                         // _updateDateDisplay). По фокусу маску надо вернуть —
                         // иначе пользователю некуда печатать и непонятно,
                         // что поле вообще для даты.
-                        if (!this._dd && !this._mm && !this._yyyy && this.element.value === '') {
-                            this.element.value = '  .  .    ';
+                        if (!this._dd && !this._mm && !this._yyyy && !this._HH && !this._MI && this.element.value === '') {
+                            this.element.value = this.showTime ? '  .  .       :  ' : '  .  .    ';
                         }
                         // Defer section selection to a microtask: by then the browser has
                         // finalized the caret (Tab-focus selects all → section 0 / day;
@@ -5983,11 +6066,54 @@ class TextBox extends FormInput {
 
     // ======================== DATE MODE METHODS ========================
 
+    // Секции маски даты. Единственное описание геометрии: смещение в строке, длина и
+    // имя поля-хранилища. Всё остальное (перемещение курсора, ввод, стрелки, Tab,
+    // выбор секции по клику) считается ОТ НЕГО — иначе включение времени пришлось бы
+    // размножать по десятку методов с числами 0/3/6 наизусть.
+    //   без времени: «dd.mm.yyyy»           → 3 секции
+    //   со временем: «dd.mm.yyyy HH:MI»     → 5 секций
+    _dateSecs() {
+        const secs = [
+            { key: '_dd', start: 0, len: 2 },
+            { key: '_mm', start: 3, len: 2 },
+            { key: '_yyyy', start: 6, len: 4 }
+        ];
+        if (this.showTime) {
+            secs.push({ key: '_HH', start: 11, len: 2 });
+            secs.push({ key: '_MI', start: 14, len: 2 });
+        }
+        return secs;
+    }
+
+    /**
+     * Календарь выбирает только ДАТУ. Уже набранное время сохраняем, пустое считаем
+     * полуночью — иначе после выбора даты мышью значение осталось бы неполным
+     * («02.08.2026   :  ») и не сохранилось бы вовсе.
+     */
+    _ensureTimeParts() {
+        if (!this.showTime) return;
+        if (!this._HH) this._HH = '00';
+        if (!this._MI) this._MI = '00';
+    }
+
+    /** Максимум для завершённой секции: день зависит от месяца, час 0–23, минута 0–59. */
+    _dateSecRange(n) {
+        if (n === 0) return { min: 1, max: this._maxDayFor(this._mm, this._yyyy) };
+        if (n === 1) return { min: 1, max: 12 };
+        if (n === 3) return { min: 0, max: 23 };
+        if (n === 4) return { min: 0, max: 59 };
+        return null; // год не ограничиваем
+    }
+
     _getDateDisplay() {
         const dd = (this._dd || '').padEnd(2, ' ');
         const mm = (this._mm || '').padEnd(2, ' ');
         const yyyy = (this._yyyy || '').padEnd(4, ' ');
-        return dd + '.' + mm + '.' + yyyy;
+        let out = dd + '.' + mm + '.' + yyyy;
+        if (this.showTime) {
+            out += ' ' + (this._HH || '').padEnd(2, ' ') + ':' + (this._MI || '').padEnd(2, ' ');
+        }
+        return out;
     }
 
     // On blur, normalize a manually-typed date so it stays valid without forcing the
@@ -6017,6 +6143,27 @@ class TextBox extends FormInput {
             if (d < 1) { this._dd = '01'; changed = true; }
             else if (d > maxD) { this._dd = String(maxD).padStart(2, '0'); changed = true; }
         }
+        // Время: та же логика однозначного ввода («9» → «09») и зажим в диапазон.
+        // Пустое время при заполненной дате — это полночь, а не «дата без значения»:
+        // иначе `getValue()` вернул бы null и заполненная дата не сохранилась бы.
+        if (this.showTime) {
+            for (const [key, sec] of [['_HH', 3], ['_MI', 4]]) {
+                const cur = this[key] || '';
+                if (cur.length === 1) { this[key] = '0' + cur; changed = true; }
+            }
+            for (const [key, sec] of [['_HH', 3], ['_MI', 4]]) {
+                if ((this[key] || '').length !== 2) continue;
+                const r = this._dateSecRange(sec);
+                const v = parseInt(this[key], 10);
+                if (v < r.min) { this[key] = String(r.min).padStart(2, '0'); changed = true; }
+                else if (v > r.max) { this[key] = String(r.max).padStart(2, '0'); changed = true; }
+            }
+            const dateFilled = (this._dd || '').length === 2 && (this._mm || '').length === 2 && (this._yyyy || '').length === 4;
+            if (dateFilled) {
+                if (!this._HH) { this._HH = '00'; changed = true; }
+                if (!this._MI) { this._MI = '00'; changed = true; }
+            }
+        }
         if (changed && this.element) this._updateDateDisplay();
     }
 
@@ -6041,14 +6188,21 @@ class TextBox extends FormInput {
             const m = parseInt(this._mm, 10);
             const y = parseInt(this._yyyy, 10);
             if (d >= 1 && d <= 31 && m >= 1 && m <= 12 && y >= 1000) {
-                return y + '-' + String(m).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+                const ymd = y + '-' + String(m).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+                if (!this.showTime) return ymd;
+                // Локальное время БЕЗ суффикса зоны: «2026-08-02T15:30» и `new Date()`,
+                // и Sequelize трактуют как местное. С «Z» момент уехал бы на смещение
+                // зоны — пользователь ввёл 15:30 по своим часам, а не по Гринвичу.
+                const hh = (this._HH || '00').padStart(2, '0');
+                const mi = (this._MI || '00').padStart(2, '0');
+                return ymd + 'T' + hh + ':' + mi;
             }
         }
         return null;
     }
 
     _setDateFromAny(val) {
-        this._dd = ''; this._mm = ''; this._yyyy = '';
+        this._dd = ''; this._mm = ''; this._yyyy = ''; this._HH = ''; this._MI = '';
         if (!val && val !== 0) { if (this.element) this._updateDateDisplay(); return; }
         // Пустая дата (0001-01-01) — это «не заполнено», а не значение:
         // правило проекта хранит незаполненную дату так, потому что NULL
@@ -6056,9 +6210,12 @@ class TextBox extends FormInput {
         // выглядеть пустым, иначе пользователь видит «01.01.1».
         if (isEmptyDateValue(val)) { if (this.element) this._updateDateDisplay(); return; }
         try {
-            let d, m, y;
+            let d, m, y, hh, mi;
             if (val instanceof Date) {
-                if (!isNaN(val.getTime())) { d = val.getDate(); m = val.getMonth() + 1; y = val.getFullYear(); }
+                if (!isNaN(val.getTime())) {
+                    d = val.getDate(); m = val.getMonth() + 1; y = val.getFullYear();
+                    hh = val.getHours(); mi = val.getMinutes();
+                }
             } else {
                 const s = String(val).trim();
                 // ISO дата-время с таймзоной (DATE/TIMESTAMP из Sequelize, "...T...Z"):
@@ -6067,7 +6224,10 @@ class TextBox extends FormInput {
                 // из строки как есть — new Date() трактовал бы его как UTC-полночь.
                 if (/^\d{4}-\d{2}-\d{2}[T ]\d{2}/.test(s)) {
                     const dt = new Date(s);
-                    if (!isNaN(dt.getTime())) { d = dt.getDate(); m = dt.getMonth() + 1; y = dt.getFullYear(); }
+                    if (!isNaN(dt.getTime())) {
+                        d = dt.getDate(); m = dt.getMonth() + 1; y = dt.getFullYear();
+                        hh = dt.getHours(); mi = dt.getMinutes();
+                    }
                 }
                 if (!(d && m && y)) {
                     const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
@@ -6076,12 +6236,19 @@ class TextBox extends FormInput {
                         const dmy = s.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})/);
                         if (dmy) { d = parseInt(dmy[1], 10); m = parseInt(dmy[2], 10); y = parseInt(dmy[3], 10); }
                     }
+                    // Время из отображаемого формата «dd.mm.yyyy HH:MI» (ре-парс своего же вывода)
+                    const hm = s.match(/(\d{1,2}):(\d{2})/);
+                    if (hm) { hh = parseInt(hm[1], 10); mi = parseInt(hm[2], 10); }
                 }
             }
             if (d && m && y && d >= 1 && d <= 31 && m >= 1 && m <= 12) {
                 this._dd = String(d).padStart(2, '0');
                 this._mm = String(m).padStart(2, '0');
                 this._yyyy = String(y);
+                if (this.showTime) {
+                    this._HH = String(isFinite(hh) ? hh : 0).padStart(2, '0');
+                    this._MI = String(isFinite(mi) ? mi : 0).padStart(2, '0');
+                }
             }
         } catch (_) {}
         if (this.element) this._updateDateDisplay();
@@ -6090,21 +6257,18 @@ class TextBox extends FormInput {
     _updateDateDisplay() {
         if (!this.element) return;
         const sec = this._dateSection || 0;
-        const dd = (this._dd || '').padEnd(2, ' ');
-        const mm = (this._mm || '').padEnd(2, ' ');
-        const yyyy = (this._yyyy || '').padEnd(4, ' ');
         // Полностью незаполненная дата вне фокуса показывается ПУСТОЙ, а не
         // маской «  .  .    ». Пустых дат стало много: правило проекта хранит
         // «не заполнено» как 0001-01-01, и в журналах документов колонки
         // вроде «Срок оплаты» иначе рябят точками у каждой строки.
         // При фокусе маска остаётся — она нужна для ввода.
-        const isBlank = !this._dd && !this._mm && !this._yyyy;
+        const isBlank = !this._dd && !this._mm && !this._yyyy && !this._HH && !this._MI;
         if (isBlank && document.activeElement !== this.element) {
             this.element.value = '';
             try { this.element.dispatchEvent(new Event('input', { bubbles: true })); } catch (_) {}
             return;
         }
-        this.element.value = dd + '.' + mm + '.' + yyyy;
+        this.element.value = this._getDateDisplay();
         this._setDateSection(sec);
         // Notify listeners so dirty-tracking / dataMap updates fire on every keystroke
         try { this.element.dispatchEvent(new Event('input', { bubbles: true })); } catch (_) {}
@@ -6115,10 +6279,12 @@ class TextBox extends FormInput {
         if (!this.element) return;
         // Only reposition cursor if element is focused
         if (document.activeElement !== this.element) return;
-        const starts = [0, 3, 6];
-        const lens = [2, 2, 4];
-        const parts = [this._dd, this._mm, this._yyyy];
-        const s = starts[n];
+        const secs = this._dateSecs();
+        const def = secs[Math.min(n, secs.length - 1)];
+        const starts = secs.map(x => x.start);
+        const lens = secs.map(x => x.len);
+        const parts = secs.map(x => this[x.key]);
+        const s = def.start;
         if (this._sectionFresh) {
             // 1C/Windows-style: a freshly-entered section is fully highlighted so the
             // user sees what they're about to overwrite, instead of a lone caret sitting
@@ -6135,9 +6301,11 @@ class TextBox extends FormInput {
     // Первая НЕ до конца заполненная секция даты (0=день, 1=месяц, 2=год).
     // Если заполнены все — возвращает 2 (ограничения нет).
     _firstIncompleteDateSection() {
-        if ((this._dd || '').length < 2) return 0;
-        if ((this._mm || '').length < 2) return 1;
-        return 2;
+        const secs = this._dateSecs();
+        for (let i = 0; i < secs.length; i++) {
+            if ((this[secs[i].key] || '').length < secs[i].len) return i;
+        }
+        return secs.length - 1;
     }
 
     // Pick the date section from the current caret position and highlight it.
@@ -6148,10 +6316,11 @@ class TextBox extends FormInput {
     _syncDateSectionFromCaret() {
         if (!this.element || document.activeElement !== this.element) return;
         const pos = this.element.selectionStart || 0;
-        let sec;
-        if (pos <= 2) sec = 0;
-        else if (pos <= 5) sec = 1;
-        else sec = 2;
+        const secs = this._dateSecs();
+        let sec = secs.length - 1;
+        for (let i = 0; i < secs.length; i++) {
+            if (pos <= secs[i].start + secs[i].len) { sec = i; break; }
+        }
         // Нельзя встать в секцию ПОЗЖЕ первой незаполненной. Маска показывает пустые
         // секции пробелами («  .  .    »), поэтому клик в пустое поле почти всегда
         // попадает в конец строки — и курсор оказывался в ГОДУ ещё до первой цифры:
@@ -6171,10 +6340,12 @@ class TextBox extends FormInput {
         // Allow standard shortcuts (copy/paste/select all)
         if (e.ctrlKey || e.metaKey) return;
         e.preventDefault();
-        const sectionMaxLen = [2, 2, 4];
-        const getPart = (n) => (n === 0 ? this._dd : (n === 1 ? this._mm : this._yyyy));
-        const setPart = (n, v) => { if (n === 0) this._dd = v; else if (n === 1) this._mm = v; else this._yyyy = v; };
-        const sec = this._dateSection;
+        const secs = this._dateSecs();
+        const lastSec = secs.length - 1;
+        const sectionMaxLen = secs.map(x => x.len);
+        const getPart = (n) => this[secs[n].key] || '';
+        const setPart = (n, v) => { this[secs[n].key] = v; };
+        const sec = Math.min(this._dateSection, lastSec);
 
         if (/^\d$/.test(k)) {
             // Fresh section (just focused / arrowed into / auto-advanced): the digit
@@ -6192,13 +6363,11 @@ class TextBox extends FormInput {
                     // the offending (second) digit and keep editing this section, so the
                     // user can correct it without retyping the whole part.
                     const val = parseInt(next, 10);
-                    if (sec === 0) {
-                        const maxD = this._maxDayFor(this._mm, this._yyyy);
-                        if (val < 1 || val > maxD) { setPart(0, cur); this._updateDateDisplay(); return; }
-                    } else if (sec === 1) {
-                        if (val < 1 || val > 12) { setPart(1, cur); this._updateDateDisplay(); return; }
+                    const range = this._dateSecRange(sec);
+                    if (range && (val < range.min || val > range.max)) {
+                        setPart(sec, cur); this._updateDateDisplay(); return;
                     }
-                    if (sec < 2) {
+                    if (sec < lastSec) {
                         this._dateSection = sec + 1;
                         this._sectionFresh = true;
                         // Пометка «секцию переключила маска, а не пользователь»:
@@ -6226,8 +6395,8 @@ class TextBox extends FormInput {
         } else if (k === 'ArrowLeft') {
             if (sec > 0) { this._dateSection = sec - 1; this._sectionFresh = true; this._updateDateDisplay(); }
         } else if (k === 'ArrowRight') {
-            if (sec < 2) { this._dateSection = sec + 1; this._sectionFresh = true; this._updateDateDisplay(); }
-        } else if (k === '.' || k === ',' || k === '/' || k === '-') {
+            if (sec < lastSec) { this._dateSection = sec + 1; this._sectionFresh = true; this._updateDateDisplay(); }
+        } else if (k === '.' || k === ',' || k === '/' || k === '-' || k === ':' || k === ' ') {
             // Разделитель, НАБРАННЫЙ пользователем. Раньше он вёл себя как ArrowRight
             // и всегда переводил на следующую секцию — из-за этого обычный ввод
             // «03.08.2026» ломался: после двух цифр дня секция переключалась САМА,
@@ -6238,12 +6407,12 @@ class TextBox extends FormInput {
             // как и раньше. ',', '/', '-' — те же привычки/раскладки.
             if (this._dateAutoAdvanced) {
                 this._dateAutoAdvanced = false;
-            } else if (sec < 2) {
+            } else if (sec < lastSec) {
                 this._dateSection = sec + 1; this._sectionFresh = true; this._updateDateDisplay();
             }
         } else if (k === 'Tab') {
             if (!e.shiftKey) {
-                if (sec < 2) { this._dateSection = sec + 1; this._sectionFresh = true; this._updateDateDisplay(); }
+                if (sec < lastSec) { this._dateSection = sec + 1; this._sectionFresh = true; this._updateDateDisplay(); }
                 else {
                     // Allow Tab to propagate to next field
                     e.preventDefault = () => {}; // already prevented above — need to re-allow
@@ -6266,7 +6435,7 @@ class TextBox extends FormInput {
             if (this._calOpen) {
                 this._closeCalendar();
             } else {
-                this._dd = ''; this._mm = ''; this._yyyy = '';
+                this._dd = ''; this._mm = ''; this._yyyy = ''; this._HH = ''; this._MI = '';
                 this._dateSection = 0;
                 this._updateDateDisplay();
             }
@@ -6517,6 +6686,7 @@ class TextBox extends FormInput {
                         this._dd = String(_day).padStart(2, '0');
                         this._mm = String(_month).padStart(2, '0');
                         this._yyyy = String(_year);
+                        this._ensureTimeParts();
                         this._updateDateDisplay();
                         try { if (this.element) this.element.dispatchEvent(new Event('input', { bubbles: true })); } catch (_) {}
                         this._closeCalendar();
@@ -6557,6 +6727,7 @@ class TextBox extends FormInput {
             this._dd = String(todayD).padStart(2, '0');
             this._mm = String(todayM).padStart(2, '0');
             this._yyyy = String(todayY);
+            this._ensureTimeParts();
             this._updateDateDisplay();
             try { if (this.element) this.element.dispatchEvent(new Event('input', { bubbles: true })); } catch (_) {}
             this._closeCalendar();
@@ -11692,6 +11863,14 @@ class DynamicTable extends Table {
         this.bufferRows = 10;
         // Явный выбор видимых колонок (имена полей модели) — сервер отдаст только их.
         this.serverFields = Array.isArray(options.serverFields) ? options.serverFields : null;
+        // Точечные правки колонок из ЛЕЙАУТА: { имяПоля: { showTime, width, caption, properties } }.
+        // Колонки списка приходят с сервера из модели, и до этого лейаут мог только
+        // выбрать их состав (`fields`). Но часть свойств колонки — это ПРЕДСТАВЛЕНИЕ,
+        // а не данные: показывать ли у даты время, какой ширины колонка. Одна и та же
+        // дата в журнале запусков нужна со временем, а в списке документов — без, и
+        // решает это форма, а не таблица БД.
+        this.columnOverrides = (options.columnOverrides && typeof options.columnOverrides === 'object')
+            ? options.columnOverrides : null;
         // Дополнительные наблюдаемые таблицы: SSE dataChanged по ним тоже рефрешит
         // эту таблицу (напр. relatedList следит и за таблицей-связкой).
         this.extraWatchTables = Array.isArray(options.extraWatchTables) ? options.extraWatchTables : null;
@@ -12254,6 +12433,20 @@ class DynamicTable extends Table {
                 if (rows && rows.length > 0 && typeof rows[0] === 'object') {
                     columns = Object.keys(rows[0]).map(k => ({ data: k, caption: k }));
                 }
+            }
+            // Правки колонок из лейаута (см. this.columnOverrides). Свойства-представления
+            // накладываются ПОВЕРХ серверных: `properties` мержатся, остальное замещается.
+            if (this.columnOverrides) {
+                columns = columns.map(col => {
+                    const ov = this.columnOverrides[col.data];
+                    if (!ov || typeof ov !== 'object') return col;
+                    const merged = Object.assign({}, col, ov);
+                    merged.properties = Object.assign({}, col.properties || {}, ov.properties || {});
+                    // showTime удобно писать прямо в колонке, а до контрола оно едет
+                    // через properties (renderCellElement мержит именно их).
+                    if (ov.showTime !== undefined) merged.properties.showTime = !!ov.showTime;
+                    return merged;
+                });
             }
             // Preload lookup lists once per column (avoid per-row lookups)
             try {

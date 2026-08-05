@@ -255,6 +255,12 @@ function collectAllModelDefs() {
         // сессия при входе), уходит в базу с NULL в обход правила.
         const { injectEmptyDefaults } = require('./db/emptyValues');
         injectEmptyDefaults(defs, { enforceNotNull: false });
+
+        // Имя индекса задаётся явно и помещается в предел идентификатора СУБД —
+        // иначе рантайм-модель и база расходятся в именах, и sync() бесконечно
+        // пересоздаёт индекс (drive_root/db/indexNames.js).
+        const { injectIndexNames } = require('./db/indexNames');
+        injectIndexNames(defs);
     } catch (e) {
         console.error('[globalModels] entity number/date/name injection failed:', e && e.message || e);
     }
@@ -363,6 +369,94 @@ const User = sequelize.define(userDef.name, Object.fromEntries(
 ), { ...userDef.options, tableName: userDef.tableName });
 const _memoryStore = require('./memory_store');
 const _SESSION_USER_NS = 'session_users';
+
+// ── Вид сессии (`sessions.kind`) и гейт служебных сессий ─────────────────────
+// Служебная сессия (kind='service') — настоящая строка в `sessions`, от имени
+// которой планировщик исполняет регламентное задание (см. drive_root/scheduler).
+// Она обязана резолвиться в пользователя внутри dbGateway (иначе RLS не сработает),
+// но НЕ должна работать как логин: утёкший ID = полноценный вход под владельцем.
+// Поэтому гейт стоит на HTTP-уровне — в единой точке извлечения сессии из запроса,
+// а НЕ внутри getUserBySessionID.
+const _SESSION_META_NS = 'session_meta';
+_memoryStore.configureNamespace(_SESSION_META_NS, { ttl: 24 * 60 * 60 * 1000, max: 5000 });
+
+/** Достать сырой sessionID из cookie запроса (без проверки вида сессии). */
+function extractSessionIdFromCookie(req) {
+    if (!req || !req.headers || !req.headers.cookie) return null;
+    const m = req.headers.cookie.match(/(?:^|; )sessionID=([^;]+)/i);
+    return m ? decodeURIComponent(m[1]) : null;
+}
+
+/**
+ * Метаданные сессии: `{ kind, scopeOrganizationId }`.
+ *   kind: 'user' | 'service' | 'none' (строки нет)
+ * Возвращает null, если сессии не передали или БД недоступна (вид неизвестен —
+ * вызывающий не должен трактовать это как «служебная»).
+ * Кэшируется (L1/L2 memory_store): один запрос к БД на сессию.
+ */
+async function getSessionMeta(sessionID) {
+    if (!sessionID || sessionID === SYSTEM_SESSION_ID) return null;
+    const cachedL1 = _memoryStore.getSync(_SESSION_META_NS, sessionID);
+    if (cachedL1 !== null && cachedL1 !== undefined) return cachedL1;
+    const cachedL2 = await _memoryStore.get(_SESSION_META_NS, sessionID);
+    if (cachedL2 !== null && cachedL2 !== undefined) return cachedL2;
+
+    let meta = { kind: 'none', scopeOrganizationId: null };
+    try {
+        const session = await Session.findOne({ where: { sessionId: sessionID } });
+        if (session) {
+            meta = {
+                kind: session.kind || 'user',
+                scopeOrganizationId: session.scopeOrganizationId || null
+            };
+        }
+    } catch (e) {
+        return null;
+    }
+    await _memoryStore.set(_SESSION_META_NS, sessionID, meta);
+    return meta;
+}
+
+/** Вид сессии: 'user' | 'service' | 'none' | null (неизвестен). */
+async function getSessionKind(sessionID) {
+    const meta = await getSessionMeta(sessionID);
+    return meta ? meta.kind : null;
+}
+
+/**
+ * Организация, которой ограничена сессия (служебная сессия задачи организации).
+ * Пусто — ограничения нет. Это СУЖЕНИЕ прав, а не расширение (см. dbGateway проекта).
+ */
+async function getSessionScopeOrganizationId(sessionID) {
+    const meta = await getSessionMeta(sessionID);
+    return meta ? (meta.scopeOrganizationId || null) : null;
+}
+
+/** Сброс кэша метаданных сессии. Звать при создании/удалении служебной сессии. */
+async function invalidateSessionKind(sessionID) {
+    if (!sessionID) return;
+    try { await _memoryStore.del(_SESSION_META_NS, sessionID); } catch (e) {}
+}
+
+/**
+ * ЕДИНАЯ точка извлечения сессии из HTTP-запроса. Все роуты обязаны звать её,
+ * а не разбирать cookie самостоятельно — иначе гейт служебных сессий появится
+ * не везде, а «где вспомнили».
+ *
+ * @returns {Promise<string|null>} sessionID или null (нет cookie / служебная сессия)
+ */
+async function getSessionIdFromRequest(req) {
+    const sessionID = extractSessionIdFromCookie(req);
+    if (!sessionID) return null;
+    const kind = await getSessionKind(sessionID);
+    if (kind === 'service') {
+        // Уровень error: служебный ID в браузерной cookie — признак утечки,
+        // а не пользовательской ошибки.
+        console.error(`[security] Служебная сессия предъявлена по HTTP и отклонена: sessionID=${String(sessionID).slice(0, 8)}…`);
+        return null;
+    }
+    return sessionID;
+}
 
 async function getUserBySessionID(sessionID) {
     if (!sessionID) {
@@ -545,6 +639,13 @@ module.exports.getServerTime = getServerTime;
 module.exports.helloFromGlobal = helloFromGlobal;
 module.exports.getUserBySessionID = getUserBySessionID;
 module.exports.invalidateSessionUser = invalidateSessionUser;
+module.exports.getSessionIdFromRequest = getSessionIdFromRequest;
+module.exports.extractSessionIdFromCookie = extractSessionIdFromCookie;
+module.exports.getSessionKind = getSessionKind;
+module.exports.getSessionMeta = getSessionMeta;
+module.exports.getSessionScopeOrganizationId = getSessionScopeOrganizationId;
+module.exports.invalidateSessionKind = invalidateSessionKind;
+module.exports.SYSTEM_SESSION_ID = SYSTEM_SESSION_ID;
 module.exports.initModelsDB = initModelsDB;
 module.exports.getContentType = getContentType;
 module.exports.processDefaultValues = processDefaultValues;
@@ -772,6 +873,15 @@ async function getTableMetadata(modelName) {
         else if (typeKey === 'BOOLEAN') width = 80;
         else if (typeKey === 'DATE' || typeKey === 'DATEONLY') width = 120;
 
+        // Время у даты в АВТОгенерации. Показывать ли время — свойство представления,
+        // и в рукописном лейауте его задаёт автор (`properties.showTime`). Но в
+        // автоформе и в автоколонке решать некому, а `DATE` хранит именно момент
+        // времени — значит показываем всё, что в данных есть, иначе часть значения
+        // молча пропадает с экрана. `DATEONLY` времени не хранит — там его и нет.
+        // Рукописный лейаут перекрывает это `columnOverrides` / `properties.showTime`.
+        const autoShowTime = (typeKey === 'DATE');
+        if (autoShowTime) width = 150; // «02.08.2026 15:30» в 120 не влезает
+
         // Check for foreign key
         let foreignKey = null;
         if (attr.references) {
@@ -821,7 +931,11 @@ async function getTableMetadata(modelName) {
             editable: false,  // All fields readonly for now
             isAddress: !!(modelDef && modelDef.fields && modelDef.fields[fieldName] && modelDef.fields[fieldName].isAddress),
             inputType: explicitInputType,
-            options: explicitOptions
+            options: explicitOptions,
+            showTime: autoShowTime,
+            // properties едут в ячейку списка как есть (renderCellElement мержит
+            // col.properties) — через них флаг доходит до контрола даты.
+            properties: autoShowTime ? { showTime: true } : undefined
         });
     }
 
@@ -1384,6 +1498,37 @@ module.exports.invalidateFkCache = function(tableName) {
     _lookupCacheInvalidate(tableName);
 };
 
+// ── Представление записи для списков выбора и FK-колонок ─────────────────────
+//
+// Поле представления (`name`) вполне может быть ПУСТЫМ: у таблицы нет билдера
+// представления (`entityHooks.registerPresentation`), либо записи созданы до
+// того, как он появился. Пустое представление означает «показать нечего», но
+// пользователю всё равно надо что-то показать — иначе он видит пустой
+// выпадающий список и не может выбрать запись.
+//
+// Раньше это не проявлялось по случайности: поля `name` в моделях не было
+// вовсе, и выбор поля представления падал на первое строковое поле — у комнат
+// это `number` («FeWo Nr. I»). После того как `name` стал системным полем
+// модели, выбор всегда попадает на него, и справочник комнат стал пустым.
+//
+// Поэтому значение подбирается по цепочке: представление → номер → код → UID.
+const DISPLAY_FALLBACK_FIELDS = ['number', 'code'];
+
+function displayFallbackFields(attrs, displayField) {
+    return DISPLAY_FALLBACK_FIELDS.filter(f => attrs && attrs[f] && f !== displayField);
+}
+
+function pickDisplayValue(row, displayField, keyField) {
+    if (!row) return '';
+    const isEmpty = v => v === null || v === undefined || String(v).trim() === '';
+    if (!isEmpty(row[displayField])) return row[displayField];
+    for (const f of DISPLAY_FALLBACK_FIELDS) {
+        if (!isEmpty(row[f])) return row[f];
+    }
+    const key = row[keyField || 'UID'];
+    return key != null ? String(key) : '';
+}
+
 /**
  * Lightweight lookup: return id and display field for a table (for dropdowns/lookups)
  * @param {Object} options - { tableName, modelName, firstRow, visibleRows, userId }
@@ -1416,6 +1561,9 @@ async function getLookupList(options) {
             }
         }) || 'UID';
     }
+    // Запасные поля представления — см. pickDisplayValue. Читаем их вместе с
+    // основным, иначе подставлять будет нечего.
+    const fallbackFields = displayFallbackFields(attrs, displayField);
 
     visibleRows = Math.max(0, Math.min(visibleRows || 20, 1000));
     firstRow = Math.max(0, firstRow || 0);
@@ -1455,7 +1603,7 @@ async function getLookupList(options) {
         operation: 'read',
         table: tableName || Model.tableName,
         options: {
-            attributes: [keyField, displayField],
+            attributes: [keyField, displayField, ...fallbackFields],
             offset: firstRow,
             limit: visibleRows,
             order: orderClause,
@@ -1465,7 +1613,7 @@ async function getLookupList(options) {
     });
 
     // Normalize to simple objects with id and display
-const data = rows.map(r => ({ UID: r[keyField], display: r[displayField] }));
+const data = rows.map(r => ({ UID: r[keyField], display: pickDisplayValue(r, displayField, keyField) }));
 
     const _lkResult = {
         totalRows,

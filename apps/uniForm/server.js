@@ -665,14 +665,18 @@ async function buildTableFieldsFromModel(tableName) {
             // в ручном лейауте формы записи.
             if (Array.isArray(f.options)) field.options = f.options;
 
+            // Время у поля-даты в автоформе: `DATE` хранит момент времени, и раз
+            // лейаут никто не писал — показываем значение целиком (см. getTableMetadata).
+            if (f.showTime) field.properties = Object.assign({}, field.properties, { showTime: true });
+
             if (f.foreignKey) {
                 field.foreignKey = f.foreignKey;
                 // No explicit showSelectionButton/showListButton → the client auto-decides:
                 // a small option set (RLS-filtered < 10) renders an inline dropdown, a large
                 // one the "..." selector form. Same UX as the hand-built booking layout.
-                field.properties = {
+                field.properties = Object.assign({}, field.properties, {
                     selection: { table: f.foreignKey.table, idField: f.foreignKey.field || 'UID', displayField: f.foreignKey.displayField || 'name' }
-                };
+                });
             }
 
             return field;

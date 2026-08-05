@@ -387,6 +387,83 @@ async function ensureIndexes(sequelize, modelsDefs) {
   console.log(`[MIGRATION] ensureIndexes: ensured ${count} index(es) on FK / access / session columns`);
 }
 
+/**
+ * Разовое переименование индексов, чьё имя СУБД обрезала по пределу идентификатора.
+ *
+ * Раньше имя индекса не задавалось явно, Sequelize генерировал длинное, а PostgreSQL
+ * обрезал его до 63 байт. С тех пор имя задаётся явно (drive_root/db/indexNames.js),
+ * но в уже существующих базах лежит обрезанное — и `sync()` считал бы, что индекса
+ * нет, и создавал бы рядом второй. Переименование, а не пересоздание: индекс на
+ * месте, блокировок и перестроения нет.
+ *
+ * Строго ограничено: переименовываем только индекс, чьё имя ровно упёрлось в предел
+ * (признак обрезки), лежит на тех же колонках и начинается с имени таблицы.
+ */
+async function renameTruncatedIndexes(sequelize, transaction, modelsDefs) {
+  if (!sequelize.getDialect || sequelize.getDialect() !== 'postgres') return 0;
+  const { MAX_IDENTIFIER_LEN } = require('./indexNames');
+
+  let existing;
+  try {
+    existing = await sequelize.query(
+      `SELECT t.relname AS table_name, i.relname AS index_name,
+              string_agg(a.attname, ',' ORDER BY k.ord) AS cols
+         FROM pg_index x
+         JOIN pg_class i ON i.oid = x.indexrelid
+         JOIN pg_class t ON t.oid = x.indrelid
+         JOIN unnest(x.indkey) WITH ORDINALITY AS k(attnum, ord) ON true
+         JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum
+         JOIN pg_namespace n ON n.oid = t.relnamespace
+        WHERE n.nspname = current_schema() AND NOT x.indisprimary
+        GROUP BY t.relname, i.relname`,
+      { transaction, type: Sequelize.QueryTypes.SELECT }
+    );
+  } catch (e) {
+    console.warn('[MIGRATION] renameTruncatedIndexes: не удалось прочитать индексы:', e.message);
+    return 0;
+  }
+
+  const byTable = new Map();
+  for (const row of existing) {
+    if (!byTable.has(row.table_name)) byTable.set(row.table_name, []);
+    byTable.get(row.table_name).push(row);
+  }
+  const taken = new Set(existing.map(r => r.index_name));
+
+  let renamed = 0;
+  for (const def of modelsDefs) {
+    const indexes = def && def.options && def.options.indexes;
+    if (!Array.isArray(indexes)) continue;
+    const rows = byTable.get(def.tableName) || [];
+
+    for (const idx of indexes) {
+      if (!idx || !idx.name || !Array.isArray(idx.fields)) continue;
+      if (taken.has(idx.name)) continue;                     // уже под нужным именем
+      const wantCols = idx.fields
+        .map(f => (typeof f === 'string' ? f : (f && f.name) || ''))
+        .filter(Boolean).join(',');
+
+      const legacy = rows.find(r =>
+        r.cols === wantCols &&
+        r.index_name !== idx.name &&
+        r.index_name.length === MAX_IDENTIFIER_LEN &&     // признак обрезки СУБД
+        r.index_name.startsWith(def.tableName.slice(0, 20))
+      );
+      if (!legacy) continue;
+
+      try {
+        await sequelize.query(`ALTER INDEX "${legacy.index_name}" RENAME TO "${idx.name}"`, { transaction });
+        taken.add(idx.name);
+        renamed++;
+        console.log(`[MIGRATION] Индекс переименован: ${legacy.index_name} → ${idx.name}`);
+      } catch (e) {
+        console.warn(`[MIGRATION] Не удалось переименовать индекс ${legacy.index_name}: ${e.message}`);
+      }
+    }
+  }
+  return renamed;
+}
+
 async function createAll() {
   await ensureDatabase();
   const sequelize = getSequelizeInstance();
@@ -528,6 +605,15 @@ async function createAll() {
 
   try {
     console.log('[MIGRATION] Starting database schema check...');
+
+    // Разовое лечение баз, где имя индекса было обрезано СУБД (см. renameTruncatedIndexes).
+    // ДО фазы синхронизации: иначе sync() снова споткнётся об «уже существует».
+    try {
+      const renamed = await renameTruncatedIndexes(sequelize, transaction, mergedModelsDef);
+      if (renamed) console.log(`[MIGRATION] Приведено к каноническим именам индексов: ${renamed}`);
+    } catch (e) {
+      console.warn('[MIGRATION] renameTruncatedIndexes failed:', e.message);
+    }
 
     // 4. Analysis Phase: Identify tables that need migration
     const tablesToMigrate = [];

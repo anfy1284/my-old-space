@@ -1,0 +1,9 @@
+{
+    "name": "scheduler",
+    "level": "app",
+    "autoStart": true,
+    "system": ["mySpace"],
+    "access": ["admin", "user"],
+    "dependencies": {},
+    "mainMenuCommands": []
+}

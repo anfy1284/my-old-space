@@ -1,0 +1,18 @@
+[
+    {
+        "type": "table",
+        "name": "schedulerRunsList",
+        "properties": {
+            "dynamicTable": true,
+            "readOnly": true,
+            "appName": "uniForm",
+            "tableName": "scheduler_runs",
+            "fields": ["number", "taskId", "startedAt", "finishedAt", "durationMs", "status", "attempt", "triggeredBy", "resultText", "errorText"],
+            "visibleRows": 20,
+            "editable": true,
+            "showToolbar": true,
+            "hiddenButtons": ["recordAdd", "recordDelete", "listSettings"],
+            "initialSort": [{ "field": "number", "order": "desc" }]
+        }
+    }
+]

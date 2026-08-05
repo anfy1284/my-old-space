@@ -1,0 +1,17 @@
+[
+    {
+        "type": "table",
+        "name": "schedulerTasksList",
+        "properties": {
+            "dynamicTable": true,
+            "readOnly": true,
+            "appName": "uniForm",
+            "tableName": "scheduler_tasks",
+            "fields": ["number", "caption", "handler", "scheduleMode", "cronExpression", "organizationId", "enabled", "lastRunAt", "lastStatus", "nextRunAt"],
+            "visibleRows": 15,
+            "editable": true,
+            "showToolbar": true,
+            "initialSort": [{ "field": "number", "order": "desc" }]
+        }
+    }
+]

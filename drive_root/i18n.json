@@ -556,5 +556,29 @@
         "ru": "Номер «{{number}}» уже существует. Номер должен быть уникальным.",
         "de": "Die Nummer „{{number}}“ existiert bereits. Die Nummer muss eindeutig sein.",
         "pl": "Numer „{{number}}” już istnieje. Numer musi być unikalny."
+    },
+    "session_kind_field": {
+        "en": "Session kind",
+        "ru": "Вид сессии",
+        "de": "Sitzungsart",
+        "pl": "Rodzaj sesji"
+    },
+    "session_expires_at_field": {
+        "en": "Expires at",
+        "ru": "Истекает",
+        "de": "Läuft ab am",
+        "pl": "Wygasa"
+    },
+    "session_scope_organization_field": {
+        "en": "Limited to organization",
+        "ru": "Ограничена организацией",
+        "de": "Auf Organisation beschränkt",
+        "pl": "Ograniczona do organizacji"
+    },
+    "session_task_run_field": {
+        "en": "Task run",
+        "ru": "Запуск задания",
+        "de": "Aufgabenlauf",
+        "pl": "Uruchomienie zadania"
     }
 }

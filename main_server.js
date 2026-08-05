@@ -97,6 +97,20 @@ function proceedAfterDb() {
       server.listen(PORT, () => {
         console.log(`Server running at ${protocol}://localhost:${PORT}`);
       });
+
+      // Планировщик регламентных заданий. Стартует ПОСЛЕ инициализации БД и
+      // подъёма сервера: тик и пул воркеров не должны задерживать listen.
+      // Отключается переменной окружения SCHEDULER_DISABLED=1.
+      try {
+        const scheduler = require('./drive_root/scheduler');
+        scheduler.start().catch(e => console.error('[main_server] Планировщик не запущен:', e && e.message || e));
+        const shutdown = () => { try { scheduler.stop(); } catch (_) {} };
+        process.on('exit', shutdown);
+        process.on('SIGINT', () => { shutdown(); process.exit(0); });
+        process.on('SIGTERM', () => { shutdown(); process.exit(0); });
+      } catch (e) {
+        console.error('[main_server] Ошибка загрузки планировщика:', e && e.message || e);
+      }
     })
     .catch(err => {
       console.error('Error loading defaultValuesCache:', err && err.message || err);

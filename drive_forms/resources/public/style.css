@@ -404,6 +404,11 @@ html, body {
    button with a heavier dark outline inside the raised border. */
 .ui-button.ui-default-button { outline: 1px solid #000; outline-offset: -3px; }
 
+/* Недоступная кнопка (Button.setEnabled(false)) — Win95 рисует подпись серым с
+   белым «эхом» на пиксель ниже-правее; рамка остаётся выпуклой, кнопка не нажимается. */
+.ui-button.ui-button-disabled { color: #808080; text-shadow: 1px 1px 0 var(--color-light); }
+.ui-button.ui-button-disabled img { opacity: 0.4; }
+
 .ui-textbox { background-color:#ffffff; border-top:2px solid #808080; border-left:2px solid #808080; border-right:2px solid #ffffff; border-bottom:2px solid #ffffff; font-family: MS Sans Serif, sans-serif; font-size:11px; padding:2px 4px; outline:none; box-sizing:border-box; }
 
 .ui-label { display:inline-block; box-sizing:border-box; font-size:11px; font-family: MS Sans Serif, sans-serif; color:var(--color-text); }

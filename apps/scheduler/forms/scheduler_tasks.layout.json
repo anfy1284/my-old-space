@@ -1,0 +1,300 @@
+[
+    {
+        "type": "commandBar",
+        "extraButtons": [
+            {
+                "name": "btnRunNow",
+                "caption": { "i18n": "sched_run_now_btn" },
+                "icon": "/apps/general_icons/resources/public/16x16/play.png",
+                "events": { "onClick": "runNow" }
+            },
+            {
+                "name": "btnStop",
+                "caption": { "i18n": "sched_stop_btn" },
+                "icon": "/apps/general_icons/resources/public/16x16/stop.png",
+                "enabled": false,
+                "events": { "onClick": "stopRun" }
+            },
+            {
+                "name": "btnHistory",
+                "caption": { "i18n": "sched_history_btn" },
+                "icon": "/apps/general_icons/resources/public/16x16/journal.png",
+                "events": { "onClick": "openHistory" }
+            }
+        ]
+    },
+    {
+        "type": "group",
+        "caption": "",
+        "noBorder": true,
+        "orientation": "horizontal",
+        "layout": [
+            {
+                "type": "group",
+                "caption": "",
+                "noBorder": true,
+                "alignFields": true,
+                "orientation": "vertical",
+                "layout": [
+                    {
+                        "type": "textbox",
+                        "name": "number",
+                        "data": "number",
+                        "caption": { "i18n": "number_field" },
+                        "properties": { "width": 150 }
+                    },
+                    {
+                        "type": "textbox",
+                        "name": "caption",
+                        "data": "caption",
+                        "caption": { "i18n": "sched_task_caption_field" }
+                    },
+                    {
+                        "type": "emunList",
+                        "name": "handler",
+                        "data": "handler",
+                        "caption": { "i18n": "sched_handler_field" },
+                        "options": [],
+                        "events": { "onChange": "onHandlerChanged" }
+                    },
+                    {
+                        "type": "checkbox",
+                        "name": "enabled",
+                        "data": "enabled",
+                        "caption": { "i18n": "sched_enabled_field" }
+                    }
+                ]
+            },
+            {
+                "type": "group",
+                "caption": "",
+                "noBorder": true,
+                "alignFields": true,
+                "orientation": "vertical",
+                "layout": [
+                    {
+                        "type": "recordSelector",
+                        "name": "organizationId",
+                        "data": "organizationId",
+                        "caption": { "i18n": "sched_organization_field" },
+                        "properties": {
+                            "selection": {
+                                "table": "organizations",
+                                "idField": "UID",
+                                "displayField": "name"
+                            }
+                        }
+                    },
+                    {
+                        "type": "recordSelector",
+                        "name": "hotelId",
+                        "data": "hotelId",
+                        "caption": { "i18n": "sched_hotel_field" },
+                        "properties": {
+                            "selection": {
+                                "table": "hotels",
+                                "idField": "UID",
+                                "displayField": "name"
+                            }
+                        }
+                    },
+                    {
+                        "type": "recordSelector",
+                        "name": "userId",
+                        "data": "userId",
+                        "caption": { "i18n": "sched_owner_field" },
+                        "properties": {
+                            "selection": {
+                                "table": "users",
+                                "idField": "UID",
+                                "displayField": "name"
+                            }
+                        }
+                    }
+                ]
+            }
+        ]
+    },
+    {
+        "type": "tabs",
+        "name": "schedulerTabs",
+        "tabs": [
+            {
+                "caption": { "i18n": "sched_schedule_tab" },
+                "layout": [
+                    {
+                        "type": "group",
+                        "caption": "",
+                        "noBorder": true,
+                        "orientation": "horizontal",
+                        "layout": [
+                            {
+                                "type": "group",
+                                "caption": { "i18n": "sched_schedule_group" },
+                                "alignFields": true,
+                                "orientation": "vertical",
+                                "layout": [
+                                    {
+                                        "type": "emunList",
+                                        "name": "scheduleMode",
+                                        "data": "scheduleMode",
+                                        "caption": { "i18n": "sched_mode_field" },
+                                        "options": [
+                                            { "value": "interval", "caption": { "i18n": "sched_mode_interval" } },
+                                            { "value": "daily", "caption": { "i18n": "sched_mode_daily" } },
+                                            { "value": "weekly", "caption": { "i18n": "sched_mode_weekly" } },
+                                            { "value": "monthly", "caption": { "i18n": "sched_mode_monthly" } },
+                                            { "value": "cron", "caption": { "i18n": "sched_mode_cron" } }
+                                        ],
+                                        "events": { "onChange": "onScheduleChanged" }
+                                    },
+                                    {
+                                        "type": "integer",
+                                        "name": "intervalMinutes",
+                                        "data": "intervalMinutes",
+                                        "caption": { "i18n": "sched_interval_minutes_field" },
+                                        "properties": { "width": 90 },
+                                        "events": { "onChange": "onScheduleChanged" }
+                                    },
+                                    {
+                                        "type": "textbox",
+                                        "name": "timeOfDay",
+                                        "data": "timeOfDay",
+                                        "caption": { "i18n": "sched_time_of_day_field" },
+                                        "properties": { "width": 90, "placeholder": "HH:MM" },
+                                        "events": { "onChange": "onScheduleChanged" }
+                                    },
+                                    {
+                                        "type": "textbox",
+                                        "name": "weekDays",
+                                        "data": "weekDays",
+                                        "caption": { "i18n": "sched_week_days_field" },
+                                        "properties": { "width": 150, "placeholder": "1,3,5" },
+                                        "events": { "onChange": "onScheduleChanged" }
+                                    },
+                                    {
+                                        "type": "integer",
+                                        "name": "monthDay",
+                                        "data": "monthDay",
+                                        "caption": { "i18n": "sched_month_day_field" },
+                                        "properties": { "width": 90 },
+                                        "events": { "onChange": "onScheduleChanged" }
+                                    },
+                                    {
+                                        "type": "textbox",
+                                        "name": "cronExpression",
+                                        "data": "cronExpression",
+                                        "caption": { "i18n": "sched_cron_field" },
+                                        "properties": { "width": 200, "placeholder": "0 3 * * *" },
+                                        "events": { "onChange": "onScheduleChanged" }
+                                    },
+                                    {
+                                        "type": "textbox",
+                                        "name": "timezone",
+                                        "data": "timezone",
+                                        "caption": { "i18n": "sched_timezone_field" },
+                                        "properties": { "width": 200 },
+                                        "events": { "onChange": "onScheduleChanged" }
+                                    },
+                                    {
+                                        "type": "textbox",
+                                        "name": "scheduleDescription",
+                                        "caption": { "i18n": "sched_schedule_description" },
+                                        "properties": { "readOnly": true }
+                                    }
+                                ]
+                            },
+                            {
+                                "type": "group",
+                                "caption": { "i18n": "sched_execution_group" },
+                                "alignFields": true,
+                                "orientation": "vertical",
+                                "layout": [
+                                    {
+                                        "type": "emunList",
+                                        "name": "misfirePolicy",
+                                        "data": "misfirePolicy",
+                                        "caption": { "i18n": "sched_misfire_field" },
+                                        "options": [
+                                            { "value": "runOnce", "caption": { "i18n": "sched_misfire_run_once" } },
+                                            { "value": "skip", "caption": { "i18n": "sched_misfire_skip" } }
+                                        ]
+                                    },
+                                    {
+                                        "type": "integer",
+                                        "name": "timeoutSec",
+                                        "data": "timeoutSec",
+                                        "caption": { "i18n": "sched_timeout_field" },
+                                        "properties": { "width": 110 }
+                                    },
+                                    {
+                                        "type": "integer",
+                                        "name": "maxRetries",
+                                        "data": "maxRetries",
+                                        "caption": { "i18n": "sched_max_retries_field" },
+                                        "properties": { "width": 90 }
+                                    },
+                                    {
+                                        "type": "integer",
+                                        "name": "retryDelaySec",
+                                        "data": "retryDelaySec",
+                                        "caption": { "i18n": "sched_retry_delay_field" },
+                                        "properties": { "width": 110 }
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            },
+            {
+                "caption": { "i18n": "sched_params_tab" },
+                "layout": [
+                    {
+                        "type": "table",
+                        "name": "ts_scheduler_task_params",
+                        "data": "scheduler_task_params",
+                        "columns": [
+                            {
+                                "caption": { "i18n": "sched_param_key_field" },
+                                "data": "key",
+                                "width": 220,
+                                "inputType": "textbox"
+                            },
+                            {
+                                "caption": { "i18n": "sched_param_value_field" },
+                                "data": "value",
+                                "autoWidth": true,
+                                "inputType": "textbox"
+                            }
+                        ],
+                        "properties": {
+                            "editMode": "cell-immediate",
+                            "visibleRows": 8,
+                            "tabularFilter": { "taskId": "{UID}" },
+                            "hiddenButtons": ["listSettings", "recordOpen"]
+                        }
+                    }
+                ]
+            },
+            {
+                "caption": { "i18n": "sched_runs_tab" },
+                "layout": [
+                    {
+                        "type": "relatedList",
+                        "name": "relRuns",
+                        "data": "related_scheduler_runs",
+                        "caption": "",
+                        "properties": {
+                            "tableName": "scheduler_runs",
+                            "fields": ["number", "startedAt", "durationMs", "status", "attempt", "triggeredBy", "resultText", "errorText"],
+                            "link": { "field": "taskId" },
+                            "visibleRows": 12
+                        },
+                        "events": { "onDataRefreshed": "onRunsRefreshed" }
+                    }
+                ]
+            }
+        ]
+    }
+]
