@@ -46,11 +46,22 @@ try {
     // ignore if we can't patch console
 }
 
-// Generate models from array of definitions
-function generateModelsFromDefs(modelDefs) {
-    const models = {};
-    
-    // First pass: merge definitions with same name
+/**
+ * Слить определения моделей по имени и вставить системный `UID`.
+ *
+ * `collectAllModelDefs()` возвращает определения ПОСЛОЙНО и НЕ слитыми: одна таблица
+ * приходит несколько раз (напр. `users` — из ядра и из `apps/common`, где ей добавлен
+ * `organizationId`). Потребитель, который просто дедуплицирует по имени таблицы,
+ * молча теряет поля второго слоя — а вместе с ними, например, реквизит доступа.
+ *
+ * Вынесено из `generateModelsFromDefs`, чтобы этим пользовались и другие механизмы
+ * (выгрузка резервной копии строит по нему снимок структуры), а правила слияния
+ * существовали в одном экземпляре.
+ *
+ * @param {Array<Object>} modelDefs
+ * @returns {Map<string, Object>} имя модели → слитое определение
+ */
+function mergeModelDefs(modelDefs) {
     const mergedDefs = new Map();
     for (const def of modelDefs) {
         if (!mergedDefs.has(def.name)) {
@@ -103,6 +114,13 @@ function generateModelsFromDefs(modelDefs) {
             }
         }
     }
+    return mergedDefs;
+}
+
+// Generate models from array of definitions
+function generateModelsFromDefs(modelDefs) {
+    const models = {};
+    const mergedDefs = mergeModelDefs(modelDefs);
 
     // Second pass: create Sequelize models
     for (const def of mergedDefs.values()) {
@@ -654,6 +672,20 @@ module.exports.getDefaultValue = getDefaultValue;
 module.exports.getDefaultValues = getDefaultValues;
 module.exports.reloadDefaultValues = reloadDefaultValues;
 module.exports.collectAllModelDefs = collectAllModelDefs;  // Export for createDB.js
+module.exports.mergeModelDefs = mergeModelDefs;            // послойные определения → слитые (см. выше)
+
+/**
+ * Слитые определения моделей одним вызовом — то, что почти всегда и нужно.
+ *
+ * `collectAllModelDefs()` отдаёт слои как есть; потребителю, который смотрит на состав
+ * полей (реквизиты доступа, типы), нужен результат слияния, иначе поля, добавленные
+ * прикладным слоем поверх ядра, не видны.
+ * @returns {{models: Array<Object>, associations: Array<Object>}}
+ */
+module.exports.collectMergedModelDefs = function () {
+    const { models, associations } = collectAllModelDefs();
+    return { models: Array.from(mergeModelDefs(models).values()), associations };
+};
 
 // --- User management moved to drive_root level ---
 async function createNewUser(sessionID, name, systems, roles, isGuest = false, guestEmail = null) {

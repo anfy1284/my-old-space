@@ -930,6 +930,207 @@
                     "caption": {
                         "i18n": "sched_heartbeat_field"
                     }
+                },
+                "paramsText": {
+                    "type": "TEXT",
+                    "allowNull": true,
+                    "caption": {
+                        "i18n": "sched_params_field"
+                    }
+                }
+            },
+            "options": {
+                "timestamps": true
+            }
+        },
+        {
+            "name": "BackupFiles",
+            "tableName": "backup_files",
+            "entityConfig": {
+                "entityType": "document",
+                "presentation": "fileName"
+            },
+            "fields": {
+                "organizationId": {
+                    "type": "STRING",
+                    "allowNull": true,
+                    "caption": {
+                        "i18n": "backup_organization_field"
+                    }
+                },
+                "fileName": {
+                    "type": "STRING",
+                    "allowNull": false,
+                    "caption": {
+                        "i18n": "backup_file_name_field"
+                    }
+                },
+                "sizeBytes": {
+                    "type": "BIGINT",
+                    "allowNull": false,
+                    "defaultValue": 0,
+                    "caption": {
+                        "i18n": "backup_size_field"
+                    }
+                },
+                "sha256": {
+                    "type": "STRING",
+                    "allowNull": false,
+                    "defaultValue": "",
+                    "caption": {
+                        "i18n": "backup_sha256_field"
+                    }
+                },
+                "keyFingerprint": {
+                    "type": "STRING",
+                    "allowNull": false,
+                    "defaultValue": "",
+                    "caption": {
+                        "i18n": "backup_key_fingerprint_field"
+                    }
+                },
+                "configHash": {
+                    "type": "STRING",
+                    "allowNull": false,
+                    "defaultValue": "",
+                    "caption": {
+                        "i18n": "backup_config_hash_field"
+                    }
+                },
+                "dbVersion": {
+                    "type": "INTEGER",
+                    "allowNull": false,
+                    "defaultValue": 0,
+                    "caption": {
+                        "i18n": "backup_db_version_field"
+                    }
+                },
+                "triggeredBy": {
+                    "type": "STRING",
+                    "allowNull": false,
+                    "defaultValue": "schedule",
+                    "caption": {
+                        "i18n": "backup_triggered_by_field"
+                    },
+                    "inputType": "emunList",
+                    "options": [
+                        {
+                            "value": "schedule",
+                            "caption": {
+                                "i18n": "sched_trigger_schedule"
+                            }
+                        },
+                        {
+                            "value": "manual",
+                            "caption": {
+                                "i18n": "sched_trigger_manual"
+                            }
+                        }
+                    ]
+                },
+                "scopeType": {
+                    "type": "STRING",
+                    "allowNull": false,
+                    "defaultValue": "full",
+                    "caption": {
+                        "i18n": "backup_scope_field"
+                    },
+                    "inputType": "emunList",
+                    "options": [
+                        {
+                            "value": "full",
+                            "caption": {
+                                "i18n": "backup_scope_full"
+                            }
+                        },
+                        {
+                            "value": "organization",
+                            "caption": {
+                                "i18n": "backup_scope_organization"
+                            }
+                        }
+                    ]
+                },
+                "scopeOrganizationId": {
+                    "type": "STRING",
+                    "allowNull": true,
+                    "caption": {
+                        "i18n": "backup_scope_org_field"
+                    }
+                },
+                "scopeOrganizationName": {
+                    "type": "STRING",
+                    "allowNull": true,
+                    "caption": {
+                        "i18n": "backup_scope_org_name_field"
+                    }
+                },
+                "rowsTotal": {
+                    "type": "INTEGER",
+                    "allowNull": false,
+                    "defaultValue": 0,
+                    "caption": {
+                        "i18n": "backup_rows_field"
+                    }
+                },
+                "verifyStatus": {
+                    "type": "STRING",
+                    "allowNull": false,
+                    "defaultValue": "none",
+                    "caption": {
+                        "i18n": "backup_verify_field"
+                    },
+                    "inputType": "emunList",
+                    "options": [
+                        {
+                            "value": "none",
+                            "caption": {
+                                "i18n": "backup_verify_none"
+                            }
+                        },
+                        {
+                            "value": "ok",
+                            "caption": {
+                                "i18n": "backup_verify_ok"
+                            }
+                        },
+                        {
+                            "value": "failed",
+                            "caption": {
+                                "i18n": "backup_verify_failed"
+                            }
+                        }
+                    ]
+                },
+                "acked": {
+                    "type": "BOOLEAN",
+                    "allowNull": false,
+                    "defaultValue": false,
+                    "caption": {
+                        "i18n": "backup_acked_field"
+                    }
+                },
+                "missing": {
+                    "type": "BOOLEAN",
+                    "allowNull": false,
+                    "defaultValue": false,
+                    "caption": {
+                        "i18n": "backup_missing_field"
+                    }
+                },
+                "deletedAt": {
+                    "type": "DATE",
+                    "allowNull": true,
+                    "caption": {
+                        "i18n": "backup_deleted_at_field"
+                    }
+                },
+                "tablesText": {
+                    "type": "TEXT",
+                    "allowNull": true,
+                    "caption": {
+                        "i18n": "backup_tables_field"
+                    }
                 }
             },
             "options": {

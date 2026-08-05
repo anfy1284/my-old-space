@@ -1,0 +1,17 @@
+[
+    {
+        "type": "table",
+        "name": "backupFilesList",
+        "properties": {
+            "dynamicTable": true,
+            "readOnly": true,
+            "appName": "uniForm",
+            "tableName": "backup_files",
+            "fields": ["number", "date", "fileName", "scopeType", "scopeOrganizationName", "triggeredBy", "rowsTotal", "sizeBytes", "sha256", "keyFingerprint", "verifyStatus", "acked", "missing"],
+            "visibleRows": 20,
+            "showToolbar": true,
+            "hiddenButtons": ["recordAdd", "recordDelete"],
+            "initialSort": [{ "field": "date", "order": "desc" }]
+        }
+    }
+]

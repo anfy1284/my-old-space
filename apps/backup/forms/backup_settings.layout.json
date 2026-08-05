@@ -1,0 +1,236 @@
+[
+    {
+        "type": "commandBar",
+        "extraButtons": [
+            {
+                "type": "splitButton",
+                "name": "btnCreate",
+                "caption": {
+                    "i18n": "backup_create_now_btn"
+                },
+                "icon": "/apps/general_icons/resources/public/16x16/backup.png",
+                "events": {
+                    "onClick": "createFull"
+                },
+                "menu": [
+                    {
+                        "caption": {
+                            "i18n": "backup_create_full_item"
+                        },
+                        "icon": "/apps/general_icons/resources/public/16x16/database.png",
+                        "events": {
+                            "onClick": "createFull"
+                        }
+                    },
+                    {
+                        "caption": {
+                            "i18n": "backup_create_org_item"
+                        },
+                        "icon": "/apps/general_icons/resources/public/16x16/organization.png",
+                        "events": {
+                            "onClick": "createForOrganization"
+                        }
+                    }
+                ]
+            },
+            {
+                "name": "btnDownload",
+                "caption": {
+                    "i18n": "backup_download_btn"
+                },
+                "icon": "/apps/general_icons/resources/public/16x16/download.png",
+                "events": {
+                    "onClick": "downloadSelected"
+                }
+            },
+            {
+                "name": "btnDeleteFile",
+                "caption": {
+                    "i18n": "backup_delete_file_btn"
+                },
+                "icon": "/apps/general_icons/resources/public/16x16/delete.png",
+                "events": {
+                    "onClick": "deleteSelected"
+                }
+            },
+            {
+                "name": "btnSchedule",
+                "caption": {
+                    "i18n": "backup_schedule_btn"
+                },
+                "icon": "/apps/general_icons/resources/public/16x16/clock.png",
+                "events": {
+                    "onClick": "openSchedule"
+                }
+            }
+        ]
+    },
+    {
+        "type": "group",
+        "name": "grpStatus",
+        "caption": {
+            "i18n": "backup_status_group"
+        },
+        "layout": [
+            {
+                "type": "textarea",
+                "name": "statusText",
+                "caption": "",
+                "readOnly": true,
+                "properties": {
+                    "rows": 5
+                },
+                "data": "statusText"
+            }
+        ]
+    },
+    {
+        "type": "group",
+        "name": "grpStorage",
+        "caption": {
+            "i18n": "backup_storage_group"
+        },
+        "alignFields": true,
+        "layout": [
+            {
+                "type": "textbox",
+                "name": "storageDir",
+                "caption": {
+                    "i18n": "backup_storage_dir_field"
+                },
+                "data": "storageDir"
+            },
+            {
+                "type": "integer",
+                "name": "keepScheduled",
+                "caption": {
+                    "i18n": "backup_keep_scheduled_field"
+                },
+                "properties": {
+                    "width": 90
+                },
+                "data": "keepScheduled"
+            },
+            {
+                "type": "integer",
+                "name": "keepManual",
+                "caption": {
+                    "i18n": "backup_keep_manual_field"
+                },
+                "properties": {
+                    "width": 90
+                },
+                "data": "keepManual"
+            }
+        ]
+    },
+    {
+        "type": "group",
+        "name": "grpKey",
+        "caption": {
+            "i18n": "backup_key_group"
+        },
+        "layout": [
+            {
+                "type": "textarea",
+                "name": "publicKeyPem",
+                "caption": {
+                    "i18n": "backup_public_key_field"
+                },
+                "properties": {
+                    "rows": 6
+                },
+                "data": "publicKeyPem"
+            },
+            {
+                "type": "group",
+                "name": "grpKeyRow",
+                "noBorder": true,
+                "horizontal": true,
+                "layout": [
+                    {
+                        "type": "textbox",
+                        "name": "keyFingerprint",
+                        "caption": {
+                            "i18n": "backup_key_fingerprint_field"
+                        },
+                        "readOnly": true,
+                        "data": "keyFingerprint"
+                    },
+                    {
+                        "type": "button",
+                        "name": "btnGenerateKeys",
+                        "caption": {
+                            "i18n": "backup_generate_keys_btn"
+                        },
+                        "icon": "/apps/general_icons/resources/public/16x16/key.png",
+                        "events": {
+                            "onClick": "generateKeys"
+                        }
+                    }
+                ]
+            }
+        ]
+    },
+    {
+        "type": "group",
+        "name": "grpScope",
+        "caption": {
+            "i18n": "backup_scope_group"
+        },
+        "alignFields": true,
+        "layout": [
+            {
+                "type": "recordSelector",
+                "name": "scopeOrganizationId",
+                "data": "scopeOrganizationId",
+                "caption": {
+                    "i18n": "backup_scope_org_field"
+                },
+                "properties": {
+                    "selection": {
+                        "table": "organizations",
+                        "idField": "UID",
+                        "displayField": "name"
+                    }
+                }
+            }
+        ]
+    },
+    {
+        "type": "group",
+        "name": "grpFiles",
+        "caption": {
+            "i18n": "backup_files_group"
+        },
+        "layout": [
+            {
+                "type": "relatedList",
+                "name": "backupFilesTable",
+                "data": "related_backup_files",
+                "caption": "",
+                "properties": {
+                    "tableName": "backup_files",
+                    "appName": "uniForm",
+                    "fields": [
+                        "date",
+                        "fileName",
+                        "scopeType",
+                        "scopeOrganizationName",
+                        "triggeredBy",
+                        "rowsTotal",
+                        "sizeBytes",
+                        "verifyStatus",
+                        "acked",
+                        "missing"
+                    ],
+                    "visibleRows": 10
+                },
+                "events": {
+                    "onDataRefreshed": "onFilesRefreshed",
+                    "onRowActivate": "onFileSelected"
+                }
+            }
+        ]
+    }
+]

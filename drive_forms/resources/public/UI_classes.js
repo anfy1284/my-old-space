@@ -6884,6 +6884,18 @@ class MultilineTextBox extends FormInput {
         return this.element ? this.element.value : this.text;
     }
 
+    // setValue/getValue — тот же интерфейс, что у остальных полей ввода.
+    // Без них многострочное поле было «особенным»: прикладной код звал setValue,
+    // как у TextBox, метод молча отсутствовал, и поле не обновлялось — ошибки при
+    // этом не возникало. Автор формы не обязан знать, какой контрол чем отличается.
+    setValue(value) {
+        this.setText(value);
+    }
+
+    getValue() {
+        return this.getText();
+    }
+
     setPlaceholder(placeholder) {
         this.placeholder = placeholder;
         if (this.element) this.element.placeholder = placeholder;

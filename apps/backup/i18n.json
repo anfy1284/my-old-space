@@ -1,0 +1,404 @@
+{
+    "backup_app_caption": {
+        "en": "Database backup",
+        "ru": "Резервное копирование",
+        "de": "Datensicherung",
+        "pl": "Kopia zapasowa bazy"
+    },
+    "backup_files_app_caption": {
+        "en": "Backup files",
+        "ru": "Резервные копии",
+        "de": "Sicherungsdateien",
+        "pl": "Kopie zapasowe"
+    },
+    "backup_files_record_caption": {
+        "en": "Backup file",
+        "ru": "Резервная копия",
+        "de": "Sicherungsdatei",
+        "pl": "Kopia zapasowa"
+    },
+    "backup_handler_create": {
+        "en": "Create database backup",
+        "ru": "Создание резервной копии БД",
+        "de": "Datensicherung erstellen",
+        "pl": "Utworzenie kopii zapasowej bazy"
+    },
+    "backup_task_caption": {
+        "en": "Database backup",
+        "ru": "Резервное копирование БД",
+        "de": "Datensicherung",
+        "pl": "Kopia zapasowa bazy"
+    },
+    "backup_status_group": {
+        "en": "Status",
+        "ru": "Состояние",
+        "de": "Status",
+        "pl": "Stan"
+    },
+    "backup_storage_group": {
+        "en": "Storage",
+        "ru": "Хранение",
+        "de": "Speicherung",
+        "pl": "Przechowywanie"
+    },
+    "backup_key_group": {
+        "en": "Encryption",
+        "ru": "Шифрование",
+        "de": "Verschlüsselung",
+        "pl": "Szyfrowanie"
+    },
+    "backup_scope_group": {
+        "en": "Manual backup scope",
+        "ru": "Область ручной выгрузки",
+        "de": "Umfang der manuellen Sicherung",
+        "pl": "Zakres ręcznej kopii"
+    },
+    "backup_files_group": {
+        "en": "Created copies",
+        "ru": "Созданные копии",
+        "de": "Erstellte Kopien",
+        "pl": "Utworzone kopie"
+    },
+    "backup_storage_dir_field": {
+        "en": "Storage folder",
+        "ru": "Каталог хранения",
+        "de": "Speicherordner",
+        "pl": "Katalog przechowywania"
+    },
+    "backup_keep_scheduled_field": {
+        "en": "Keep scheduled copies",
+        "ru": "Хранить плановых копий",
+        "de": "Geplante Kopien aufbewahren",
+        "pl": "Przechowuj kopie planowe"
+    },
+    "backup_keep_manual_field": {
+        "en": "Keep manual copies",
+        "ru": "Хранить ручных копий",
+        "de": "Manuelle Kopien aufbewahren",
+        "pl": "Przechowuj kopie ręczne"
+    },
+    "backup_public_key_field": {
+        "en": "Public key (PEM)",
+        "ru": "Публичный ключ (PEM)",
+        "de": "Öffentlicher Schlüssel (PEM)",
+        "pl": "Klucz publiczny (PEM)"
+    },
+    "backup_key_fingerprint_field": {
+        "en": "Key fingerprint",
+        "ru": "Отпечаток ключа",
+        "de": "Schlüssel-Fingerabdruck",
+        "pl": "Odcisk klucza"
+    },
+    "backup_generate_keys_btn": {
+        "en": "Generate key pair",
+        "ru": "Сгенерировать пару",
+        "de": "Schlüsselpaar erzeugen",
+        "pl": "Wygeneruj parę kluczy"
+    },
+    "backup_create_now_btn": {
+        "en": "Back up now",
+        "ru": "Создать сейчас",
+        "de": "Jetzt sichern",
+        "pl": "Utwórz teraz"
+    },
+    "backup_create_full_item": {
+        "en": "Whole database",
+        "ru": "Вся база",
+        "de": "Gesamte Datenbank",
+        "pl": "Cała baza"
+    },
+    "backup_create_org_item": {
+        "en": "Selected organization only",
+        "ru": "Только выбранная организация",
+        "de": "Nur ausgewählte Organisation",
+        "pl": "Tylko wybrana organizacja"
+    },
+    "backup_download_btn": {
+        "en": "Download",
+        "ru": "Скачать",
+        "de": "Herunterladen",
+        "pl": "Pobierz"
+    },
+    "backup_delete_file_btn": {
+        "en": "Delete copy",
+        "ru": "Удалить копию",
+        "de": "Kopie löschen",
+        "pl": "Usuń kopię"
+    },
+    "backup_schedule_btn": {
+        "en": "Schedule",
+        "ru": "Расписание",
+        "de": "Zeitplan",
+        "pl": "Harmonogram"
+    },
+    "backup_organization_field": {
+        "en": "Organization",
+        "ru": "Организация",
+        "de": "Organisation",
+        "pl": "Organizacja"
+    },
+    "backup_file_name_field": {
+        "en": "File",
+        "ru": "Файл",
+        "de": "Datei",
+        "pl": "Plik"
+    },
+    "backup_size_field": {
+        "en": "Size, bytes",
+        "ru": "Размер, байт",
+        "de": "Größe, Bytes",
+        "pl": "Rozmiar, bajty"
+    },
+    "backup_sha256_field": {
+        "en": "SHA-256",
+        "ru": "SHA-256",
+        "de": "SHA-256",
+        "pl": "SHA-256"
+    },
+    "backup_config_hash_field": {
+        "en": "Structure hash",
+        "ru": "Хэш структуры",
+        "de": "Struktur-Hash",
+        "pl": "Hash struktury"
+    },
+    "backup_db_version_field": {
+        "en": "DB version",
+        "ru": "Версия структуры БД",
+        "de": "DB-Version",
+        "pl": "Wersja struktury bazy"
+    },
+    "backup_triggered_by_field": {
+        "en": "Trigger",
+        "ru": "Повод",
+        "de": "Auslöser",
+        "pl": "Powód"
+    },
+    "backup_scope_field": {
+        "en": "Scope",
+        "ru": "Область",
+        "de": "Umfang",
+        "pl": "Zakres"
+    },
+    "backup_scope_full": {
+        "en": "Whole database",
+        "ru": "Вся база",
+        "de": "Gesamte Datenbank",
+        "pl": "Cała baza"
+    },
+    "backup_scope_organization": {
+        "en": "One organization",
+        "ru": "Одна организация",
+        "de": "Eine Organisation",
+        "pl": "Jedna organizacja"
+    },
+    "backup_scope_org_field": {
+        "en": "Organization",
+        "ru": "Организация",
+        "de": "Organisation",
+        "pl": "Organizacja"
+    },
+    "backup_scope_org_name_field": {
+        "en": "Organization name",
+        "ru": "Наименование организации",
+        "de": "Name der Organisation",
+        "pl": "Nazwa organizacji"
+    },
+    "backup_rows_field": {
+        "en": "Rows",
+        "ru": "Строк",
+        "de": "Zeilen",
+        "pl": "Wiersze"
+    },
+    "backup_verify_field": {
+        "en": "Verification",
+        "ru": "Проверка",
+        "de": "Prüfung",
+        "pl": "Weryfikacja"
+    },
+    "backup_verify_none": {
+        "en": "Not verified",
+        "ru": "Не проверялась",
+        "de": "Nicht geprüft",
+        "pl": "Niesprawdzona"
+    },
+    "backup_verify_ok": {
+        "en": "Verified",
+        "ru": "Проверена",
+        "de": "Geprüft",
+        "pl": "Sprawdzona"
+    },
+    "backup_verify_failed": {
+        "en": "Failed",
+        "ru": "Не прошла проверку",
+        "de": "Fehlgeschlagen",
+        "pl": "Niepowodzenie"
+    },
+    "backup_acked_field": {
+        "en": "Stored externally",
+        "ru": "Принята хранилищем",
+        "de": "Extern gespeichert",
+        "pl": "Przyjęta przez magazyn"
+    },
+    "backup_missing_field": {
+        "en": "File missing",
+        "ru": "Файл отсутствует",
+        "de": "Datei fehlt",
+        "pl": "Brak pliku"
+    },
+    "backup_deleted_at_field": {
+        "en": "Deleted at",
+        "ru": "Удалена",
+        "de": "Gelöscht am",
+        "pl": "Usunięto"
+    },
+    "backup_tables_field": {
+        "en": "Row counts by table",
+        "ru": "Строк по таблицам",
+        "de": "Zeilen je Tabelle",
+        "pl": "Wiersze wg tabel"
+    },
+    "backup_status_dialect": {
+        "en": "DBMS: {{dialect}}. Backup does not block users: {{mode}}.",
+        "ru": "СУБД: {{dialect}}. Выгрузка не блокирует работу: {{mode}}.",
+        "de": "DBMS: {{dialect}}. Sicherung blockiert die Arbeit nicht: {{mode}}.",
+        "pl": "SZBD: {{dialect}}. Kopia nie blokuje pracy: {{mode}}."
+    },
+    "backup_status_nonblocking_ok": {
+        "en": "yes",
+        "ru": "да",
+        "de": "ja",
+        "pl": "tak"
+    },
+    "backup_status_nonblocking_bad": {
+        "en": "NO — backup will be refused, see log",
+        "ru": "НЕТ — выгрузка будет отклонена, см. журнал",
+        "de": "NEIN — Sicherung wird abgelehnt, siehe Protokoll",
+        "pl": "NIE — kopia zostanie odrzucona, zob. dziennik"
+    },
+    "backup_status_space": {
+        "en": "Folder: {{dir}}. Free: {{free}} MB, database: {{db}} MB.",
+        "ru": "Каталог: {{dir}}. Свободно: {{free}} МБ, база: {{db}} МБ.",
+        "de": "Ordner: {{dir}}. Frei: {{free}} MB, Datenbank: {{db}} MB.",
+        "pl": "Katalog: {{dir}}. Wolne: {{free}} MB, baza: {{db}} MB."
+    },
+    "backup_status_key_set": {
+        "en": "Public key is set ({{fingerprint}}…).",
+        "ru": "Публичный ключ задан ({{fingerprint}}…).",
+        "de": "Öffentlicher Schlüssel ist gesetzt ({{fingerprint}}…).",
+        "pl": "Klucz publiczny ustawiony ({{fingerprint}}…)."
+    },
+    "backup_status_key_missing": {
+        "en": "Public key is NOT set — backups will not run. Paste a key or generate a pair.",
+        "ru": "Публичный ключ НЕ задан — копии создаваться не будут. Вставьте ключ или сгенерируйте пару.",
+        "de": "Öffentlicher Schlüssel NICHT gesetzt — es werden keine Sicherungen erstellt. Schlüssel einfügen oder Paar erzeugen.",
+        "pl": "Klucz publiczny NIE jest ustawiony — kopie nie będą tworzone. Wklej klucz lub wygeneruj parę."
+    },
+    "backup_status_unknown_objects": {
+        "en": "WARNING: database contains objects outside the models — they will NOT be in the backup: {{list}}",
+        "ru": "ВНИМАНИЕ: в базе есть объекты вне моделей — в копию они НЕ попадут: {{list}}",
+        "de": "ACHTUNG: Die Datenbank enthält Objekte außerhalb der Modelle — sie kommen NICHT in die Sicherung: {{list}}",
+        "pl": "UWAGA: baza zawiera obiekty spoza modeli — NIE trafią do kopii: {{list}}"
+    },
+    "backup_run_started_msg": {
+        "en": "Backup started. Progress is visible in the run log.",
+        "ru": "Выгрузка запущена. Ход виден в журнале запусков.",
+        "de": "Sicherung gestartet. Der Fortschritt ist im Ausführungsprotokoll sichtbar.",
+        "pl": "Kopia uruchomiona. Postęp widoczny w dzienniku uruchomień."
+    },
+    "backup_save_before_run_msg": {
+        "en": "Settings have been changed. Save them before running?",
+        "ru": "Настройки изменены. Сохранить их перед запуском?",
+        "de": "Einstellungen wurden geändert. Vor dem Start speichern?",
+        "pl": "Ustawienia zmienione. Zapisać przed uruchomieniem?"
+    },
+    "backup_org_scope_confirm": {
+        "en": "Create a backup of the selected organization only? Such a file is not a full database copy.",
+        "ru": "Создать копию только выбранной организации? Такой файл не является полной копией базы.",
+        "de": "Nur die ausgewählte Organisation sichern? Diese Datei ist keine vollständige Datenbankkopie.",
+        "pl": "Utworzyć kopię tylko wybranej organizacji? Taki plik nie jest pełną kopią bazy."
+    },
+    "backup_generate_keys_confirm": {
+        "en": "A new key pair will be generated. The private key is shown ONCE — it is not stored on the server. Copies made with the previous key will require the previous private key. Continue?",
+        "ru": "Будет создана новая пара ключей. Приватный ключ выдаётся ОДИН раз — на сервере он не хранится. Копии, снятые прежним ключом, потребуют прежнего приватного ключа. Продолжить?",
+        "de": "Ein neues Schlüsselpaar wird erzeugt. Der private Schlüssel wird EINMAL ausgegeben — er wird nicht auf dem Server gespeichert. Mit dem bisherigen Schlüssel erstellte Kopien benötigen den bisherigen privaten Schlüssel. Fortfahren?",
+        "pl": "Zostanie utworzona nowa para kluczy. Klucz prywatny jest wydawany RAZ — nie jest przechowywany na serwerze. Kopie utworzone poprzednim kluczem będą wymagać poprzedniego klucza prywatnego. Kontynuować?"
+    },
+    "backup_private_key_saved_msg": {
+        "en": "The private key has been downloaded. Store it outside this server — without it the backups cannot be decrypted. It cannot be shown again.",
+        "ru": "Приватный ключ скачан. Храните его вне этого сервера — без него копии не расшифровать. Повторно показать его невозможно.",
+        "de": "Der private Schlüssel wurde heruntergeladen. Bewahren Sie ihn außerhalb dieses Servers auf — ohne ihn sind die Sicherungen nicht entschlüsselbar. Eine erneute Anzeige ist nicht möglich.",
+        "pl": "Klucz prywatny został pobrany. Przechowuj go poza tym serwerem — bez niego kopii nie da się odszyfrować. Nie można go pokazać ponownie."
+    },
+    "backup_delete_confirm": {
+        "en": "Delete the selected copy? The file will be removed from disk.",
+        "ru": "Удалить выбранную копию? Файл будет удалён с диска.",
+        "de": "Ausgewählte Kopie löschen? Die Datei wird von der Festplatte entfernt.",
+        "pl": "Usunąć wybraną kopię? Plik zostanie usunięty z dysku."
+    },
+    "backup_err_no_selection": {
+        "en": "Select a copy in the list first.",
+        "ru": "Сначала выберите копию в списке.",
+        "de": "Wählen Sie zuerst eine Kopie in der Liste aus.",
+        "pl": "Najpierw wybierz kopię z listy."
+    },
+    "backup_err_admin_only": {
+        "en": "Backup management is available to administrators only.",
+        "ru": "Управление резервным копированием доступно только администратору.",
+        "de": "Die Sicherungsverwaltung ist nur für Administratoren verfügbar.",
+        "pl": "Zarządzanie kopiami zapasowymi jest dostępne tylko dla administratora."
+    },
+    "backup_err_key_empty": {
+        "en": "Public key is not set — a backup cannot be created. Paste a key or generate a pair.",
+        "ru": "Публичный ключ не задан — копию создать нельзя. Вставьте ключ или сгенерируйте пару.",
+        "de": "Öffentlicher Schlüssel ist nicht gesetzt — es kann keine Sicherung erstellt werden. Schlüssel einfügen oder Paar erzeugen.",
+        "pl": "Klucz publiczny nie jest ustawiony — nie można utworzyć kopii. Wklej klucz lub wygeneruj parę."
+    },
+    "backup_err_key_unparsable": {
+        "en": "The public key cannot be read: {{message}}",
+        "ru": "Публичный ключ не читается: {{message}}",
+        "de": "Der öffentliche Schlüssel kann nicht gelesen werden: {{message}}",
+        "pl": "Nie można odczytać klucza publicznego: {{message}}"
+    },
+    "backup_err_key_not_rsa": {
+        "en": "An RSA key is required, but the key is of type {{type}}.",
+        "ru": "Нужен RSA-ключ, а этот имеет тип {{type}}.",
+        "de": "Es wird ein RSA-Schlüssel benötigt, dieser hat den Typ {{type}}.",
+        "pl": "Wymagany jest klucz RSA, a ten ma typ {{type}}."
+    },
+    "backup_err_key_too_short": {
+        "en": "The key is {{bits}} bits, at least {{need}} are required.",
+        "ru": "Длина ключа {{bits}} бит, требуется не менее {{need}}.",
+        "de": "Der Schlüssel hat {{bits}} Bit, erforderlich sind mindestens {{need}}.",
+        "pl": "Klucz ma {{bits}} bitów, wymagane co najmniej {{need}}."
+    },
+    "backup_err_storage_unwritable": {
+        "en": "Storage folder is not writable ({{dir}}): {{message}}",
+        "ru": "Каталог хранения недоступен на запись ({{dir}}): {{message}}",
+        "de": "Speicherordner ist nicht beschreibbar ({{dir}}): {{message}}",
+        "pl": "Katalog przechowywania nie jest zapisywalny ({{dir}}): {{message}}"
+    },
+    "backup_err_no_space": {
+        "en": "Not enough free space: about {{need}} MB needed, {{free}} MB available.",
+        "ru": "Недостаточно свободного места: нужно около {{need}} МБ, доступно {{free}} МБ.",
+        "de": "Nicht genügend freier Speicher: ca. {{need}} MB benötigt, {{free}} MB verfügbar.",
+        "pl": "Za mało wolnego miejsca: potrzeba ok. {{need}} MB, dostępne {{free}} MB."
+    },
+    "backup_err_sqlite_needs_wal": {
+        "en": "SQLite is in {{mode}} journal mode: a backup would block writes for its whole duration. Enable journal_mode = WAL.",
+        "ru": "SQLite работает в режиме журнала {{mode}}: выгрузка заблокировала бы запись на всё своё время. Включите journal_mode = WAL.",
+        "de": "SQLite läuft im Journalmodus {{mode}}: Eine Sicherung würde Schreibvorgänge die ganze Zeit blockieren. Aktivieren Sie journal_mode = WAL.",
+        "pl": "SQLite działa w trybie dziennika {{mode}}: kopia zablokowałaby zapis na cały czas. Włącz journal_mode = WAL."
+    },
+    "backup_err_scope_org_required": {
+        "en": "Select the organization to back up.",
+        "ru": "Выберите организацию для выгрузки.",
+        "de": "Wählen Sie die zu sichernde Organisation aus.",
+        "pl": "Wybierz organizację do wykonania kopii."
+    },
+    "sched_params_field": {
+        "en": "Run parameters",
+        "ru": "Параметры запуска",
+        "de": "Ausführungsparameter",
+        "pl": "Parametry uruchomienia"
+    }
+}

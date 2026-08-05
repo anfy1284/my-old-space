@@ -60,6 +60,10 @@
         {
             "name": "scheduler",
             "path": "/scheduler"
+        },
+        {
+            "name": "backup",
+            "path": "/backup"
         }
     ]
 }

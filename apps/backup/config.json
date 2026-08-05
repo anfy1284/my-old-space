@@ -1,0 +1,9 @@
+{
+    "name": "backup",
+    "level": "app",
+    "autoStart": true,
+    "system": ["mySpace"],
+    "access": ["admin"],
+    "dependencies": {},
+    "mainMenuCommands": []
+}

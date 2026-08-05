@@ -10,7 +10,7 @@
  *
  * Протокол IPC:
  *   главный → воркер: { type:'run', runId, taskUID, handler, params, sessionID,
- *                       organizationId, hotelId, userId }
+ *                       organizationId, hotelId, userId, triggeredBy }
  *                     { type:'cancel', runId }
  *   воркер → главный: { type:'progress'|'heartbeat'|'done'|'error'|'cancelled', ... }
  *
@@ -75,6 +75,10 @@ async function runJob(msg) {
         userId: msg.userId || null,
         organizationId: msg.organizationId || null,
         hotelId: msg.hotelId || null,
+        // Повод запуска. Обработчику он бывает нужен по существу, а не для журнала:
+        // например, ретеншн резервных копий считает плановые и ручные РАЗДЕЛЬНО,
+        // и без этого признака ручная копия вылетала бы по чужому лимиту.
+        triggeredBy: msg.triggeredBy || 'schedule',
         params: msg.params || {},
         log: (text) => send({ type: 'progress', runId: msg.runId, text: String(text) }),
         heartbeat: () => send({ type: 'heartbeat', runId: msg.runId }),

@@ -147,10 +147,34 @@ function getPresentation(tableName) {
  * @param {Object} request   — объект dbGateway request (мутируется request.data.name)
  * @param {Object} context   — { modelsDB, dbGateway, sessionID }
  */
+/**
+ * Декларативное представление: `entityConfig.presentation` в `db.json`.
+ *
+ * Имя поля (или список имён) вместо функции. Нужно потому, что билдеры регистрируются
+ * в `init.js` приложения, а `init.js` выполняет только ГЛАВНЫЙ процесс: запись,
+ * созданная регламентной задачей в процессе-воркере, оставалась без представления —
+ * `name` пустой. Объявление в модели видно везде, где видна модель, и кода не требует.
+ *
+ * Функция-билдер (registerPresentation) остаётся для случаев, где представление
+ * действительно вычисляется (номер + контрагент + даты).
+ */
+function declarativePresentation(Model) {
+    const spec = Model && Model.entityConfig && Model.entityConfig.presentation;
+    if (!spec) return null;
+    const fields = Array.isArray(spec) ? spec : [spec];
+    return (data) => fields
+        .map(f => data && data[f])
+        .filter(v => v !== null && v !== undefined && String(v) !== '')
+        .join(' ');
+}
+
 async function applyPresentation(operation, Model, request, context) {
     if (operation !== 'create' && operation !== 'update') return;
     const tableName = (Model && Model.tableName) || (request && request.table);
-    const builder = tableName ? presentationRegistry.get(tableName) : null;
+    // Зарегистрированный билдер важнее объявления: он мог появиться именно для того,
+    // чтобы переопределить умолчание.
+    let builder = tableName ? presentationRegistry.get(tableName) : null;
+    if (typeof builder !== 'function') builder = declarativePresentation(Model);
     if (typeof builder !== 'function') return;
 
     // Собираем полные данные записи. На update в request.data только изменённые поля —

@@ -159,6 +159,7 @@ function sendToWorker(w, job) {
             handler: job.task.handler,
             params: job.params,
             sessionID: job.sessionID,
+            triggeredBy: job.triggeredBy || 'schedule',
             organizationId: job.task.organizationId || null,
             hotelId: job.task.hotelId || null,
             userId: job.task.userId || null
@@ -217,10 +218,24 @@ async function handleWorkerMessage(w, msg) {
 
 // ── Запуск задачи ────────────────────────────────────────────────────────────
 
-/** Параметры задачи (ТЧ) → плоский объект с проверкой по схеме обработчика. */
-async function loadParams(task) {
+/**
+ * Параметры задачи (ТЧ) → плоский объект с проверкой по схеме обработчика.
+ *
+ * `overrideParams` — разовые значения ЭТОГО запуска: их задаёт «Выполнить сейчас»,
+ * когда у действия есть вариант (например, выгрузить всю базу или одну организацию).
+ * Они кладутся ПОВЕРХ значений из ТЧ и проходят ту же проверку по схеме, то есть
+ * неизвестный параметр по-прежнему отвергается обработчиком.
+ *
+ * Альтернатива — «строка-намерение» где-нибудь рядом, которую форма пишет, а
+ * обработчик читает и стирает, — это скрытое состояние между двумя процессами с
+ * гонкой при двойном нажатии и без следа в журнале. Разовый параметр запуска
+ * принадлежит планировщику, поэтому он здесь.
+ */
+async function loadParams(task, overrideParams) {
     const rows = await db.read('scheduler_task_params', { taskId: task.UID });
-    const pairs = (rows || []).map(r => ({ key: plain(r).key, value: plain(r).value }));
+    const byKey = new Map((rows || []).map(r => [plain(r).key, plain(r).value]));
+    for (const [k, v] of Object.entries(overrideParams || {})) byKey.set(k, v);
+    const pairs = [...byKey.entries()].map(([key, value]) => ({ key, value }));
     return registry.validateParams(task.handler, pairs);
 }
 
@@ -229,9 +244,10 @@ async function loadParams(task) {
  * @param {Object} task — запись scheduler_tasks (plain)
  * @param {'schedule'|'manual'|'catchup'} triggeredBy
  * @param {number} attempt
+ * @param {Object} [overrideParams] — разовые параметры ЭТОГО запуска (см. loadParams)
  * @returns {Promise<{ok: boolean, runId?: string, errorKey?: string}>}
  */
-async function dispatch(task, triggeredBy = 'schedule', attempt = 1) {
+async function dispatch(task, triggeredBy = 'schedule', attempt = 1, overrideParams = null) {
     const util = require('../db/utilites');
     let runId;
     try { runId = util.generateUID('SchedulerRuns'); }
@@ -267,7 +283,7 @@ async function dispatch(task, triggeredBy = 'schedule', attempt = 1) {
             return { ok: false, errorKey: 'sched_err_unknown_handler' };
         }
 
-        const validated = await loadParams(task);
+        const validated = await loadParams(task, overrideParams);
         if (!validated.ok) {
             await db.create(RUNS, {
                 UID: runId, taskId: task.UID, organizationId: task.organizationId || null,
@@ -295,14 +311,17 @@ async function dispatch(task, triggeredBy = 'schedule', attempt = 1) {
         await db.create(RUNS, {
             UID: runId, taskId: task.UID, organizationId: task.organizationId || null,
             userId: task.userId || null, startedAt, status: 'running', triggeredBy, attempt,
-            serviceSessionId: sessionID, lastHeartbeatAt: startedAt
+            serviceSessionId: sessionID, lastHeartbeatAt: startedAt,
+            // Разовые параметры — в журнал: иначе по записи запуска не понять, что
+            // именно выполнялось (вся база или одна организация).
+            paramsText: overrideParams ? JSON.stringify(overrideParams) : ''
         });
         await db.update(TASKS, { UID: task.UID }, { lastRunAt: startedAt, lastStatus: 'running', nextRunAt: next || null });
         notify(RUNS, 'create', runId);
         notify(TASKS, 'update', task.UID);
 
         state.active.set(runId, { task, startedAt, sessionID, attempt, triggeredBy, worker: null });
-        state.queue.push({ runId, task, params: validated.values, sessionID });
+        state.queue.push({ runId, task, params: validated.values, sessionID, triggeredBy });
         ensurePool();
         pumpQueue();
         return { ok: true, runId };
@@ -489,13 +508,17 @@ function stop() {
 
 // ── Ручное управление (из формы) ─────────────────────────────────────────────
 
-/** «Выполнить сейчас» — тот же путь, что и плановый запуск. */
-async function runNow(taskUID) {
+/**
+ * «Выполнить сейчас» — тот же путь, что и плановый запуск.
+ * @param {string} taskUID
+ * @param {Object} [overrideParams] — разовые параметры этого запуска (см. loadParams)
+ */
+async function runNow(taskUID, overrideParams) {
     const task = plain(await db.findByPk(TASKS, taskUID));
     if (!task) return { ok: false, errorKey: 'sched_err_task_not_found' };
     if (!isEmpty(task.runningRunId)) return { ok: false, errorKey: 'sched_err_already_running' };
     if (!state.started) return { ok: false, errorKey: 'sched_err_not_started' };
-    return await dispatch(task, 'manual', 1);
+    return await dispatch(task, 'manual', 1, overrideParams || null);
 }
 
 /** «Остановить» — флаг отмены воркеру; игнорирующий его обработчик добивается. */
