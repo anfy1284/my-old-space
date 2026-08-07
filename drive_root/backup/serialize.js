@@ -115,11 +115,85 @@ function fromDump(value, fieldDef) {
     if (key === 'DATEONLY') return dateOnlyToString(value);
     if (key === 'DATE' || key === 'DATETIME') {
         const d = new Date(value);
-        return isNaN(d.getTime()) ? null : d;
+        if (isNaN(d.getTime())) return null;
+        // СТРОКОЙ ISO В UTC, а не объектом `Date`.
+        //
+        // Восстановление вставляет строки сырым SQL с именованными подстановками, а
+        // Sequelize форматирует объект `Date` через ЛОКАЛЬНУЮ зону процесса. Для
+        // современных дат смещение зоны кратно минутам и на результате не сказывается,
+        // но у дат первого года действует историческое среднее солнечное время
+        // (Europe/Berlin — UTC+0:53:28), и остаток в 28 СЕКУНД переживает преобразование.
+        //
+        // Практическое следствие: платформенная «пустая дата» `0001-01-01T00:00:00Z`
+        // после восстановления превращалась в `0001-01-01T00:00:28Z`. Функционально
+        // это ещё «пусто» (`isEmptyDate` сравнивает по `<=`), но данные УЖЕ не те, что
+        // были, — а восстановление обязано воспроизводить, а не пересчитывать.
+        // Строка-литерал разбирается самой СУБД и через локальную зону не проходит.
+        // Поймано побайтовым сравнением восстановленной базы со схемой отката.
+        return d.toISOString();
     }
     if (BLOB_TYPES.has(key)) return Buffer.from(String(value), 'base64');
-    if (JSON_TYPES.has(key)) return value;
+    if (JSON_TYPES.has(key)) {
+        // ТЕКСТОМ, а не объектом. Восстановление вставляет строки сырым SQL с
+        // именованными подстановками, а экранирование Sequelize объект не принимает —
+        // падает с «Invalid value { … }» на середине загрузки. СУБД разбирает
+        // JSON-литерал из текста сама, и это работает одинаково на всех диалектах
+        // (в SQLite такая колонка и хранится текстом).
+        // Поймано живым прогоном: восстановление падало на `user_settings_fields`.
+        return typeof value === 'string' ? value : JSON.stringify(value);
+    }
     return value;
+}
+
+/**
+ * Служебные отметки времени Sequelize (`createdAt`/`updatedAt`/`deletedAt`).
+ *
+ * В `def.fields` их НЕТ — их добавляет сама ORM по `options.timestamps`. Поэтому
+ * наивный обход полей модели молча выбрасывает их из дампа, и восстановление либо
+ * падает на `NOT NULL`, либо (что хуже) проставляет всем строкам момент
+ * восстановления: «когда документ создан» — единственный след его происхождения, и
+ * терять его нельзя. Ровно та же ошибка однажды была допущена в переносе данных при
+ * миграции таблиц (B1), и лечится она так же — явным перечислением этих колонок.
+ *
+ * Имена берутся из опций: Sequelize позволяет их переименовать или отключить
+ * поштучно (`updatedAt: false`).
+ */
+function serviceFields(model) {
+    const opts = (model && model.options) || {};
+    if (opts.timestamps === false) return {};
+    const out = {};
+    const nameOf = (key, dflt) => {
+        const v = opts[key];
+        if (v === false) return null;
+        return (typeof v === 'string' && v) ? v : dflt;
+    };
+    const c = nameOf('createdAt', 'createdAt'); if (c) out[c] = { type: 'DATE' };
+    const u = nameOf('updatedAt', 'updatedAt'); if (u) out[u] = { type: 'DATE' };
+    if (opts.paranoid) { const d = nameOf('deletedAt', 'deletedAt'); if (d) out[d] = { type: 'DATE' }; }
+    return out;
+}
+
+/**
+ * Полный набор колонок таблицы = объявленные поля + служебные отметки времени.
+ * Единая точка для выгрузки и восстановления — второго списка быть не должно.
+ *
+ * Имена ОТСОРТИРОВАНЫ, и это не косметика. Порядок ключей в строке дампа задаётся
+ * порядком обхода этого объекта, а определения моделей приходят к нам двумя разными
+ * путями: из живого реестра (порядок ОБЪЯВЛЕНИЯ полей) и из снимка внутри дампа
+ * (канонический, то есть алфавитный). Значения при этом одни и те же, но текст строки
+ * получается разным — а по тексту считается контрольная сумма таблицы. Следствие:
+ * копия, снятая после восстановления, имела ДРУГИЕ контрольные суммы при тех же
+ * данных, и сверка round-trip между СУБД (ТЗ, приёмка §9 п. 2) оказывалась
+ * невыполнимой в принципе. Сортировка делает представление строки каноническим
+ * независимо от происхождения определений. Поймано прогоном postgres → sqlite → дамп.
+ */
+function modelFields(model) {
+    // Явно объявленное поле важнее служебного умолчания (напр. `deletedAt` как
+    // прикладной реквизит в `backup_files`).
+    const merged = Object.assign({}, serviceFields(model), (model && model.fields) || {});
+    const out = {};
+    for (const name of Object.keys(merged).sort()) out[name] = merged[name];
+    return out;
 }
 
 /**
@@ -139,4 +213,7 @@ function rowToDump(row, fields) {
     return out;
 }
 
-module.exports = { toDump, fromDump, rowToDump, dateOnlyToString, dateToString, isReferenceField };
+module.exports = {
+    toDump, fromDump, rowToDump, dateOnlyToString, dateToString, isReferenceField,
+    serviceFields, modelFields
+};

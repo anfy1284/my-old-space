@@ -223,6 +223,36 @@ async function del(ns, key) {
     } catch (_) {}
 }
 
+/**
+ * Очистить пространство имён целиком (или ВЕСЬ store, если `ns` не задан).
+ *
+ * Нужно для события `onDatabaseReset`: store живёт в ОТДЕЛЬНОМ процессе и переживает
+ * перезапуск сервера, унося сессии, роли и справочники прежней базы. Поэтому чистить
+ * надо не только локальную копию, но и сервис, и Redis — иначе после подмены базы
+ * первый же `get` вернёт данные, которых в базе больше нет.
+ *
+ * @param {string} [ns] — пространство имён; без него чистится всё
+ * @param {Object} [opts] — `{ localOnly }`: не транслировать дальше. Обязателен, когда
+ *   вызов пришёл ИЗ сервис-процесса: иначе он адресует запрос сам себе и зацикливается.
+ */
+async function clearNamespace(ns, opts = {}) {
+    if (ns) MEM.delete(ns); else MEM.clear();
+    if (opts.localOnly) return;
+
+    if (useRedis && redisClient) {
+        try {
+            const pattern = ns ? `ms:${ns}:*` : 'ms:*';
+            const found = await redisClient.keys(pattern);
+            if (found && found.length) await redisClient.del(found);
+        } catch (e) { /* Redis недоступен — локальная копия уже очищена */ }
+    }
+    try {
+        if (await checkServiceAvailable()) {
+            await callService('POST', '/clear', { ns: ns || '' }).catch(() => {});
+        }
+    } catch (_) {}
+}
+
 async function keys(ns, prefix) {
     if (!ns) ns = '_default';
     const nsMap = MEM.get(ns) || new Map();
@@ -329,6 +359,7 @@ module.exports = {
     set,
     get,
     del,
+    clearNamespace,
     keys,
     getSync,
     hasSync,

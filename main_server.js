@@ -94,6 +94,24 @@ function proceedAfterDb() {
         }
       }
 
+      // Сброс кэшей ДО того, как сервер начнёт обслуживать запросы.
+      //
+      // Зовётся при обычном старте, а не только после восстановления, по двум
+      // причинам. Первая: `memory_store` — ОТДЕЛЬНЫЙ процесс, он переживает
+      // перезапуск сервера и способен вернуть сессии, роли и справочники
+      // ПРЕДЫДУЩЕЙ базы. Вторая: старт и восстановление обязаны идти одним путём
+      // (инициализация БД → сброс кэшей → обслуживание), иначе через полгода это
+      // будут два разных пути с разным набором забытого.
+      //
+      // Место вызова принципиально: ПОСЛЕ `createServer` (он загружает все
+      // приложения, а подписчик регистрируется при загрузке своего модуля) и ДО
+      // `listen` (иначе первые запросы успеют лечь на кэши прежней базы).
+      try {
+        await require('./drive_root/dbLifecycle').notifyDatabaseReset({ reason: 'startup' });
+      } catch (e) {
+        console.error('[main_server] Сброс кэшей при старте не выполнен:', e && e.message || e);
+      }
+
       server.listen(PORT, () => {
         console.log(`Server running at ${protocol}://localhost:${PORT}`);
       });
@@ -122,11 +140,25 @@ function proceedAfterDb() {
     });
 }
 
-// Запуск: либо пропускаем schema-sync (SKIP_DB_SYNC), либо прогоняем createDB как раньше.
-if (SKIP_DB_SYNC) {
-  console.log('[main_server] SKIP_DB_SYNC=1 — schema-sync пропущен, старт сервера напрямую');
-  proceedAfterDb();
-} else {
+// ── Старт при поднятом флаге обслуживания ───────────────────────────────────────
+//
+// Сервер ОБЯЗАН подниматься при отсутствующей или битой базе (ТЗ §6.2, приёмка §9
+// п. 19). Стартовая последовательность синхронизирует модели и досевает справочники,
+// то есть на пустой базе упала бы. Поэтому: увидел файл-флаг → пропустил фазу
+// инициализации БД ЦЕЛИКОМ → занял порт → поднял только страницу обслуживания.
+//
+// Обычные приложения при этом не грузятся вовсе: их `init.js` ходит в базу, а базы
+// может не быть. Пользователи в систему не допускаются ни при каком раскладе.
+//
+// Флаг НЕ снимается автоматически: иначе прерванное восстановление закончится тем,
+// что сервер начнёт обслуживать полуразрушенные данные (см. drive_root/maintenance.js).
+/** Обычный старт: инициализация БД отдельным процессом, затем подъём сервера. */
+function bootNormally() {
+  if (SKIP_DB_SYNC) {
+    console.log('[main_server] SKIP_DB_SYNC=1 — schema-sync пропущен, старт сервера напрямую');
+    return proceedAfterDb();
+  }
+
   console.log('Initializing database...');
   console.log(`[main_server] PROJECT_ROOT from environment: ${process.env.PROJECT_ROOT || 'NOT SET'}`);
 
@@ -157,6 +189,44 @@ if (SKIP_DB_SYNC) {
     console.log('Database initialized.');
     proceedAfterDb();
   });
+}
+
+const maintenanceFlag = require('./drive_root/maintenance');
+if (maintenanceFlag.isActive()) {
+  const st = maintenanceFlag.read() || {};
+  console.warn('[main_server] РЕЖИМ ОБСЛУЖИВАНИЯ: инициализация БД пропущена'
+    + ` (фаза обрыва: ${st.phase || 'неизвестна'})`);
+  maintenanceFlag.audit(`SERVER_START_MAINTENANCE phase=${st.phase || ''} pid=${process.pid}`);
+
+  // ПОСЛЕ ручного снятия блокировки сервер поднимается сам, без перезапуска.
+  //
+  // Без этого получался тупик: администратор снял блокировку на странице обслуживания,
+  // а процесс так и остался отвечать 503 — он ведь стартовал БЕЗ инициализации базы и
+  // приложений. Требовать в этот момент перезапуск значит вернуться к супервизору, от
+  // которого мы ушли: под службой Windows или pm2 его ещё надо иметь, а из консоли
+  // перезапускать некому. Поэтому страница обслуживания просто передаёт управление
+  // обычному старту: слушатель освобождает порт, дальше идёт штатная последовательность.
+  require('./drive_root/maintenanceServer').startStandalone(PORT, {
+    onResume: (server) => new Promise((resolve) => {
+      console.log('[main_server] Блокировка снята — передаю управление обычному старту');
+
+      let handedOver = false;
+      const handOver = () => { if (handedOver) return; handedOver = true; bootNormally(); resolve(); };
+
+      // `close()` ждёт завершения ВСЕХ соединений, а браузер держит keep-alive и
+      // отпускать его не собирается — без явного закрытия передача управления просто
+      // не наступала, и сервер оставался молчащим. Поймано живым прогоном.
+      server.close(handOver);
+      if (typeof server.closeAllConnections === 'function') server.closeAllConnections();
+      else if (typeof server.closeIdleConnections === 'function') server.closeIdleConnections();
+
+      // Страховка: порт должен освободиться в любом случае, иначе обычный старт
+      // упадёт с EADDRINUSE и мы получим тупик вместо выхода из тупика.
+      setTimeout(handOver, 5000).unref();
+    })
+  });
+} else {
+  bootNormally();
 }
 
 module.exports = { server: null };

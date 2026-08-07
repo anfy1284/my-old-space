@@ -41,6 +41,12 @@ const User = sequelize.define(userDef.name, Object.fromEntries(
 const { BoundedTTLMap } = require('../memory_store');
 const sessionCache = new BoundedTTLMap({ ttl: 24 * 60 * 60 * 1000, max: 5000 });
 
+// Таблица `sessions` уходит вместе со старой схемой, а кэш продолжал бы считать
+// пользователя вошедшим. Подписка — рядом с кэшем (см. dbLifecycle).
+require('../dbLifecycle').onDatabaseReset('sessionManager', () => {
+    if (typeof sessionCache.clear === 'function') sessionCache.clear();
+});
+
 function parseCookies(cookieHeader) {
   const cookies = {};
   if (!cookieHeader) return cookies;

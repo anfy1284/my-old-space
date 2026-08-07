@@ -580,5 +580,174 @@
         "ru": "Запуск задания",
         "de": "Aufgabenlauf",
         "pl": "Uruchomienie zadania"
+    },
+
+    "maint_page_title": {
+        "en": "Server maintenance",
+        "ru": "Обслуживание сервера",
+        "de": "Serverwartung",
+        "pl": "Konserwacja serwera"
+    },
+    "maint_intro": {
+        "en": "The server is not serving requests. A database operation is in progress or was interrupted. The lock is never removed automatically on restart — that would mean serving a half-restored database.",
+        "ru": "Сервер не обслуживает запросы: идёт или оборвалась операция с базой данных. Блокировка никогда не снимается сама при перезапуске — иначе сервер начал бы работать на полувосстановленной базе.",
+        "de": "Der Server bedient keine Anfragen. Eine Datenbankoperation läuft oder wurde abgebrochen. Die Sperre wird beim Neustart nie automatisch aufgehoben — sonst würde eine halb wiederhergestellte Datenbank bedient.",
+        "pl": "Serwer nie obsługuje żądań: trwa lub została przerwana operacja na bazie danych. Blokada nigdy nie jest zdejmowana automatycznie przy restarcie."
+    },
+    "maint_state_reason": {
+        "en": "Reason",
+        "ru": "Причина",
+        "de": "Grund",
+        "pl": "Przyczyna"
+    },
+    "maint_state_phase": {
+        "en": "Phase",
+        "ru": "Фаза",
+        "de": "Phase",
+        "pl": "Faza"
+    },
+    "maint_state_started": {
+        "en": "Started at",
+        "ru": "Начато",
+        "de": "Begonnen",
+        "pl": "Rozpoczęto"
+    },
+    "maint_state_source": {
+        "en": "Source file",
+        "ru": "Файл-источник",
+        "de": "Quelldatei",
+        "pl": "Plik źródłowy"
+    },
+    "maint_state_mode": {
+        "en": "Mode",
+        "ru": "Режим",
+        "de": "Modus",
+        "pl": "Tryb"
+    },
+    "maint_state_db": {
+        "en": "Database",
+        "ru": "База данных",
+        "de": "Datenbank",
+        "pl": "Baza danych"
+    },
+    "maint_state_error": {
+        "en": "Error",
+        "ru": "Ошибка",
+        "de": "Fehler",
+        "pl": "Błąd"
+    },
+    "maint_log": {
+        "en": "Operation log",
+        "ru": "Журнал операции",
+        "de": "Vorgangsprotokoll",
+        "pl": "Dziennik operacji"
+    },
+    "maint_audit": {
+        "en": "Audit log",
+        "ru": "Аудит-журнал",
+        "de": "Auditprotokoll",
+        "pl": "Dziennik audytu"
+    },
+    "maint_login_title": {
+        "en": "Emergency administrator sign-in",
+        "ru": "Аварийный вход администратора",
+        "de": "Notfall-Anmeldung des Administrators",
+        "pl": "Awaryjne logowanie administratora"
+    },
+    "maint_login_hint": {
+        "en": "Enter the recovery password. It is stored as a hash in dbSettings.json and does not depend on the database — the users table may not exist at this moment.",
+        "ru": "Введите пароль восстановления. Он хранится хэшем в dbSettings.json и не зависит от базы — таблицы пользователей в этот момент может не существовать.",
+        "de": "Geben Sie das Wiederherstellungskennwort ein. Es liegt als Hash in dbSettings.json und hängt nicht von der Datenbank ab.",
+        "pl": "Wprowadź hasło odzyskiwania. Jest przechowywane jako hasz w dbSettings.json i nie zależy od bazy danych."
+    },
+    "maint_login_btn": {
+        "en": "Sign in",
+        "ru": "Войти",
+        "de": "Anmelden",
+        "pl": "Zaloguj"
+    },
+    "maint_login_ok": {
+        "en": "Signed in. Service actions only — business data is not available.",
+        "ru": "Вход выполнен. Доступны только сервисные действия; к рабочим данным доступа нет.",
+        "de": "Angemeldet. Nur Serviceaktionen — auf Geschäftsdaten besteht kein Zugriff.",
+        "pl": "Zalogowano. Tylko akcje serwisowe — brak dostępu do danych biznesowych."
+    },
+    "maint_action_rollback": {
+        "en": "Roll back to previous schema",
+        "ru": "Откатиться на прежнюю схему",
+        "de": "Auf vorheriges Schema zurücksetzen",
+        "pl": "Wycofaj do poprzedniego schematu"
+    },
+    "maint_action_drop_shadow": {
+        "en": "Delete leftover shadow schema",
+        "ru": "Удалить мусорную теневую схему",
+        "de": "Übrig gebliebenes Schattenschema löschen",
+        "pl": "Usuń pozostały schemat tymczasowy"
+    },
+    "maint_action_unlock": {
+        "en": "Remove the lock manually",
+        "ru": "Снять блокировку вручную",
+        "de": "Sperre manuell aufheben",
+        "pl": "Zdejmij blokadę ręcznie"
+    },
+    "maint_action_hint": {
+        "en": "A restore is never resumed from the middle — only from the beginning, with the private key entered again. Removing the lock does not repair the data.",
+        "ru": "Восстановление не возобновляется с середины — только с начала и с повторным вводом приватного ключа. Снятие блокировки данные не чинит.",
+        "de": "Eine Wiederherstellung wird nie in der Mitte fortgesetzt — nur von vorn, mit erneuter Eingabe des privaten Schlüssels.",
+        "pl": "Przywracanie nigdy nie jest wznawiane od środka — tylko od początku, z ponownym wprowadzeniem klucza prywatnego."
+    },
+    "maint_confirm_rollback": {
+        "en": "Roll back to the previous schema? The current one will be kept aside for investigation.",
+        "ru": "Откатиться на прежнюю схему? Текущая будет сохранена в стороне для разбора.",
+        "de": "Auf das vorherige Schema zurücksetzen? Das aktuelle wird zur Untersuchung beiseitegelegt.",
+        "pl": "Wycofać do poprzedniego schematu? Bieżący zostanie zachowany do analizy."
+    },
+    "maint_confirm_drop_shadow": {
+        "en": "Delete the leftover shadow schema?",
+        "ru": "Удалить мусорную теневую схему?",
+        "de": "Das übrig gebliebene Schattenschema löschen?",
+        "pl": "Usunąć pozostały schemat tymczasowy?"
+    },
+    "maint_confirm_unlock": {
+        "en": "Remove the maintenance lock? Users will be allowed in whatever state the database is currently in.",
+        "ru": "Снять блокировку обслуживания? Пользователи будут допущены к базе в том состоянии, в каком она сейчас.",
+        "de": "Wartungssperre aufheben? Benutzer erhalten Zugriff auf die Datenbank in ihrem aktuellen Zustand.",
+        "pl": "Zdjąć blokadę konserwacji? Użytkownicy uzyskają dostęp do bazy w jej obecnym stanie."
+    },
+    "maint_err_bad_password": {
+        "en": "Wrong recovery password",
+        "ru": "Неверный пароль восстановления",
+        "de": "Falsches Wiederherstellungskennwort",
+        "pl": "Nieprawidłowe hasło odzyskiwania"
+    },
+    "maint_err_no_password": {
+        "en": "Recovery password is not set. Use: node node_modules/my-old-space/scripts/set-recovery-password.js",
+        "ru": "Пароль восстановления не задан. Задайте: node node_modules/my-old-space/scripts/set-recovery-password.js",
+        "de": "Wiederherstellungskennwort ist nicht gesetzt. Verwenden Sie: node node_modules/my-old-space/scripts/set-recovery-password.js",
+        "pl": "Hasło odzyskiwania nie jest ustawione. Użyj: node node_modules/my-old-space/scripts/set-recovery-password.js"
+    },
+    "maint_err_rate_limited": {
+        "en": "Too many attempts. Try again later.",
+        "ru": "Слишком много попыток. Повторите позже.",
+        "de": "Zu viele Versuche. Später erneut versuchen.",
+        "pl": "Zbyt wiele prób. Spróbuj później."
+    },
+    "maint_err_unauthorized": {
+        "en": "Emergency sign-in required",
+        "ru": "Требуется аварийный вход",
+        "de": "Notfall-Anmeldung erforderlich",
+        "pl": "Wymagane awaryjne logowanie"
+    },
+    "maint_err_unknown_action": {
+        "en": "Unknown action",
+        "ru": "Неизвестное действие",
+        "de": "Unbekannte Aktion",
+        "pl": "Nieznana akcja"
+    },
+    "maint_err_no_rollback": {
+        "en": "There is no rollback schema to switch to",
+        "ru": "Нет схемы отката, на которую можно переключиться",
+        "de": "Es gibt kein Rollback-Schema zum Umschalten",
+        "pl": "Brak schematu wycofania do przełączenia"
     }
 }

@@ -88,5 +88,17 @@
         "ru": "Наименование",
         "de": "Bezeichnung",
         "pl": "Nazwa"
+    },
+    "Started": {
+        "en": "Started",
+        "ru": "Запущено",
+        "de": "Gestartet",
+        "pl": "Uruchomiono"
+    },
+    "Done": {
+        "en": "Done",
+        "ru": "Готово",
+        "de": "Fertig",
+        "pl": "Gotowe"
     }
 }

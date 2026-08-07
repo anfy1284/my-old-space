@@ -10,6 +10,7 @@
     "apps/",
     "drive_forms/",
     "drive_root/",
+    "scripts/",
     "main_server.js",
     "server.config.json",
     "АРХИТЕКТУРА_ПРОЕКТА.md",
@@ -23,6 +24,7 @@
   "author": "Andrey",
   "license": "MIT",
   "dependencies": {
+    "bcrypt": "^6.0.0",
     "cron-parser": "^4.9.0",
     "dotenv": "^16.0.0",
     "selfsigned": "^2.0.0",

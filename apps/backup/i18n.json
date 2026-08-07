@@ -400,5 +400,917 @@
         "ru": "Параметры запуска",
         "de": "Ausführungsparameter",
         "pl": "Parametry uruchomienia"
+    },
+    "backup_restore_org_btn": {
+        "en": "Restore organization...",
+        "ru": "Восстановить организацию...",
+        "de": "Organisation wiederherstellen...",
+        "pl": "Przywroc organizacje..."
+    },
+    "restore_app_caption": {
+        "en": "Restore organization from backup",
+        "ru": "Восстановление организации из копии",
+        "de": "Organisation aus Sicherung wiederherstellen",
+        "pl": "Przywracanie organizacji z kopii"
+    },
+    "restore_source_group": {
+        "en": "Source",
+        "ru": "Источник",
+        "de": "Quelle",
+        "pl": "Zrodlo"
+    },
+    "restore_key_group": {
+        "en": "Private key file — NOT the public key from the backup settings",
+        "ru": "Файл приватного ключа — НЕ публичный ключ из настроек копирования",
+        "de": "Private Schlüsseldatei — NICHT der öffentliche Schlüssel aus den Sicherungseinstellungen",
+        "pl": "Plik klucza prywatnego — NIE klucz publiczny z ustawień kopii"
+    },
+    "restore_report_group": {
+        "en": "What will happen",
+        "ru": "Что произойдёт",
+        "de": "Was passieren wird",
+        "pl": "Co sie stanie"
+    },
+    "restore_confirm_group": {
+        "en": "Confirmation",
+        "ru": "Подтверждение",
+        "de": "Bestatigung",
+        "pl": "Potwierdzenie"
+    },
+    "restore_file_info_field": {
+        "en": "Backup",
+        "ru": "Копия",
+        "de": "Sicherung",
+        "pl": "Kopia"
+    },
+    "restore_file_info_value": {
+        "en": "created {{created}}, scope {{scope}}, database {{db}} ({{dialect}})",
+        "ru": "создана {{created}}, область {{scope}}, база {{db}} ({{dialect}})",
+        "de": "erstellt {{created}}, Bereich {{scope}}, Datenbank {{db}} ({{dialect}})",
+        "pl": "utworzona {{created}}, zakres {{scope}}, baza {{db}} ({{dialect}})"
+    },
+    "restore_target_org_field": {
+        "en": "Organization to restore",
+        "ru": "Восстанавливаемая организация",
+        "de": "Wiederherzustellende Organisation",
+        "pl": "Przywracana organizacja"
+    },
+    "restore_confirm_name_field": {
+        "en": "Type the organization name",
+        "ru": "Введите наименование организации",
+        "de": "Name der Organisation eingeben",
+        "pl": "Wpisz nazwe organizacji"
+    },
+    "restore_analyze_btn": {
+        "en": "Analyze",
+        "ru": "Проанализировать",
+        "de": "Analysieren",
+        "pl": "Analizuj"
+    },
+    "restore_run_btn": {
+        "en": "Restore",
+        "ru": "Восстановить",
+        "de": "Wiederherstellen",
+        "pl": "Przywroc"
+    },
+    "restore_hint_analyze_first": {
+        "en": "Paste the private key, choose the organization and press Analyze. Nothing is changed until you confirm.",
+        "ru": "Вставьте приватный ключ, выберите организацию и нажмите «Проанализировать». До подтверждения ничего не меняется.",
+        "de": "Privaten Schlussel einfugen, Organisation wahlen und Analysieren drucken. Bis zur Bestatigung wird nichts geandert.",
+        "pl": "Wklej klucz prywatny, wybierz organizacje i nacisnij Analizuj. Do potwierdzenia nic nie jest zmieniane."
+    },
+    "restore_confirm_hint": {
+        "en": "To run the restore, type the organization name exactly: {{name}}",
+        "ru": "Чтобы запустить восстановление, введите наименование организации в точности: {{name}}",
+        "de": "Zum Starten der Wiederherstellung den Namen der Organisation genau eingeben: {{name}}",
+        "pl": "Aby uruchomic przywracanie, wpisz dokladnie nazwe organizacji: {{name}}"
+    },
+    "restore_final_confirm": {
+        "en": "The organization state will be replaced by the one in the backup. Everything created after the backup was taken will be deleted. A safety backup is taken first. Continue?",
+        "ru": "Состояние организации будет заменено на то, что в копии. Всё созданное после снятия копии будет удалено. Перед этим снимается страховочная копия. Продолжить?",
+        "de": "Der Zustand der Organisation wird durch den der Sicherung ersetzt. Alles, was danach entstanden ist, wird geloscht. Zuvor wird eine Sicherheitskopie erstellt. Fortfahren?",
+        "pl": "Stan organizacji zostanie zastapiony stanem z kopii. Wszystko utworzone pozniej zostanie usuniete. Wczesniej tworzona jest kopia bezpieczenstwa. Kontynuowac?"
+    },
+    "restore_done_msg": {
+        "en": "Organization {{name}} restored: {{del}} rows deleted, {{ins}} inserted, {{sessions}} sessions reset.",
+        "ru": "Организация «{{name}}» восстановлена: удалено строк {{del}}, вставлено {{ins}}, сброшено сессий {{sessions}}.",
+        "de": "Organisation {{name}} wiederhergestellt: {{del}} Zeilen geloscht, {{ins}} eingefugt, {{sessions}} Sitzungen zuruckgesetzt.",
+        "pl": "Organizacja {{name}} przywrocona: usunieto {{del}} wierszy, wstawiono {{ins}}, zresetowano sesji: {{sessions}}."
+    },
+    "restore_rep_structure_ok": {
+        "en": "Structure: compatible.",
+        "ru": "Структура: совместима.",
+        "de": "Struktur: kompatibel.",
+        "pl": "Struktura: zgodna."
+    },
+    "restore_rep_structure_fatal": {
+        "en": "Structure: INCOMPATIBLE - restore is not possible:",
+        "ru": "Структура: НЕСОВМЕСТИМА — восстановление невозможно:",
+        "de": "Struktur: NICHT KOMPATIBEL - Wiederherstellung nicht moglich:",
+        "pl": "Struktura: NIEZGODNA - przywracanie niemozliwe:"
+    },
+    "restore_rep_column_removed": {
+        "en": "column {{table}}.{{column}} exists in the backup but not in the database",
+        "ru": "колонка {{table}}.{{column}} есть в копии, но её нет в базе",
+        "de": "Spalte {{table}}.{{column}} ist in der Sicherung, aber nicht in der Datenbank",
+        "pl": "kolumna {{table}}.{{column}} jest w kopii, ale nie ma jej w bazie"
+    },
+    "restore_rep_type_changed": {
+        "en": "column {{table}}.{{column}}: type changed {{from}} -> {{to}}",
+        "ru": "колонка {{table}}.{{column}}: тип изменился {{from}} → {{to}}",
+        "de": "Spalte {{table}}.{{column}}: Typ geandert {{from}} -> {{to}}",
+        "pl": "kolumna {{table}}.{{column}}: typ zmieniony {{from}} -> {{to}}"
+    },
+    "restore_rep_table_missing_now": {
+        "en": "table {{table}} is in the backup but not in the database",
+        "ru": "таблица {{table}} есть в копии, но её нет в базе",
+        "de": "Tabelle {{table}} ist in der Sicherung, aber nicht in der Datenbank",
+        "pl": "tabela {{table}} jest w kopii, ale nie ma jej w bazie"
+    },
+    "restore_rep_column_added_required": {
+        "en": "column {{table}}.{{column}} appeared after the backup and is required without a default",
+        "ru": "колонка {{table}}.{{column}} появилась после снятия копии и обязательна без умолчания",
+        "de": "Spalte {{table}}.{{column}} kam nach der Sicherung hinzu und ist ohne Vorgabewert pflichtig",
+        "pl": "kolumna {{table}}.{{column}} pojawila sie po kopii i jest wymagana bez wartosci domyslnej"
+    },
+    "restore_rep_column_added": {
+        "en": "column {{table}}.{{column}} appeared after the backup - will be filled with its default",
+        "ru": "колонка {{table}}.{{column}} появилась после снятия копии — заполнится умолчанием",
+        "de": "Spalte {{table}}.{{column}} kam nach der Sicherung hinzu - wird mit Vorgabewert gefullt",
+        "pl": "kolumna {{table}}.{{column}} pojawila sie po kopii - zostanie wypelniona domyslnie"
+    },
+    "restore_rep_table_added_since_dump": {
+        "en": "table {{table}} appeared after the backup - its rows of this organization will be deleted",
+        "ru": "таблица {{table}} появилась после снятия копии — её строки этой организации будут удалены",
+        "de": "Tabelle {{table}} kam nach der Sicherung hinzu - ihre Zeilen dieser Organisation werden geloscht",
+        "pl": "tabela {{table}} pojawila sie po kopii - jej wiersze tej organizacji zostana usuniete"
+    },
+    "restore_rep_dangling": {
+        "en": "Dangling references to global reference data: {{count}}. Restore is blocked - the reference data has changed since the backup was taken.",
+        "ru": "Висячих ссылок на глобальные справочники: {{count}}. Восстановление заблокировано — справочники изменились после снятия копии.",
+        "de": "Hangende Verweise auf globale Stammdaten: {{count}}. Wiederherstellung blockiert - die Stammdaten haben sich seit der Sicherung geandert.",
+        "pl": "Wiszace odwolania do slownikow globalnych: {{count}}. Przywracanie zablokowane - slowniki zmienily sie po utworzeniu kopii."
+    },
+    "restore_rep_cycle": {
+        "en": "Reference cycle between tables ({{list}}), and foreign key checks cannot be disabled on this installation. Restore is not possible.",
+        "ru": "Цикл ссылок между таблицами ({{list}}), а отключить проверку внешних ключей на этой инсталляции нельзя. Восстановление невозможно.",
+        "de": "Verweiszyklus zwischen Tabellen ({{list}}), und Fremdschlusselprufungen lassen sich hier nicht abschalten. Wiederherstellung nicht moglich.",
+        "pl": "Cykl odwolan miedzy tabelami ({{list}}), a wylaczenie kluczy obcych na tej instalacji jest niemozliwe. Przywracanie niemozliwe."
+    },
+    "restore_rep_plan_head": {
+        "en": "Rows per table (- delete / + insert):",
+        "ru": "Строки по таблицам (− удалить / + вставить):",
+        "de": "Zeilen je Tabelle (- loschen / + einfugen):",
+        "pl": "Wiersze wg tabel (- usunac / + wstawic):"
+    },
+    "restore_rep_totals": {
+        "en": "Total: {{del}} rows will be deleted, {{ins}} inserted.",
+        "ru": "Итого: будет удалено строк {{del}}, вставлено {{ins}}.",
+        "de": "Gesamt: {{del}} Zeilen werden geloscht, {{ins}} eingefugt.",
+        "pl": "Razem: zostanie usunietych {{del}} wierszy, wstawionych {{ins}}."
+    },
+    "restore_rep_users": {
+        "en": "User accounts: {{create}} will be created, {{update}} updated (password hashes rolled back). Nothing is deleted.",
+        "ru": "Учётные записи: будет создано {{create}}, обновлено {{update}} (хэш пароля откатится). Ничего не удаляется.",
+        "de": "Benutzerkonten: {{create}} werden angelegt, {{update}} aktualisiert (Passwort-Hash wird zuruckgesetzt). Nichts wird geloscht.",
+        "pl": "Konta uzytkownikow: zostanie utworzonych {{create}}, zaktualizowanych {{update}} (hash hasla zostanie cofniety). Nic nie jest usuwane."
+    },
+    "restore_rep_fk_by_order": {
+        "en": "Foreign key checks stay on ({{reason}}) - write order is derived from references.",
+        "ru": "Проверка внешних ключей не отключается ({{reason}}) — порядок записи строится по ссылкам.",
+        "de": "Fremdschlusselprufung bleibt aktiv ({{reason}}) - Schreibreihenfolge folgt den Verweisen.",
+        "pl": "Kontrola kluczy obcych pozostaje wlaczona ({{reason}}) - kolejnosc zapisu wynika z odwolan."
+    },
+    "restore_err_org_required": {
+        "en": "Choose the organization to restore.",
+        "ru": "Выберите восстанавливаемую организацию.",
+        "de": "Wahlen Sie die wiederherzustellende Organisation.",
+        "pl": "Wybierz przywracana organizacje."
+    },
+    "restore_err_key_required": {
+        "en": "Paste the private key - the server does not store it.",
+        "ru": "Вставьте приватный ключ — на сервере его нет.",
+        "de": "Fugen Sie den privaten Schlussel ein - der Server speichert ihn nicht.",
+        "pl": "Wklej klucz prywatny - serwer go nie przechowuje."
+    },
+    "restore_err_file_missing": {
+        "en": "The backup file is not in the storage directory.",
+        "ru": "Файла копии нет в каталоге хранения.",
+        "de": "Die Sicherungsdatei fehlt im Ablageverzeichnis.",
+        "pl": "Brak pliku kopii w katalogu przechowywania."
+    },
+    "restore_err_header": {
+        "en": "Backup header unreadable: {{message}}",
+        "ru": "Заголовок копии нечитаем: {{message}}",
+        "de": "Sicherungskopf nicht lesbar: {{message}}",
+        "pl": "Naglowek kopii nieczytelny: {{message}}"
+    },
+    "restore_err_no_header": {
+        "en": "The file has no dump header - it is not a backup of this system.",
+        "ru": "В файле нет заголовка дампа — это не копия этой системы.",
+        "de": "Die Datei hat keinen Dump-Kopf - es ist keine Sicherung dieses Systems.",
+        "pl": "Plik nie ma naglowka zrzutu - to nie jest kopia tego systemu."
+    },
+    "restore_err_analyze": {
+        "en": "Analysis failed: {{message}}",
+        "ru": "Анализ не выполнен: {{message}}",
+        "de": "Analyse fehlgeschlagen: {{message}}",
+        "pl": "Analiza nie powiodla sie: {{message}}"
+    },
+    "restore_err_too_large": {
+        "en": "The backup holds more than {{limit}} rows for this organization - partial restore does not handle that. Use full restore.",
+        "ru": "В копии больше {{limit}} строк этой организации — частичное восстановление столько не тянет. Нужно полное восстановление.",
+        "de": "Die Sicherung enthalt mehr als {{limit}} Zeilen dieser Organisation - die Teilwiederherstellung schafft das nicht. Vollstandige Wiederherstellung nutzen.",
+        "pl": "Kopia zawiera ponad {{limit}} wierszy tej organizacji - przywracanie czesciowe tego nie obsluzy. Uzyj pelnego przywracania."
+    },
+    "restore_err_confirm_mismatch": {
+        "en": "The typed name does not match. Type exactly: {{name}}",
+        "ru": "Введённое наименование не совпадает. Введите в точности: {{name}}",
+        "de": "Der eingegebene Name stimmt nicht. Genau eingeben: {{name}}",
+        "pl": "Wpisana nazwa nie zgadza sie. Wpisz dokladnie: {{name}}"
+    },
+    "restore_err_no_backup_task": {
+        "en": "The backup task does not exist yet - open the backup form once so it is created.",
+        "ru": "Задания резервного копирования ещё нет — откройте форму бэкапа, чтобы оно создалось.",
+        "de": "Die Sicherungsaufgabe existiert noch nicht - offnen Sie einmal das Sicherungsformular.",
+        "pl": "Zadanie kopii zapasowej jeszcze nie istnieje - otworz raz formularz kopii."
+    },
+    "restore_err_safety_failed": {
+        "en": "The safety backup did not succeed ({{status}}): {{message}}. Restore was not started.",
+        "ru": "Страховочная копия не удалась ({{status}}): {{message}}. Восстановление не запускалось.",
+        "de": "Die Sicherheitskopie ist fehlgeschlagen ({{status}}): {{message}}. Wiederherstellung wurde nicht gestartet.",
+        "pl": "Kopia bezpieczenstwa nie powiodla sie ({{status}}): {{message}}. Przywracanie nie zostalo uruchomione."
+    },
+    "restore_err_blocked": {
+        "en": "Restore is blocked by the checks - see the report. Nothing was changed.",
+        "ru": "Восстановление заблокировано проверками — см. отчёт. Ничего не изменено.",
+        "de": "Wiederherstellung durch die Prufungen blockiert - siehe Bericht. Nichts wurde geandert.",
+        "pl": "Przywracanie zablokowane przez kontrole - patrz raport. Nic nie zostalo zmienione."
+    },
+    "restore_err_failed": {
+        "en": "Restore failed and was rolled back: {{message}}. The organization data is unchanged.",
+        "ru": "Восстановление не выполнено и откачено: {{message}}. Данные организации не изменились.",
+        "de": "Wiederherstellung fehlgeschlagen und zuruckgerollt: {{message}}. Die Daten der Organisation sind unverandert.",
+        "pl": "Przywracanie nie powiodlo sie i zostalo wycofane: {{message}}. Dane organizacji bez zmian."
+    },
+    "sched_err_wait_timeout": {
+        "en": "Timed out waiting for the task run to finish.",
+        "ru": "Истекло время ожидания завершения запуска задачи.",
+        "de": "Zeituberschreitung beim Warten auf das Ende des Aufgabenlaufs.",
+        "pl": "Przekroczono czas oczekiwania na zakonczenie uruchomienia zadania."
+    },
+    "restore_rep_timestamps_missing": {
+        "en": "table {{table}}: the backup has no created/updated timestamps - restored rows will get the current time",
+        "ru": "таблица {{table}}: в копии нет служебных отметок времени — восстановленные строки получат текущее время",
+        "de": "Tabelle {{table}}: die Sicherung enthalt keine Zeitstempel - wiederhergestellte Zeilen erhalten die aktuelle Zeit",
+        "pl": "tabela {{table}}: kopia nie zawiera znacznikow czasu - przywrocone wiersze otrzymaja biezacy czas"
+    },
+    "restore_err_bad_key": {
+        "en": "This private key does not match the backup - it was encrypted with a different key pair.",
+        "ru": "Этот приватный ключ не подходит к копии — она зашифрована другой парой ключей.",
+        "de": "Dieser private Schlussel passt nicht zur Sicherung - sie wurde mit einem anderen Schlusselpaar verschlusselt.",
+        "pl": "Ten klucz prywatny nie pasuje do kopii - zostala zaszyfrowana inna para kluczy."
+    },
+    "backup_run_group": {
+        "en": "Operation progress",
+        "ru": "Ход операции",
+        "de": "Ablauf der Operation",
+        "pl": "Przebieg operacji"
+    },
+    "backup_retention_warn_msg": {
+        "en": "The copy limit is already used up. Creating a new one will delete:",
+        "ru": "Лимит копий уже занят. Создание новой удалит:",
+        "de": "Das Limit an Kopien ist erreicht. Eine neue Sicherung loscht:",
+        "pl": "Limit kopii jest juz wykorzystany. Utworzenie nowej usunie:"
+    },
+    "backup_status_restore_scope": {
+        "en": "Restore: one organization from a copy. Restoring the whole database is not implemented yet.",
+        "ru": "Восстановление: одна организация из копии. Восстановление всей базы пока не реализовано.",
+        "de": "Wiederherstellung: eine Organisation aus einer Kopie. Die gesamte Datenbank ist noch nicht moglich.",
+        "pl": "Przywracanie: jedna organizacja z kopii. Przywracanie calej bazy nie jest jeszcze zaimplementowane."
+    },
+    "backup_title_field": {
+        "en": "Name",
+        "ru": "Наименование",
+        "de": "Bezeichnung",
+        "pl": "Nazwa"
+    },
+    "backup_recovery_group": {
+        "en": "Recovery password",
+        "ru": "Аварийный пароль восстановления",
+        "de": "Wiederherstellungskennwort",
+        "pl": "Hasło odzyskiwania"
+    },
+    "backup_recovery_hint": {
+        "en": "Needed to reach the server when the database is unavailable and the ordinary sign-in does not work. Stored as a hash in dbSettings.json, never in the database — otherwise restoring an old copy would silently roll it back.",
+        "ru": "Нужен, чтобы попасть на сервер, когда база недоступна и обычный вход не работает. Хранится хэшем в dbSettings.json, а не в базе — иначе восстановление старой копии молча откатило бы его.",
+        "de": "Nötig, um den Server zu erreichen, wenn die Datenbank nicht verfügbar ist. Als Hash in dbSettings.json gespeichert, nicht in der Datenbank.",
+        "pl": "Potrzebne, aby dostać się do serwera, gdy baza jest niedostępna. Przechowywane jako hasz w dbSettings.json, nie w bazie."
+    },
+    "backup_recovery_state_field": {
+        "en": "State",
+        "ru": "Состояние",
+        "de": "Zustand",
+        "pl": "Stan"
+    },
+    "backup_recovery_password_field": {
+        "en": "New password",
+        "ru": "Новый пароль",
+        "de": "Neues Kennwort",
+        "pl": "Nowe hasło"
+    },
+    "backup_recovery_set_btn": {
+        "en": "Save password",
+        "ru": "Сохранить пароль",
+        "de": "Kennwort speichern",
+        "pl": "Zapisz hasło"
+    },
+    "backup_recovery_state_set": {
+        "en": "Set",
+        "ru": "Задан",
+        "de": "Gesetzt",
+        "pl": "Ustawione"
+    },
+    "backup_recovery_state_unset": {
+        "en": "Not set",
+        "ru": "Не задан",
+        "de": "Nicht gesetzt",
+        "pl": "Nieustawione"
+    },
+    "backup_recovery_saved": {
+        "en": "The recovery password is saved as a hash. It cannot be shown again — only checked or replaced.",
+        "ru": "Аварийный пароль сохранён хэшем. Показать его снова нельзя — только проверить или заменить.",
+        "de": "Das Wiederherstellungskennwort wurde als Hash gespeichert und kann nicht erneut angezeigt werden.",
+        "pl": "Hasło odzyskiwania zapisano jako hasz. Nie można go ponownie pokazać."
+    },
+    "backup_recovery_write_failed": {
+        "en": "Could not save the password: {{message}}",
+        "ru": "Не удалось сохранить пароль: {{message}}",
+        "de": "Kennwort konnte nicht gespeichert werden: {{message}}",
+        "pl": "Nie udało się zapisać hasła: {{message}}"
+    },
+    "recovery_err_too_short": {
+        "en": "The recovery password must be at least 8 characters long",
+        "ru": "Аварийный пароль должен быть не короче 8 символов",
+        "de": "Das Wiederherstellungskennwort muss mindestens 8 Zeichen lang sein",
+        "pl": "Hasło odzyskiwania musi mieć co najmniej 8 znaków"
+    },
+    "dbver_app_caption": {
+        "en": "Database structure versions",
+        "ru": "Версии структуры базы",
+        "de": "Datenbankstruktur-Versionen",
+        "pl": "Wersje struktury bazy"
+    },
+    "dbver_record_caption": {
+        "en": "Structure version",
+        "ru": "Версия структуры",
+        "de": "Strukturversion",
+        "pl": "Wersja struktury"
+    },
+    "dbver_organization_field": {
+        "en": "Organization",
+        "ru": "Организация",
+        "de": "Organisation",
+        "pl": "Organizacja"
+    },
+    "dbver_config_hash_field": {
+        "en": "Configuration hash",
+        "ru": "Хэш конфигурации",
+        "de": "Konfigurations-Hash",
+        "pl": "Hasz konfiguracji"
+    },
+    "dbver_actual_hash_field": {
+        "en": "Actual structure hash",
+        "ru": "Хэш фактической структуры",
+        "de": "Hash der tatsachlichen Struktur",
+        "pl": "Hasz rzeczywistej struktury"
+    },
+    "dbver_dialect_field": {
+        "en": "DBMS",
+        "ru": "СУБД",
+        "de": "DBMS",
+        "pl": "SZBD"
+    },
+    "dbver_app_version_field": {
+        "en": "Application version",
+        "ru": "Версия приложения",
+        "de": "Anwendungsversion",
+        "pl": "Wersja aplikacji"
+    },
+    "dbver_framework_version_field": {
+        "en": "Framework version",
+        "ru": "Версия фреймворка",
+        "de": "Framework-Version",
+        "pl": "Wersja frameworku"
+    },
+    "dbver_origin_field": {
+        "en": "Source",
+        "ru": "Источник",
+        "de": "Herkunft",
+        "pl": "Zrodlo"
+    },
+    "dbver_origin_migration": {
+        "en": "Migration",
+        "ru": "Миграция",
+        "de": "Migration",
+        "pl": "Migracja"
+    },
+    "dbver_origin_restore": {
+        "en": "Restore",
+        "ru": "Восстановление",
+        "de": "Wiederherstellung",
+        "pl": "Przywracanie"
+    },
+    "dbver_snapshot_field": {
+        "en": "Structure snapshot",
+        "ru": "Снимок структуры",
+        "de": "Strukturabbild",
+        "pl": "Migawka struktury"
+    },
+    "restore_full_app_caption": {
+        "en": "Restore from backup",
+        "ru": "Восстановление из резервной копии",
+        "de": "Wiederherstellung aus Sicherung",
+        "pl": "Przywracanie z kopii zapasowej"
+    },
+    "restore_full_source_group": {
+        "en": "Source copy",
+        "ru": "Копия-источник",
+        "de": "Quellkopie",
+        "pl": "Kopia źródłowa"
+    },
+    "restore_full_file_field": {
+        "en": "Copy from the server",
+        "ru": "Копия с сервера",
+        "de": "Kopie vom Server",
+        "pl": "Kopia z serwera"
+    },
+    "restore_full_uploaded_field": {
+        "en": "Uploaded file",
+        "ru": "Загруженный файл",
+        "de": "Hochgeladene Datei",
+        "pl": "Wgrany plik"
+    },
+    "restore_full_mode_field": {
+        "en": "Restore mode",
+        "ru": "Режим восстановления",
+        "de": "Wiederherstellungsmodus",
+        "pl": "Tryb przywracania"
+    },
+    "restore_full_report_group": {
+        "en": "What is going to happen",
+        "ru": "Что произойдёт",
+        "de": "Was geschehen wird",
+        "pl": "Co się wydarzy"
+    },
+    "restore_full_password_group": {
+        "en": "Recovery password (mandatory step)",
+        "ru": "Аварийный пароль (обязательный шаг)",
+        "de": "Wiederherstellungskennwort (Pflichtschritt)",
+        "pl": "Hasło odzyskiwania (krok obowiązkowy)"
+    },
+    "restore_full_password_warning": {
+        "en": "After the switch the ordinary sign-in is impossible: the sessions table goes away with the old schema, including your own session. Leave this screen with the password in hand.",
+        "ru": "После переключения обычный вход невозможен: таблица сессий уходит вместе со старой схемой, включая вашу собственную сессию. Уйдите с этого экрана с паролем на руках.",
+        "de": "Nach dem Umschalten ist die normale Anmeldung unmöglich: Die Sitzungstabelle verschwindet mit dem alten Schema, auch Ihre eigene Sitzung. Verlassen Sie diesen Bildschirm mit dem Kennwort in der Hand.",
+        "pl": "Po przełączeniu zwykłe logowanie jest niemożliwe: tabela sesji znika wraz ze starym schematem, łącznie z Twoją sesją. Opuść ten ekran z hasłem w ręku."
+    },
+    "restore_full_pwd_state_field": {
+        "en": "State",
+        "ru": "Состояние",
+        "de": "Zustand",
+        "pl": "Stan"
+    },
+    "restore_full_pwd_field": {
+        "en": "Password",
+        "ru": "Пароль",
+        "de": "Kennwort",
+        "pl": "Hasło"
+    },
+    "restore_full_pwd_verify_btn": {
+        "en": "Check password",
+        "ru": "Проверить пароль",
+        "de": "Kennwort prüfen",
+        "pl": "Sprawdź hasło"
+    },
+    "restore_full_pwd_generate_btn": {
+        "en": "Generate a new one and show it",
+        "ru": "Сгенерировать новый и показать",
+        "de": "Neues erzeugen und anzeigen",
+        "pl": "Wygeneruj nowe i pokaż"
+    },
+    "restore_full_pwd_set": {
+        "en": "A recovery password is set. It cannot be shown — only checked or replaced.",
+        "ru": "Аварийный пароль задан. Показать его нельзя — только проверить или заменить.",
+        "de": "Ein Wiederherstellungskennwort ist gesetzt. Es kann nicht angezeigt, nur geprüft oder ersetzt werden.",
+        "pl": "Hasło odzyskiwania jest ustawione. Nie można go pokazać — tylko sprawdzić lub zastąpić."
+    },
+    "restore_full_pwd_unset": {
+        "en": "No recovery password is set. Generate one — otherwise you will not be able to reach the server after a failure.",
+        "ru": "Аварийный пароль не задан. Сгенерируйте его — иначе после сбоя вы не попадёте на сервер.",
+        "de": "Kein Wiederherstellungskennwort gesetzt. Erzeugen Sie eines — sonst erreichen Sie den Server nach einem Fehler nicht.",
+        "pl": "Hasło odzyskiwania nie jest ustawione. Wygeneruj je — inaczej po awarii nie dostaniesz się do serwera."
+    },
+    "restore_full_pwd_verified": {
+        "en": "Password confirmed",
+        "ru": "Пароль подтверждён",
+        "de": "Kennwort bestätigt",
+        "pl": "Hasło potwierdzone"
+    },
+    "restore_full_pwd_generated": {
+        "en": "A new password has been generated and is shown once",
+        "ru": "Новый пароль сгенерирован и показан один раз",
+        "de": "Ein neues Kennwort wurde erzeugt und wird einmal angezeigt",
+        "pl": "Nowe hasło zostało wygenerowane i pokazane raz"
+    },
+    "restore_full_pwd_saved_confirm": {
+        "en": "Write this password down. It will never be shown again. Confirm that you have saved it.",
+        "ru": "Запишите этот пароль. Повторно он не будет показан никогда. Подтвердите, что сохранили его.",
+        "de": "Notieren Sie dieses Kennwort. Es wird nie wieder angezeigt. Bestätigen Sie, dass Sie es gespeichert haben.",
+        "pl": "Zapisz to hasło. Nigdy nie zostanie pokazane ponownie. Potwierdź, że je zapisałeś."
+    },
+    "restore_full_pwd_not_saved": {
+        "en": "Restore stays blocked until the password step is completed.",
+        "ru": "Восстановление остаётся заблокированным, пока шаг с паролем не выполнен.",
+        "de": "Die Wiederherstellung bleibt gesperrt, bis der Kennwortschritt abgeschlossen ist.",
+        "pl": "Przywracanie pozostaje zablokowane, dopóki krok z hasłem nie zostanie ukończony."
+    },
+    "restore_full_pwd_write_failed": {
+        "en": "Could not save the password to dbSettings.json: {{message}}. The restore will not start.",
+        "ru": "Не удалось сохранить пароль в dbSettings.json: {{message}}. Восстановление не начнётся.",
+        "de": "Kennwort konnte nicht in dbSettings.json gespeichert werden: {{message}}. Die Wiederherstellung startet nicht.",
+        "pl": "Nie udało się zapisać hasła w dbSettings.json: {{message}}. Przywracanie się nie rozpocznie."
+    },
+    "restore_full_upload_btn": {
+        "en": "Upload a file from disk",
+        "ru": "Загрузить файл с диска",
+        "de": "Datei von der Festplatte laden",
+        "pl": "Wgraj plik z dysku"
+    },
+    "restore_full_inspect_btn": {
+        "en": "Read the copy header",
+        "ru": "Прочитать заголовок копии",
+        "de": "Kopf der Kopie lesen",
+        "pl": "Odczytaj nagłówek kopii"
+    },
+    "restore_full_run_btn": {
+        "en": "Restore the whole database",
+        "ru": "Восстановить всю базу",
+        "de": "Gesamte Datenbank wiederherstellen",
+        "pl": "Przywróć całą bazę"
+    },
+    "restore_full_uploading": {
+        "en": "Uploading the file…",
+        "ru": "Загрузка файла…",
+        "de": "Datei wird hochgeladen…",
+        "pl": "Wgrywanie pliku…"
+    },
+    "restore_full_hint_pick_file": {
+        "en": "Choose a copy from the server or upload one from disk, then read its header.",
+        "ru": "Выберите копию с сервера либо загрузите её с диска, затем прочитайте заголовок.",
+        "de": "Wählen Sie eine Kopie vom Server oder laden Sie eine von der Festplatte, dann lesen Sie den Kopf.",
+        "pl": "Wybierz kopię z serwera lub wgraj ją z dysku, następnie odczytaj nagłówek."
+    },
+    "restore_full_hint_inspect_first": {
+        "en": "Read the copy header first — the restore button stays disabled until then.",
+        "ru": "Сначала прочитайте заголовок копии — до этого кнопка восстановления выключена.",
+        "de": "Lesen Sie zuerst den Kopf der Kopie — bis dahin bleibt die Schaltfläche deaktiviert.",
+        "pl": "Najpierw odczytaj nagłówek kopii — do tego czasu przycisk pozostaje wyłączony."
+    },
+    "restore_full_mode_shadow": {
+        "en": "Shadow switch: the new database is built alongside and swapped in atomically. The live database is not destroyed; a failure is undone by renaming back.",
+        "ru": "Теневое переключение: новая база строится рядом и подменяется атомарно. Живая база не разрушается, неудача откатывается обратным переименованием.",
+        "de": "Schattenumschaltung: Die neue Datenbank wird daneben aufgebaut und atomar eingewechselt. Die Live-Datenbank wird nicht zerstört.",
+        "pl": "Przełączenie cieniowe: nowa baza budowana jest obok i podmieniana atomowo. Żywa baza nie jest niszczona."
+    },
+    "restore_full_mode_destructive": {
+        "en": "DESTRUCTIVE path: a shadow space cannot be created ({{reason}}). The current database is cleared and refilled — this is irreversible, and a safety copy is taken by force.",
+        "ru": "РАЗРУШАЮЩИЙ путь: теневое пространство создать нельзя ({{reason}}). Текущая база очищается и заполняется заново — это необратимо, safety-выгрузка делается принудительно.",
+        "de": "ZERSTÖRENDER Weg: Ein Schattenbereich kann nicht angelegt werden ({{reason}}). Die aktuelle Datenbank wird geleert und neu befüllt — unumkehrbar.",
+        "pl": "ŚCIEŻKA NISZCZĄCA: nie można utworzyć przestrzeni cieniowej ({{reason}}). Bieżąca baza zostanie wyczyszczona i wypełniona od nowa — nieodwracalnie."
+    },
+    "restore_full_rep_file": {
+        "en": "File: {{name}}",
+        "ru": "Файл: {{name}}",
+        "de": "Datei: {{name}}",
+        "pl": "Plik: {{name}}"
+    },
+    "restore_full_rep_created": {
+        "en": "Created: {{value}}",
+        "ru": "Снята: {{value}}",
+        "de": "Erstellt: {{value}}",
+        "pl": "Utworzono: {{value}}"
+    },
+    "restore_full_rep_db": {
+        "en": "Database in the copy: {{value}}",
+        "ru": "База в копии: {{value}}",
+        "de": "Datenbank in der Kopie: {{value}}",
+        "pl": "Baza w kopii: {{value}}"
+    },
+    "restore_full_rep_scope": {
+        "en": "Scope: {{value}}",
+        "ru": "Область: {{value}}",
+        "de": "Umfang: {{value}}",
+        "pl": "Zakres: {{value}}"
+    },
+    "restore_full_rep_dialect": {
+        "en": "DBMS: {{from}} → {{to}}",
+        "ru": "СУБД: {{from}} → {{to}}",
+        "de": "DBMS: {{from}} → {{to}}",
+        "pl": "SZBD: {{from}} → {{to}}"
+    },
+    "restore_full_rep_version": {
+        "en": "Structure version: {{value}}",
+        "ru": "Версия структуры: {{value}}",
+        "de": "Strukturversion: {{value}}",
+        "pl": "Wersja struktury: {{value}}"
+    },
+    "restore_full_rep_confighash": {
+        "en": "Configuration hash: {{value}}…",
+        "ru": "Хэш конфигурации: {{value}}…",
+        "de": "Konfigurations-Hash: {{value}}…",
+        "pl": "Hasz konfiguracji: {{value}}…"
+    },
+    "restore_full_rep_actualhash": {
+        "en": "Structure fingerprint: {{value}}… (the rebuilt schema will be checked against it)",
+        "ru": "Отпечаток структуры: {{value}}… (воссозданная схема будет сверена с ним)",
+        "de": "Struktur-Fingerabdruck: {{value}}… (das neue Schema wird damit abgeglichen)",
+        "pl": "Odcisk struktury: {{value}}… (odtworzony schemat zostanie z nim porównany)"
+    },
+    "restore_full_rep_no_actualhash": {
+        "en": "The copy carries no structure fingerprint (taken before the version log existed) — the rebuilt schema cannot be verified against the source.",
+        "ru": "Копия не несёт отпечатка структуры (снята до появления журнала версий) — сверить воссозданную схему с источником нечем.",
+        "de": "Die Kopie enthält keinen Struktur-Fingerabdruck — das neue Schema kann nicht mit der Quelle verglichen werden.",
+        "pl": "Kopia nie zawiera odcisku struktury — nie ma z czym porównać odtworzonego schematu."
+    },
+    "restore_full_final_confirm": {
+        "en": "Start the full restore? The server will stop serving requests, all users will be logged out, and the database will be replaced with the contents of the copy.",
+        "ru": "Запустить полное восстановление? Сервер перестанет обслуживать запросы, все пользователи будут разлогинены, а база заменена содержимым копии.",
+        "de": "Vollständige Wiederherstellung starten? Der Server stellt den Betrieb ein, alle Benutzer werden abgemeldet, die Datenbank wird durch die Kopie ersetzt.",
+        "pl": "Uruchomić pełne przywracanie? Serwer przestanie obsługiwać żądania, wszyscy użytkownicy zostaną wylogowani, a baza zastąpiona zawartością kopii."
+    },
+    "restore_full_done_msg": {
+        "en": "Restore completed: {{rows}} rows in {{tables}} tables, {{sec}} s. The previous schema is kept as {{rollback}}.",
+        "ru": "Восстановление завершено: {{rows}} строк в {{tables}} таблицах, {{sec}} с. Прежняя схема сохранена как {{rollback}}.",
+        "de": "Wiederherstellung abgeschlossen: {{rows}} Zeilen in {{tables}} Tabellen, {{sec}} s. Das vorherige Schema bleibt als {{rollback}}.",
+        "pl": "Przywracanie zakończone: {{rows}} wierszy w {{tables}} tabelach, {{sec}} s. Poprzedni schemat zachowano jako {{rollback}}."
+    },
+    "restore_full_err_password_step": {
+        "en": "The recovery password step is not completed. Check the password you remember or generate a new one.",
+        "ru": "Шаг с аварийным паролем не выполнен. Проверьте пароль, который помните, либо сгенерируйте новый.",
+        "de": "Der Schritt mit dem Wiederherstellungskennwort ist nicht abgeschlossen.",
+        "pl": "Krok z hasłem odzyskiwania nie został ukończony."
+    },
+    "restore_full_err_already_maintenance": {
+        "en": "The server is already in maintenance mode. Open the maintenance page.",
+        "ru": "Сервер уже в режиме обслуживания. Откройте страницу обслуживания.",
+        "de": "Der Server ist bereits im Wartungsmodus.",
+        "pl": "Serwer jest już w trybie konserwacji."
+    },
+    "restore_err_scope_not_full": {
+        "en": "This copy holds one organization only. The whole database cannot be restored from it — use the organization restore.",
+        "ru": "Эта копия содержит только одну организацию. Восстановить из неё всю базу нельзя — используйте восстановление организации.",
+        "de": "Diese Kopie enthält nur eine Organisation. Die gesamte Datenbank kann daraus nicht wiederhergestellt werden.",
+        "pl": "Ta kopia zawiera tylko jedną organizację. Nie można z niej przywrócić całej bazy."
+    },
+    "restore_err_no_models": {
+        "en": "The copy has no structure snapshot — the schema cannot be rebuilt from it.",
+        "ru": "В копии нет снимка структуры — воссоздать по ней схему невозможно.",
+        "de": "Die Kopie enthält kein Strukturabbild — das Schema kann nicht daraus erstellt werden.",
+        "pl": "Kopia nie zawiera migawki struktury — nie da się z niej odtworzyć schematu."
+    },
+    "restore_err_config_hash": {
+        "en": "The structure snapshot does not match the header ({{expected}}… vs {{actual}}…) — the file is damaged.",
+        "ru": "Снимок структуры не соответствует заголовку ({{expected}}… против {{actual}}…) — файл повреждён.",
+        "de": "Das Strukturabbild passt nicht zum Kopf ({{expected}}… vs. {{actual}}…) — die Datei ist beschädigt.",
+        "pl": "Migawka struktury nie pasuje do nagłówka ({{expected}}… vs {{actual}}…) — plik jest uszkodzony."
+    },
+    "restore_err_actual_hash": {
+        "en": "The rebuilt structure differs from the one in the copy ({{expected}}… vs {{actual}}…). Data would land in the wrong place — stopped before the switch, the live database is intact.",
+        "ru": "Воссозданная структура отличается от той, что в копии ({{expected}}… против {{actual}}…). Данные легли бы не туда — остановлено до переключения, живая база цела.",
+        "de": "Die neu erstellte Struktur weicht von der in der Kopie ab ({{expected}}… vs. {{actual}}…). Abbruch vor dem Umschalten, die Live-Datenbank ist unversehrt.",
+        "pl": "Odtworzona struktura różni się od tej w kopii ({{expected}}… vs {{actual}}…). Zatrzymano przed przełączeniem, żywa baza jest nienaruszona."
+    },
+    "restore_err_schema_build": {
+        "en": "The structure could not be created from the snapshot: {{list}}. Stopped before the switch.",
+        "ru": "Не удалось создать структуру по снимку: {{list}}. Остановлено до переключения.",
+        "de": "Die Struktur konnte nicht aus dem Abbild erstellt werden: {{list}}. Abbruch vor dem Umschalten.",
+        "pl": "Nie udało się utworzyć struktury z migawki: {{list}}. Zatrzymano przed przełączeniem."
+    },
+    "restore_err_foreign_keys": {
+        "en": "Referential integrity check failed: {{list}}. Stopped before the switch.",
+        "ru": "Проверка ссылочной целостности не прошла: {{list}}. Остановлено до переключения.",
+        "de": "Prüfung der referenziellen Integrität fehlgeschlagen: {{list}}. Abbruch vor dem Umschalten.",
+        "pl": "Kontrola integralności referencyjnej nie powiodła się: {{list}}. Zatrzymano przed przełączeniem."
+    },
+    "restore_err_row_count": {
+        "en": "The number of loaded rows differs from the copy: {{list}}. Stopped before the switch.",
+        "ru": "Количество загруженных строк расходится с копией: {{list}}. Остановлено до переключения.",
+        "de": "Die Anzahl geladener Zeilen weicht von der Kopie ab: {{list}}. Abbruch vor dem Umschalten.",
+        "pl": "Liczba wczytanych wierszy różni się od kopii: {{list}}. Zatrzymano przed przełączeniem."
+    },
+    "restore_err_worker_died": {
+        "en": "The restore process died ({{message}}). The server stays in maintenance mode until the state is established.",
+        "ru": "Процесс восстановления умер ({{message}}). Сервер остаётся в режиме обслуживания, пока состояние не выяснено.",
+        "de": "Der Wiederherstellungsprozess ist gestorben ({{message}}). Der Server bleibt im Wartungsmodus.",
+        "pl": "Proces przywracania zginął ({{message}}). Serwer pozostaje w trybie konserwacji."
+    },
+    "restore_err_timeout": {
+        "en": "The restore exceeded the time limit and was stopped.",
+        "ru": "Восстановление превысило предельное время и было остановлено.",
+        "de": "Die Wiederherstellung hat das Zeitlimit überschritten und wurde gestoppt.",
+        "pl": "Przywracanie przekroczyło limit czasu i zostało zatrzymane."
+    },
+    "restore_err_migration": {
+        "en": "The data was restored and the switch happened, but bringing the structure to the current version failed: {{message}}. The server stays in maintenance mode; a rollback is available there.",
+        "ru": "Данные восстановлены и переключение состоялось, но приведение структуры к текущей версии не удалось: {{message}}. Сервер остаётся в обслуживании, откат доступен там же.",
+        "de": "Die Daten wurden wiederhergestellt und umgeschaltet, aber die Migration schlug fehl: {{message}}. Der Server bleibt im Wartungsmodus.",
+        "pl": "Dane przywrócono i przełączono, ale migracja struktury nie powiodła się: {{message}}. Serwer pozostaje w trybie konserwacji."
+    },
+    "restore_err_upload_too_large": {
+        "en": "The uploaded file is too large.",
+        "ru": "Загружаемый файл слишком велик.",
+        "de": "Die hochgeladene Datei ist zu groß.",
+        "pl": "Wgrywany plik jest za duży."
+    },
+    "restore_full_err_failed": {
+        "en": "Full restore failed: {{message}}. It stopped before the switch — the live database is unchanged.",
+        "ru": "Полное восстановление не выполнено: {{message}}. Остановлено до переключения — живая база не изменена.",
+        "de": "Vollständige Wiederherstellung fehlgeschlagen: {{message}}. Abbruch vor dem Umschalten — die Live-Datenbank ist unverändert.",
+        "pl": "Pełne przywracanie nie powiodło się: {{message}}. Zatrzymano przed przełączeniem — żywa baza jest niezmieniona."
+    },
+    "restore_full_err_failed_switched": {
+        "en": "Full restore failed AFTER the switch: {{message}}. The server stays in maintenance mode; the state of the database and the rollback are on the maintenance page.",
+        "ru": "Полное восстановление не выполнено ПОСЛЕ переключения: {{message}}. Сервер остаётся в обслуживании; состояние базы и откат — на странице обслуживания.",
+        "de": "Vollständige Wiederherstellung nach dem Umschalten fehlgeschlagen: {{message}}. Der Server bleibt im Wartungsmodus; Zustand und Rollback auf der Wartungsseite.",
+        "pl": "Pełne przywracanie nie powiodło się PO przełączeniu: {{message}}. Serwer pozostaje w trybie konserwacji; stan i wycofanie — na stronie konserwacji."
+    },
+    "restore_err_key_is_public": {
+        "en": "This is the PUBLIC key. The restore needs the PRIVATE one — the file handed out once when the key pair was generated (backup-private-key.pem). The public key stays on the server and only encrypts; the private key is never stored here by design.",
+        "ru": "Это ПУБЛИЧНЫЙ ключ. Для восстановления нужен ПРИВАТНЫЙ — тот файл, что выдавался один раз при генерации пары (backup-private-key.pem). Публичный ключ остаётся на сервере и только шифрует; приватного здесь нет по построению.",
+        "de": "Das ist der ÖFFENTLICHE Schlüssel. Für die Wiederherstellung wird der PRIVATE benötigt — die Datei, die bei der Schlüsselerzeugung einmalig ausgegeben wurde (backup-private-key.pem).",
+        "pl": "To klucz PUBLICZNY. Do przywracania potrzebny jest PRYWATNY — plik wydany jednorazowo przy generowaniu pary (backup-private-key.pem)."
+    },
+    "restore_err_key_unparsable": {
+        "en": "The private key could not be read: {{message}}. Paste the whole PEM file, including the BEGIN and END lines.",
+        "ru": "Приватный ключ не прочитан: {{message}}. Вставьте PEM-файл целиком, вместе со строками BEGIN и END.",
+        "de": "Der private Schlüssel konnte nicht gelesen werden: {{message}}. Fügen Sie die gesamte PEM-Datei ein, samt BEGIN- und END-Zeilen.",
+        "pl": "Nie udało się odczytać klucza prywatnego: {{message}}. Wklej cały plik PEM, razem z liniami BEGIN i END."
+    },
+    "restore_err_key_passphrase": {
+        "en": "The private key is protected by a passphrase, and it was not supplied.",
+        "ru": "Приватный ключ защищён паролем, а пароль не указан.",
+        "de": "Der private Schlüssel ist durch eine Passphrase geschützt, die nicht angegeben wurde.",
+        "pl": "Klucz prywatny jest chroniony hasłem, którego nie podano."
+    },
+    "restore_err_key_not_rsa": {
+        "en": "The key is of type {{type}}, but an RSA key is required.",
+        "ru": "Ключ типа {{type}}, а нужен RSA.",
+        "de": "Der Schlüssel ist vom Typ {{type}}, benötigt wird RSA.",
+        "pl": "Klucz jest typu {{type}}, a wymagany jest RSA."
+    },
+    "restore_err_key_other_pair": {
+        "en": "This key belongs to a different pair than the one that encrypted the copy (the copy expects {{expected}}…, the key gives {{actual}}…). Installations accumulate several pairs over time — take the one from the same period as the copy.",
+        "ru": "Ключ от другой пары, не той, которой зашифрована копия (копия ждёт {{expected}}…, ключ даёт {{actual}}…). Пар на инсталляции со временем оказывается несколько — возьмите ту, что относится ко времени этой копии.",
+        "de": "Der Schlüssel gehört zu einem anderen Paar als dem, mit dem die Kopie verschlüsselt wurde (erwartet {{expected}}…, geliefert {{actual}}…).",
+        "pl": "Klucz pochodzi z innej pary niż ta, którą zaszyfrowano kopię (oczekiwano {{expected}}…, otrzymano {{actual}}…)."
+    },
+    "restore_err_not_a_backup": {
+        "en": "This is not a backup copy of this system.",
+        "ru": "Это не резервная копия этой системы.",
+        "de": "Dies ist keine Sicherungskopie dieses Systems.",
+        "pl": "To nie jest kopia zapasowa tego systemu."
+    },
+    "restore_key_hint": {
+        "en": "The file handed out once when the key pair was generated (backup-private-key.pem). The server never stores it — that is the point of the scheme.",
+        "ru": "Тот файл, что выдавался один раз при генерации пары (backup-private-key.pem). На сервере он не хранится никогда — в этом и смысл схемы.",
+        "de": "Die Datei, die bei der Schlüsselerzeugung einmalig ausgegeben wurde (backup-private-key.pem). Der Server speichert sie nie.",
+        "pl": "Plik wydany jednorazowo przy generowaniu pary (backup-private-key.pem). Serwer nigdy go nie przechowuje."
+    },
+    "restore_key_pick_btn": {
+        "en": "Choose key file (.pem)",
+        "ru": "Выбрать файл ключа (.pem)",
+        "de": "Schlüsseldatei wählen (.pem)",
+        "pl": "Wybierz plik klucza (.pem)"
+    },
+    "restore_key_state_field": {
+        "en": "Key file",
+        "ru": "Файл ключа",
+        "de": "Schlüsseldatei",
+        "pl": "Plik klucza"
+    },
+    "restore_key_matches_copy": {
+        "en": "key matches this copy",
+        "ru": "ключ подходит к этой копии",
+        "de": "Schlüssel passt zu dieser Kopie",
+        "pl": "klucz pasuje do tej kopii"
+    },
+    "restore_key_ok_no_copy": {
+        "en": "private key read; choose a copy to check the pair",
+        "ru": "приватный ключ прочитан; выберите копию, чтобы сверить пару",
+        "de": "privater Schlüssel gelesen; Kopie wählen, um das Paar zu prüfen",
+        "pl": "klucz prywatny odczytany; wybierz kopię, aby sprawdzić parę"
+    },
+    "restore_full_rep_target_db": {
+        "en": "The copy will be deployed into database: {{name}}",
+        "ru": "Копия развернётся в базу: {{name}}",
+        "de": "Die Kopie wird in die Datenbank entfaltet: {{name}}",
+        "pl": "Kopia zostanie wdrożona do bazy: {{name}}"
+    },
+    "backup_create_plain_btn": {
+        "en": "Unencrypted copy → download",
+        "ru": "Незашифрованная копия → скачать",
+        "de": "Unverschlüsselte Kopie → herunterladen",
+        "pl": "Kopia niezaszyfrowana → pobierz"
+    },
+    "backup_create_plain_confirm": {
+        "en": "Create an UNENCRYPTED copy and download it right away?\n\nIt is not stored on the server at all — the bytes go straight into the download. The file contains the personal data of all clients in the clear: keep it where you keep the paper archive.\n\nScheduled backups are never made this way.",
+        "ru": "Создать НЕЗАШИФРОВАННУЮ копию и сразу скачать?\n\nНа сервере она не сохраняется вовсе — байты идут прямо в скачивание. Файл содержит персональные данные всех клиентов открытым текстом: храните его там же, где бумажный архив.\n\nПлановые копии так не делаются никогда.",
+        "de": "Eine UNVERSCHLÜSSELTE Kopie erstellen und sofort herunterladen?\n\nSie wird auf dem Server nicht gespeichert. Die Datei enthält die personenbezogenen Daten aller Kunden im Klartext.",
+        "pl": "Utworzyć kopię NIEZASZYFROWANĄ i od razu pobrać?\n\nNie jest zapisywana na serwerze. Plik zawiera dane osobowe wszystkich klientów otwartym tekstem."
+    },
+    "backup_err_plain_failed": {
+        "en": "Unencrypted export failed",
+        "ru": "Незашифрованная выгрузка не выполнена",
+        "de": "Unverschlüsselter Export fehlgeschlagen",
+        "pl": "Eksport niezaszyfrowany nie powiódł się"
+    },
+    "restore_full_rep_encrypted": {
+        "en": "The copy is ENCRYPTED — the private key file is required.",
+        "ru": "Копия ЗАШИФРОВАНА — нужен файл приватного ключа.",
+        "de": "Die Kopie ist VERSCHLÜSSELT — die private Schlüsseldatei wird benötigt.",
+        "pl": "Kopia jest ZASZYFROWANA — wymagany plik klucza prywatnego."
+    },
+    "restore_full_rep_plain": {
+        "en": "The copy is NOT encrypted — no key is needed (this is how the home archive stores copies).",
+        "ru": "Копия НЕ зашифрована — ключ не нужен (так копии хранит домашний архив).",
+        "de": "Die Kopie ist NICHT verschlüsselt — kein Schlüssel nötig.",
+        "pl": "Kopia NIE jest zaszyfrowana — klucz nie jest potrzebny."
+    },
+    "restore_full_ready_field": {
+        "en": "Readiness",
+        "ru": "Готовность",
+        "de": "Bereitschaft",
+        "pl": "Gotowość"
+    },
+    "restore_full_not_ready": {
+        "en": "Restore is not available yet — missing:",
+        "ru": "Восстановление пока недоступно — не хватает:",
+        "de": "Wiederherstellung noch nicht möglich — es fehlt:",
+        "pl": "Przywracanie jeszcze niedostępne — brakuje:"
+    },
+    "restore_full_ready": {
+        "en": "Everything is ready — the restore can be started.",
+        "ru": "Всё готово — восстановление можно запускать.",
+        "de": "Alles bereit — die Wiederherstellung kann gestartet werden.",
+        "pl": "Wszystko gotowe — można uruchomić przywracanie."
+    },
+    "restore_full_need_inspect": {
+        "en": "read the copy header",
+        "ru": "прочитать заголовок копии",
+        "de": "Kopf der Kopie lesen",
+        "pl": "odczytać nagłówek kopii"
+    },
+    "restore_full_need_key": {
+        "en": "choose the private key file",
+        "ru": "выбрать файл приватного ключа",
+        "de": "private Schlüsseldatei wählen",
+        "pl": "wybrać plik klucza prywatnego"
+    },
+    "restore_full_need_password": {
+        "en": "check or generate the recovery password",
+        "ru": "проверить или сгенерировать аварийный пароль",
+        "de": "Wiederherstellungskennwort prüfen oder erzeugen",
+        "pl": "sprawdzić lub wygenerować hasło odzyskiwania"
+    },
+    "restore_scope_group": {
+        "en": "What to restore",
+        "ru": "Что восстанавливать",
+        "de": "Was wiederherstellen",
+        "pl": "Co przywrócić"
+    },
+    "restore_scope_field": {
+        "en": "Scope",
+        "ru": "Область",
+        "de": "Umfang",
+        "pl": "Zakres"
+    },
+    "restore_scope_full": {
+        "en": "The whole database",
+        "ru": "Всю базу целиком",
+        "de": "Die gesamte Datenbank",
+        "pl": "Całą bazę danych"
+    },
+    "restore_scope_org": {
+        "en": "One organization only",
+        "ru": "Только одну организацию",
+        "de": "Nur eine Organisation",
+        "pl": "Tylko jedną organizację"
+    },
+    "restore_full_need_org": {
+        "en": "choose the organization",
+        "ru": "выбрать организацию",
+        "de": "Organisation wählen",
+        "pl": "wybrać organizację"
     }
 }

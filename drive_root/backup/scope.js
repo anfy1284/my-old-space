@@ -90,8 +90,10 @@ function accessConfig() {
     return _accessConfig;
 }
 
-/** Сбросить кэш конфигурации (для будущего события `onDatabaseReset`). */
+/** Сбросить кэш конфигурации доступа. */
 function resetCache() { _accessConfig = null; }
+
+require('../dbLifecycle').onDatabaseReset('backup/scope', resetCache);
 
 /**
  * Классифицировать таблицу по её полям.
@@ -225,6 +227,10 @@ function rowBelongsToOrg(row, filter, organizationId, hotelIds) {
     if (!filter) return true;
     const v = row[filter.field];
     if (v === null || v === undefined || v === '') return false;
+    // Сама организация: ключ — её собственный UID (см. classify, спецслучай ORG_TABLE).
+    // Без этой ветки строка организации не признаётся «своей», и восстановление
+    // удалило бы организацию, не вставив её обратно (поймано dry-run-отчётом).
+    if (filter.field === 'UID') return String(v) === String(organizationId);
     if (filter.field === ORG_FIELD) return String(v) === String(organizationId);
     if (filter.field === HOTEL_FIELD) return !!(hotelIds && hotelIds.has(String(v)));
     return false;

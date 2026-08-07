@@ -48,6 +48,8 @@ module.exports = {
     start,
     stop: engine.stop,
     runNow: engine.runNow,
+    waitForRun: engine.waitForRun,
+    sweepStuckRuns: engine.sweepStuckRuns,
     cancel: engine.cancel,
     listHandlers: registry.list,
     getHandler: registry.get,

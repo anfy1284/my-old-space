@@ -58,6 +58,30 @@ function notify(table, action, rowId) {
     } catch (e) { /* uniForm мог быть не поднят — не повод ронять тик */ }
 }
 
+/**
+ * Событие хода задания в браузер — по тому же сессионному SSE, что и обновления
+ * списков (одно подключение на окно).
+ *
+ * Что здесь важно: `handler` идёт В КАЖДОМ событии. Форма подписывается на СВОЙ тип
+ * задачи («резервное копирование»), а не на конкретный запуск, — иначе она не увидит
+ * ни начала операции, ни запуска, стартовавшего по расписанию.
+ *
+ * @param {'jobStarted'|'jobProgress'|'jobFinished'} kind
+ */
+function emitJobEvent(kind, runId, extra) {
+    try {
+        const entry = state.active.get(runId);
+        const task = entry && entry.task;
+        require('../../drive_forms/dynamicTableRegistry').broadcastSessionEvent(Object.assign({
+            type: kind,
+            runId,
+            taskUID: task ? task.UID : (extra && extra.taskUID) || null,
+            handler: task ? task.handler : (extra && extra.handler) || null,
+            caption: task ? task.caption : null
+        }, extra || {}));
+    } catch (e) { /* оповещение не важнее исполнения */ }
+}
+
 const isEmpty = (v) => v === null || v === undefined || v === '';
 
 /** Пустая дата в этой платформе — 0001-01-01, а не NULL (drive_root/db/emptyValues.js). */
@@ -94,7 +118,13 @@ async function releaseTask(taskUID) {
 function spawnWorker() {
     const workerPath = path.join(__dirname, 'worker.js');
     const proc = fork(workerPath, [], {
-        env: { ...process.env, PROJECT_ROOT: process.env.PROJECT_ROOT || globalCtx.getProjectRoot() || '' },
+        env: {
+            ...process.env,
+            PROJECT_ROOT: process.env.PROJECT_ROOT || globalCtx.getProjectRoot() || '',
+            // Признак «я воркер»: по нему оповещение об изменении таблиц уходит
+            // главному процессу, а не рассылается в пустоту (SSE-клиенты живут там).
+            MOS_SCHEDULER_WORKER: '1'
+        },
         stdio: 'inherit'
     });
     const w = { proc, busy: false, runId: null };
@@ -198,6 +228,14 @@ async function handleWorkerMessage(w, msg) {
     switch (msg.type) {
         case 'progress':
             log.info(`[scheduler] Запуск ${msg.runId}: ${msg.text}`);
+            // Ход работы виден пользователю СРАЗУ, в том окне, где он нажал кнопку.
+            // «Смотрите журнал запусков» — это отговорка: длинная операция обязана
+            // показывать, что она жива и сколько осталось.
+            emitJobEvent('jobProgress', msg.runId, { text: msg.text, done: msg.done, total: msg.total });
+            break;
+        case 'notifyTable':
+            // Воркер не имеет SSE-подключений — рассылает главный процесс.
+            notify(msg.table, msg.action, msg.rowId);
             break;
         case 'heartbeat':
             await db.update(RUNS, { UID: msg.runId }, { lastHeartbeatAt: new Date() });
@@ -321,6 +359,7 @@ async function dispatch(task, triggeredBy = 'schedule', attempt = 1, overridePar
         notify(TASKS, 'update', task.UID);
 
         state.active.set(runId, { task, startedAt, sessionID, attempt, triggeredBy, worker: null });
+        emitJobEvent('jobStarted', runId, { triggeredBy });
         state.queue.push({ runId, task, params: validated.values, sessionID, triggeredBy });
         ensurePool();
         pumpQueue();
@@ -337,6 +376,9 @@ async function dispatch(task, triggeredBy = 'schedule', attempt = 1, overridePar
 /** Закрыть запуск: журнал, освобождение задачи, служебная сессия, ретрай. */
 async function finishRun(runId, { status, resultText = null, errorText = null }) {
     const entry = state.active.get(runId);
+    // Событие шлём ДО удаления записи из active — из неё берутся задача и её тип,
+    // без которых форма не поймёт, её ли это операция.
+    emitJobEvent('jobFinished', runId, { status, resultText: resultText || '', errorText: errorText || '' });
     state.active.delete(runId);
     if (entry) {
         if (entry.timeoutTimer) clearTimeout(entry.timeoutTimer);
@@ -432,19 +474,28 @@ async function tick() {
  * его — а исполнителя у запуска уже нет, и без повторной проверки задача осталась бы
  * заблокированной навсегда.
  */
-async function sweepStuckRuns() {
+async function sweepStuckRuns(opts = {}) {
     const deadline = new Date(Date.now() - HEARTBEAT_DEAD_MS);
     const rows = await db.read(RUNS, { status: 'running' });
     let n = 0;
     for (const row of rows || []) {
         const run = plain(row);
         if (state.active.has(run.UID)) continue;   // наш собственный живой запуск
-        const hb = isRealDate(run.lastHeartbeatAt) ? new Date(run.lastHeartbeatAt)
-            : (isRealDate(run.startedAt) ? new Date(run.startedAt) : new Date(0));
-        if (hb.getTime() > deadline.getTime()) continue;
+        // `force` — состояние заведомо чужое: базу только что подменили целиком, и
+        // «выполняющийся» запуск приехал ВНУТРИ дампа вместе с остальными данными.
+        // Ждать протухания heartbeat здесь нельзя: он в дампе свежий, а исполнителя
+        // не существует — задача осталась бы заблокированной на минуты, и первой
+        // пострадала бы safety-выгрузка следующего восстановления.
+        if (!opts.force) {
+            const hb = isRealDate(run.lastHeartbeatAt) ? new Date(run.lastHeartbeatAt)
+                : (isRealDate(run.startedAt) ? new Date(run.startedAt) : new Date(0));
+            if (hb.getTime() > deadline.getTime()) continue;
+        }
         await db.update(RUNS, { UID: run.UID }, {
             status: 'error', finishedAt: new Date(),
-            errorText: 'Прервано остановкой сервера (нет сигнала жизни от исполнителя)'
+            errorText: opts.force
+                ? 'Прервано подменой базы: запуск приехал внутри резервной копии'
+                : 'Прервано остановкой сервера (нет сигнала жизни от исполнителя)'
         });
         await db.update(TASKS, { UID: run.taskId }, { runningRunId: '', lastStatus: 'error' });
         if (run.serviceSessionId) await serviceSession.destroy(run.serviceSessionId);
@@ -521,6 +572,41 @@ async function runNow(taskUID, overrideParams) {
     return await dispatch(task, 'manual', 1, overrideParams || null);
 }
 
+/**
+ * Дождаться завершения запуска.
+ *
+ * Нужно там, где задание — не «фон», а ПРЕДУСЛОВИЕ другой операции: восстановление
+ * организации обязано сначала снять safety-выгрузку и убедиться, что она удалась
+ * (ТЗ §6.6 п.1). Без этого пришлось бы либо дублировать вызов ядра выгрузки в обход
+ * планировщика (второй путь исполнения), либо запускать восстановление, не зная,
+ * есть ли копия.
+ *
+ * Ожидание — опросом журнала, а не подпиской: запуск ведёт другой ПРОЦЕСС, событий
+ * от него в этом процессе нет, а строка `scheduler_runs` — общий и уже существующий
+ * источник правды о состоянии.
+ *
+ * @param {string} runId
+ * @param {Object} [opts] — `{ timeoutMs, pollMs }`
+ * @returns {Promise<{ok: boolean, status: string, run: Object|null, errorKey?: string}>}
+ */
+async function waitForRun(runId, opts = {}) {
+    const timeoutMs = Number(opts.timeoutMs) || 30 * 60 * 1000;
+    const pollMs = Number(opts.pollMs) || 1000;
+    const deadline = Date.now() + timeoutMs;
+
+    for (;;) {
+        const run = plain(await db.findByPk(RUNS, runId));
+        const status = run && run.status;
+        if (status && status !== 'running' && status !== 'queued') {
+            return { ok: status === 'success', status, run };
+        }
+        if (Date.now() > deadline) {
+            return { ok: false, status: status || 'unknown', run, errorKey: 'sched_err_wait_timeout' };
+        }
+        await new Promise(res => setTimeout(res, pollMs));
+    }
+}
+
 /** «Остановить» — флаг отмены воркеру; игнорирующий его обработчик добивается. */
 async function cancel(taskUID) {
     const task = plain(await db.findByPk(TASKS, taskUID));
@@ -543,4 +629,4 @@ async function cancel(taskUID) {
     return { ok: true };
 }
 
-module.exports = { start, stop, tick, runNow, cancel, dispatch, state };
+module.exports = { start, stop, tick, runNow, cancel, dispatch, waitForRun, sweepStuckRuns, state };

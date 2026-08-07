@@ -477,6 +477,84 @@ class FormInput extends UIObject {
     }
 }
 
+/**
+ * Шина серверных событий страницы поверх сессионного SSE (`/app/events`).
+ *
+ * Поток на окно один и уже существует — он несёт `dataChanged` для списков. События,
+ * не связанные с конкретной таблицей (ход длинной операции), ходят по нему же:
+ * заводить второе подключение ради этого незачем.
+ *
+ * Разбор сообщения — ЗДЕСЬ, в одном месте, и им пользуются оба создателя потока
+ * (DynamicTable.connectSSE и подписчик на события). Иначе у одного и того же потока
+ * оказалось бы два разных обработчика, и события, пришедшие «не тому», терялись бы.
+ */
+if (typeof window !== 'undefined') {
+    window.MySpaceEvents = window.MySpaceEvents || {
+        _handlers: new Set(),
+
+        /** Подписаться на серверные события. Возвращает функцию отписки. */
+        on(fn) {
+            if (typeof fn !== 'function') return () => {};
+            this._handlers.add(fn);
+            this.ensureStream();
+            return () => this._handlers.delete(fn);
+        },
+
+        off(fn) { this._handlers.delete(fn); },
+
+        /** Поднять сессионный поток, если его ещё нет (форма может не иметь таблиц). */
+        ensureStream() {
+            try {
+                window._dynamicTableEventSources = window._dynamicTableEventSources || new Map();
+                window._dynamicTableSubscribers = window._dynamicTableSubscribers || new Map();
+                const key = '__session__events';
+                const existing = window._dynamicTableEventSources.get(key);
+                if (existing && existing.es && existing.es.readyState !== 2) return existing.es;
+                const es = new EventSource('/app/events');
+                es.onmessage = (ev) => window.MySpaceEvents.handleMessage(ev, key);
+                window._dynamicTableEventSources.set(key, { es });
+                if (!window._dynamicTableSubscribers.has(key)) window._dynamicTableSubscribers.set(key, new Set());
+                return es;
+            } catch (e) {
+                console.warn('[MySpaceEvents] не удалось поднять поток событий', e);
+                return null;
+            }
+        },
+
+        /** Единый разбор сообщения сессионного потока. */
+        handleMessage(event, sessionSharedKey) {
+            let d;
+            try { d = JSON.parse(event.data); } catch (e) { return; }
+            if (!d) return;
+
+            // 1. Изменение данных таблицы — фан-аут подписчикам-таблицам.
+            if (d.type === 'dataChanged') {
+                const subs = window._dynamicTableSubscribers && window._dynamicTableSubscribers.get(sessionSharedKey);
+                if (subs) subs.forEach(sub => {
+                    try {
+                        // Подписка реагирует на СВОЮ таблицу и на дополнительные
+                        // наблюдаемые (extraWatchTables — напр. relatedList следит и за
+                        // таблицей-связкой).
+                        if (!sub || sub.appName !== d.app) return;
+                        const watches = sub.tableName === d.tableName ||
+                            (Array.isArray(sub.extraWatchTables) && sub.extraWatchTables.includes(d.tableName));
+                        if (!watches) return;
+                        sub.dataCache = {};
+                        if (sub._sseRefreshTimer) clearTimeout(sub._sseRefreshTimer);
+                        sub._sseRefreshTimer = setTimeout(() => {
+                            sub._sseRefreshTimer = null;
+                            if (typeof sub.refresh === 'function' && !sub._sseDestroyed) sub.refresh();
+                        }, 300);
+                    } catch (e) {}
+                });
+            }
+
+            // 2. Всё остальное (ход операций) — подписчикам страницы.
+            this._handlers.forEach(h => { try { h(d); } catch (e) { console.error('[MySpaceEvents] handler error', e); } });
+        }
+    };
+}
+
 // Minimal MySpace registrar exposed at framework (drive_forms) client level.
 // Provides `register(name, descriptor)` and `open(name, params)` for app scripts.
 if (typeof window !== 'undefined') {
@@ -565,6 +643,32 @@ if (typeof window !== 'undefined') {
                 // токенов не осталось — отменить отложенный показ и спрятать
                 if (_busyTimer !== null) { clearTimeout(_busyTimer); _busyTimer = null; }
                 if (_busyVisible) { _busyVisible = false; if (_busyEl) _busyEl.style.display = 'none'; }
+            },
+
+            /**
+             * Скачать файл по адресу сервера.
+             *
+             * Именно навигацией, а не `fetch`: файл может весить сотни мегабайт, и
+             * тянуть его в память вкладки, чтобы отдать блобом, незачем. Права проверяет
+             * сам роут, поэтому ссылка безопасна.
+             *
+             * Метод ядра, потому что иначе каждая форма пишет одно и то же создание
+             * `<a>` с кликом по нему — то есть прямой DOM в прикладном коде, чего
+             * правила проекта не допускают.
+             *
+             * @param {string} url
+             * @param {string} [fileName] — предложить имя (работает для своего источника)
+             */
+            downloadFile(url, fileName) {
+                if (!url) return false;
+                const a = document.createElement('a');
+                a.href = url;
+                if (fileName) a.download = fileName;
+                a.style.display = 'none';
+                document.body.appendChild(a);
+                a.click();
+                setTimeout(() => { try { document.body.removeChild(a); } catch (e) {} }, 0);
+                return true;
             },
 
             register(name, descriptor) {
@@ -910,6 +1014,17 @@ class Form extends UIObject {
                 }
             } catch (e) {}
             try { if (this._child && typeof this._child.destroy === 'function') this._child.destroy(); } catch (e) {}
+            // Прочие контролы с долгоживущими ресурсами (подписка на серверные события
+            // у RunLogBox и т.п.). Таблицы уже разобраны выше и повторно не трогаются.
+            try {
+                const seen = new Set(Array.isArray(this._tables) ? this._tables : []);
+                for (const c of Object.values(this.controlsMap || {})) {
+                    if (!c || seen.has(c) || c === this.table) continue;
+                    if (typeof c.destroy === 'function' && c.__needsDispose) {
+                        try { c.destroy(); } catch (e) {}
+                    }
+                }
+            } catch (e) {}
         } catch (e) {}
 
         try {
@@ -1922,6 +2037,10 @@ class Form extends UIObject {
             this.element.style.height     = 'auto';
             this.contentArea.style.width  = 'auto';
             this.contentArea.style.height = 'auto';
+            // На время замера полям возвращается их «желаемая» ширина (см.
+            // MultilineTextBox: `--mos-pref-width`). В рабочем состоянии такого порога
+            // быть не должно — иначе поле не сжимается и вылезает за окно.
+            this.element.classList.add('ui-measuring');
         } catch (e) {
             // ignore
         }
@@ -1929,6 +2048,8 @@ class Form extends UIObject {
         const contentWidth = Math.max(this.contentArea.scrollWidth || 0, this.contentArea.clientWidth || 0);
         let targetWidth = Math.max(minWidth, Math.ceil(contentWidth + padW));
         if (targetWidth > maxWidth) targetWidth = maxWidth;
+
+        try { this.element.classList.remove('ui-measuring'); } catch (e) {}
 
         // ── Фаза 2: высота контента при ИТОГОВОЙ ширине ─────────────────────────────────────
         // Фиксируем ширину на targetWidth, contentArea — на 100% (как в обычной отрисовке),
@@ -2247,6 +2368,101 @@ class DataForm extends Form {
         return ctrl;
     }
 
+    // ── Доступ к контролам формы: публичный интерфейс вместо лазания в controlsMap ──
+    //
+    // `controlsMap` — ВНУТРЕННЯЯ структура (в ней и поля формы, и каждая ячейка каждой
+    // строки таблицы под составными ключами вида `ts_x__r0__field`). Прикладной код,
+    // который в неё лазит, копирует из формы в форму один и тот же хелпер `ctrl(form, name)`
+    // и завязывается на устройство формы. Это работа ядра, а не автора формы.
+
+    /**
+     * Контрол формы по имени из лейаута (`name`). Возвращает `null`, если такого нет —
+     * обработчик не обязан оборачивать каждый вызов в проверку.
+     */
+    getControl(name) {
+        if (!name || !this.controlsMap) return null;
+        return this.controlsMap[name] || null;
+    }
+
+    /** Включить/выключить контрол (кнопку, поле). Неприменимое действие ВЫКЛЮЧАЕТСЯ, а не прячется. */
+    setControlEnabled(name, enabled) {
+        const c = this.getControl(name);
+        if (!c || typeof c.setEnabled !== 'function') return false;
+        try { c.setEnabled(!!enabled); return true; } catch (e) { return false; }
+    }
+
+    /** Значение контрола; если контрол ещё не отрисован — из данных формы. */
+    getControlValue(name) {
+        const c = this.getControl(name);
+        if (c && typeof c.getValue === 'function') {
+            try { return c.getValue(); } catch (e) { /* контрол ещё не готов */ }
+        }
+        const rec = this._dataMap && this._dataMap[name];
+        return rec ? rec.value : null;
+    }
+
+    /** Записать значение в контрол (и в данные формы, чтобы они не разошлись). */
+    setControlValue(name, value, display) {
+        const c = this.getControl(name);
+        if (!c || typeof c.setValue !== 'function') return false;
+        try { c.setValue(value, display); } catch (e) { return false; }
+        try {
+            if (this._dataMap) {
+                if (!this._dataMap[name]) this._dataMap[name] = { name, value };
+                else this._dataMap[name].value = value;
+            }
+        } catch (e) {}
+        return true;
+    }
+
+    // ── Декларативная доступность элемента: `enabledWhen` в лейауте ────────────────
+    //
+    // «Кнопка работает, когда в таблице выбрана строка» — это СВОЙСТВО ФОРМЫ, а не
+    // повод писать в каждой форме пару обработчиков «строку выбрали»/«данные
+    // перечитали» и вручную дёргать `setEnabled`. Объявляется на элементе лейаута:
+    //
+    //   "enabledWhen": { "currentRow": "backupFilesTable" }
+    //   "enabledWhen": { "currentRow": "backupFilesTable", "where": { "missing": false } }
+    //   "enabledWhen": { "rowsIn": "backupFilesTable" }        // в таблице есть хоть одна строка
+    //
+    // Кнопка при этом ОСТАЁТСЯ ВИДИМОЙ и выключается — прятать неприменимое действие
+    // нельзя, командная панель начнёт прыгать.
+    _declareEnabledWhen(controlName, decl) {
+        if (!controlName || !decl || typeof decl !== 'object') return;
+        if (!this._enabledWhen) this._enabledWhen = [];
+        this._enabledWhen.push({ control: controlName, decl });
+    }
+
+    _evalEnabledWhen(decl) {
+        const tableName = decl.currentRow || decl.rowsIn || decl.table;
+        const tbl = this.getControl(tableName);
+        if (!tbl) return false;
+        if (decl.rowsIn) return (tbl.getRows() || []).length > 0;
+        const row = tbl.currentRow;
+        if (!row) return false;
+        const where = decl.where;
+        if (where && typeof where === 'object') {
+            for (const k of Object.keys(where)) {
+                const actual = (row[k] === undefined || row[k] === null) ? '' : row[k];
+                if (String(actual) !== String(where[k])) return false;
+            }
+        }
+        return true;
+    }
+
+    /** Пересчитать доступность всех элементов с `enabledWhen`. Зовётся ядром, не приложением. */
+    refreshEnabledWhen() {
+        if (!this._enabledWhen || !this._enabledWhen.length) return;
+        for (const d of this._enabledWhen) {
+            try { this.setControlEnabled(d.control, this._evalEnabledWhen(d.decl)); } catch (e) {}
+        }
+    }
+
+    /** Таблица сменила выбор/перечитала данные — ядро само пересчитывает зависимости. */
+    _onTableStateChanged(_table) {
+        try { this.refreshEnabledWhen(); } catch (e) {}
+    }
+
     // Нужно ли сохранить форму перед действием, требующим запись в БД
     // (печать, «создать на основании», серверный пересчёт по recordID).
     // true, если есть несохранённые правки ИЛИ запись ещё НЕ в БД (_isNew).
@@ -2337,6 +2553,9 @@ class DataForm extends Form {
         // re-render to a layout without a default button (e.g. login → change password)
         // must not keep Enter bound to the previous, now-detached button.
         if (isRoot) this._defaultButton = null;
+        // Тот же довод для деклараций `enabledWhen`: они указывают на контролы, которых
+        // после ре-рендера уже нет.
+        if (isRoot) this._enabledWhen = null;
         for (const item of items) {
             await this.renderItem(item, contentArea);
         }
@@ -2625,6 +2844,15 @@ class DataForm extends Form {
             if (!this._applyControlWidth(ctrl, properties)) {
                 try { if (ctrl.element) ctrl.element.style.width = '100%'; } catch (e) {}
             }
+            // Многострочное поле, делящее строку с соседями, обязано уступать им место
+            // (см. MultilineTextBox.setShrinkable). Горизонтальность определяем по уже
+            // отрисованному контейнеру группы, а не по догадке об устройстве лейаута.
+            try {
+                if (typeof ctrl.setShrinkable === 'function' && contentArea && contentArea.classList
+                    && contentArea.classList.contains('horizontal')) {
+                    ctrl.setShrinkable(true);
+                }
+            } catch (e) {}
             // Keep _dataMap in sync when user types
             try {
                 if (item.data && ctrl.element && ctrl.element.addEventListener) {
@@ -2638,7 +2866,7 @@ class DataForm extends Form {
                             else self._dataMap[fieldKey].value = newVal;
                         } catch (_) {}
                         // Mark form as modified
-                        try { if (typeof self.setModified === 'function') self.setModified(true); } catch (_) {}
+                        try { if (!item.suppressModified && typeof self.setModified === 'function') self.setModified(true); } catch (_) {}
                     });
                 }
             } catch (_) {}
@@ -2726,7 +2954,7 @@ class DataForm extends Form {
                                 if (!formSelf._dataMap[fieldKey]) formSelf._dataMap[fieldKey] = { name: fieldKey, value: newVal };
                                 else formSelf._dataMap[fieldKey].value = newVal;
                             } catch (_) {}
-                            try { if (typeof formSelf.setModified === 'function') formSelf.setModified(true); } catch (_) {}
+                            try { if (!item.suppressModified && typeof formSelf.setModified === 'function') formSelf.setModified(true); } catch (_) {}
                         };
                         try { if (ctrl.element && ctrl.element.addEventListener) ctrl.element.addEventListener('input', handler); } catch (_) {}
                     }
@@ -2821,7 +3049,7 @@ class DataForm extends Form {
                                 if (!formSelf._dataMap[fieldKey]) formSelf._dataMap[fieldKey] = { name: fieldKey, value: newVal };
                                 else formSelf._dataMap[fieldKey].value = newVal;
                             } catch (_) {}
-                            try { if (typeof formSelf.setModified === 'function') formSelf.setModified(true); } catch (_) {}
+                            try { if (!item.suppressModified && typeof formSelf.setModified === 'function') formSelf.setModified(true); } catch (_) {}
                         };
                         try { if (ctrl.element && ctrl.element.addEventListener) ctrl.element.addEventListener('input', handler); } catch (_) {}
                     }
@@ -2848,7 +3076,7 @@ class DataForm extends Form {
                     if (item.data && cb.element) {
                         const formSelf = this;
                         cb.element.addEventListener('change', () => {
-                            try { if (typeof formSelf.setModified === 'function') formSelf.setModified(true); } catch (_) {}
+                            try { if (!item.suppressModified && typeof formSelf.setModified === 'function') formSelf.setModified(true); } catch (_) {}
                         });
                     }
                 } catch (_) {}
@@ -2879,7 +3107,7 @@ class DataForm extends Form {
                                 if (!formSelf._dataMap[fieldKey]) formSelf._dataMap[fieldKey] = { name: fieldKey, value: nv };
                                 else formSelf._dataMap[fieldKey].value = nv;
                             } catch (_) {}
-                            try { if (typeof formSelf.setModified === 'function') formSelf.setModified(true); } catch (_) {}
+                            try { if (!item.suppressModified && typeof formSelf.setModified === 'function') formSelf.setModified(true); } catch (_) {}
                         });
                     }
                 } catch (_) {}
@@ -2889,7 +3117,22 @@ class DataForm extends Form {
             case 'group': {
                 const grp = new Group(contentArea, properties);
                 grp.setCaption(caption);
+                // Ориентация группы. Умолчание — ГОРИЗОНТАЛЬ, как было исторически.
+                //
+                // Я его однажды перевёл на вертикаль, чтобы «починить» наезд
+                // многострочного поля на соседний блок. Это была не починка, а сокрытие:
+                // группа переставала быть горизонтальной, и дефект просто не проявлялся —
+                // заодно молча меняя вид уже написанных форм у всех потребителей
+                // фреймворка. Настоящая причина была в `flex: 0 0 auto` у поля
+                // (см. MultilineTextBox.Draw), она устранена, и подпирать её сменой
+                // умолчания больше не нужно.
+                //
+                // Короткая запись `"horizontal": true` / `"vertical": true` работает —
+                // это чистое дополнение: она напрашивается сама, её уже писали в
+                // лейауте, и она молча не действовала.
                 if (item.orientation) grp.orientation = item.orientation;
+                else if (item.horizontal === true) grp.orientation = 'horizontal';
+                else if (item.vertical === true) grp.orientation = 'vertical';
                 if (item.noBorder) grp.noBorder = true;
                 if (item.boldCaption) grp.boldCaption = true;
                 grp.Draw(contentArea);
@@ -3009,7 +3252,11 @@ class DataForm extends Form {
                                 onClick: binding ? ((ev) => formSelfEx.callClientBinding(binding, [ev])) : null
                             };
                         });
-                        btn = new SplitButton(cmdBarEl, Object.assign({}, exProps, { menu: menuItems }));
+                        btn = new SplitButton(cmdBarEl, Object.assign({}, exProps, {
+                            menu: menuItems,
+                            // Нет действия по умолчанию — нажатие открывает меню.
+                            menuOnClick: exBtn.menuOnClick === true
+                        }));
                     } else {
                         btn = new Button(cmdBarEl, exProps);
                     }
@@ -3027,8 +3274,33 @@ class DataForm extends Form {
                                 }
                             }
                             if (mergedEvts) this._wireItemEvents(this.controlsMap[exBtn.name], mergedEvts);
+                            if (exBtn.enabledWhen) this._declareEnabledWhen(exBtn.name, exBtn.enabledWhen);
                         }
                     } catch(e) {}
+                }
+                break;
+            }
+            case 'runLog': {
+                // Живой ход длинной операции ПРЯМО В ОКНЕ: строки журнала по мере
+                // выполнения + полоса прогресса. Отсылать пользователя «смотреть журнал
+                // запусков» вместо этого нельзя — он нажал кнопку здесь и должен здесь же
+                // видеть, что происходит и сколько осталось.
+                //
+                // properties:
+                //   handler — тип задачи планировщика, чьи запуски показываем
+                //             (напр. 'backup.create'); без него показываются все
+                //   rows    — высота поля в строках (по умолчанию 8)
+                try {
+                    const props = properties || {};
+                    const box = new RunLogBox(contentArea, {
+                        handler: props.handler || null,
+                        rows: props.rows || 8,
+                        caption
+                    });
+                    box.Draw(contentArea);
+                    if (item.name) this.registerControl(item.name, box);
+                } catch (e) {
+                    console.error('[runLog] render error:', e);
                 }
                 break;
             }
@@ -3076,8 +3348,13 @@ class DataForm extends Form {
                         tableName: props.tableName,
                         dataKey: item.data || item.name,
                         appForm: this,
-                        readOnly: true,
-                        editable: false,
+                        // По умолчанию список только показывает. `editable: true` в
+                        // properties делает ячейки редактируемыми, и тогда правка
+                        // сохраняется сразу (saveOnEdit) — у списка нет «Сохранить».
+                        readOnly: props.editable !== true,
+                        editable: props.editable === true,
+                        editMode: props.editable === true ? 'cell-immediate' : undefined,
+                        saveOnEdit: props.editable === true,
                         showToolbar: false,
                         rowHeight: props.rowHeight || 25,
                         visibleRows: props.visibleRows || 8,
@@ -3085,7 +3362,13 @@ class DataForm extends Form {
                         extraWatchTables: extraWatch,
                         serverFields: Array.isArray(props.fields) ? props.fields : null,
                         columnOverrides: props.columnOverrides || null,
-                        hiddenButtons: props.hiddenButtons || []
+                        hiddenButtons: props.hiddenButtons || [],
+                        // Список связанных документов ведёт текущую строку сам (как список
+                        // 1С): сразу после загрузки активна первая. Иначе действия «над
+                        // выбранной строкой» стоят выключенными, пока пользователь не
+                        // догадается кликнуть, а на форме с одной строкой это выглядит
+                        // как неработающая кнопка.
+                        autoActivateFirstRow: props.autoActivateFirstRow !== false
                     };
                     const rel = new DynamicTable(relConf);
                     try { if (typeof rel.setCaption === 'function') rel.setCaption(caption); } catch (e) {}
@@ -3129,7 +3412,23 @@ class DataForm extends Form {
                         if (properties && properties.columnOverrides) dtConf.columnOverrides = properties.columnOverrides;
                         dtConf.rowHeight = dtConf.rowHeight || 25;
                         dtConf.multiSelect = dtConf.multiSelect || false;
-                        dtConf.editable = (dtConf.editable === undefined) ? true : dtConf.editable;
+                        // Умолчание — ТОЛЬКО ПРОСМОТР. Раньше умолчанием было
+                        // «редактируемо», но правка при этом никуда не сохранялась: список
+                        // выглядел редактируемым и молча терял ввод. Из двух вариантов
+                        // честен один — не обещать того, чего нет.
+                        //
+                        // В ФОРМЕ ВЫБОРА редактирование выключено принудительно: там
+                        // пользователь выбирает запись, а не правит её, и случайная правка
+                        // чужой строки по дороге к выбору — чистый вред.
+                        dtConf.editable = this.selectMode === true
+                            ? false
+                            : (dtConf.editable === undefined ? false : dtConf.editable);
+                        // Если редактирование всё же включено ЯВНО — значит так и задумано,
+                        // и оно обязано работать: правка ячейки пишется в базу.
+                        // `readOnly: true` при этом сильнее: сочетание «только просмотр +
+                        // редактируемо» противоречиво, и побеждает запрет.
+                        dtConf.saveOnEdit = dtConf.editable === true && dtConf.readOnly !== true;
+                        if (dtConf.saveOnEdit && !dtConf.editMode) dtConf.editMode = 'cell-immediate';
                         dtConf.showToolbar = (dtConf.showToolbar === undefined) ? true : dtConf.showToolbar;
                         const tbl = new DynamicTable(dtConf);
                         try { if (typeof tbl.setCaption === 'function') tbl.setCaption(caption); } catch (e) {}
@@ -3313,6 +3612,8 @@ class DataForm extends Form {
                     }
                 }
                 if (mergedEvents) this._wireItemEvents(this.controlsMap[item.name], mergedEvents);
+                // Декларативная зависимость доступности от состояния таблицы
+                if (item.enabledWhen) this._declareEnabledWhen(item.name, item.enabledWhen);
             }
         } catch(e) {}
     }
@@ -3461,6 +3762,9 @@ class DataForm extends Form {
                 } catch(e) {}
             }
         } catch(e) {}
+        // Стартовое состояние элементов с `enabledWhen`: пока строка не выбрана, кнопка
+        // выключена. Дальше её ведёт сама таблица (`_onTableStateChanged`).
+        try { this.refreshEnabledWhen(); } catch (e) {}
         // Форма полностью отрисована — с этого момента разрешаем form-level onChange.
         this._formReady = true;
         // Form-level событие «форма готова» (events.onReady в saveLayout). Нужно там,
@@ -4163,6 +4467,15 @@ class SplitButton extends Button {
     constructor(parentElement = null, properties = {}) {
         super(parentElement, properties);
         this.menu = Array.isArray(properties.menu) ? properties.menu : [];
+        // `menuOnClick: true` — у кнопки НЕТ действия по умолчанию: нажатие на основной
+        // сегмент открывает то же меню, что и стрелка.
+        //
+        // Кнопка с вариантами обязана либо называть своё действие («Создать копию всей
+        // базы»), либо не делать вида, что оно у неё есть. Подпись «Создать копию» над
+        // меню из двух пунктов не сообщает, что произойдёт по нажатию, и пользователь
+        // узнаёт это только постфактум — а здесь цена ошибки это лишняя копия базы либо
+        // не та область выгрузки.
+        this.menuOnClick = properties.menuOnClick === true;
         this._arrowEl = null;
         this._menuPopup = null;
         this._menuOpen = false;
@@ -4195,6 +4508,14 @@ class SplitButton extends Button {
 
         // Основной сегмент — штатная кнопка Button (цвета/рамки/tooltip как у всех).
         super.Draw(wrap);
+
+        // Нет действия по умолчанию — основной сегмент открывает меню (см. menuOnClick).
+        if (this.menuOnClick) {
+            this.onClick = (e) => {
+                try { if (e && e.stopPropagation) e.stopPropagation(); } catch (_) {}
+                try { if (this._menuOpen) this._closeMenu(); else this._openMenu(); } catch (_) {}
+            };
+        }
 
         // Сегмент со стрелкой — своя 3D-рамка, зеркалит стиль основного сегмента.
         const arrow = document.createElement('button');
@@ -6916,6 +7237,32 @@ class MultilineTextBox extends FormInput {
         if (this.element) this.element.cols = this.cols;
     }
 
+    /**
+     * Разрешить полю сжиматься ниже своей «желаемой» ширины (`cols`).
+     *
+     * Желаемая ширина реализована как `min-width`, и это ЖЁСТКИЙ пол: в горизонтальной
+     * группе поле отказывается сжиматься, вылезает за границу и передавливает соседний
+     * блок — в форме бэкапа многострочный ключ наезжал на подпись «Key fingerprint».
+     * Делить строку с соседями и одновременно требовать 50 знаков ширины нельзя, и
+     * приоритет здесь у соседа: он виден целиком, а текст переносится.
+     *
+     * Зовётся ядром при отрисовке в горизонтальной группе — автору формы об этом
+     * думать не нужно.
+     */
+    setShrinkable(on) {
+        this._shrinkable = !!on;
+        try {
+            // Само поле сжимается всегда (базис `cols` + `min-width: 0`, см. Draw).
+            // Здесь снимается порог у КОНТЕЙНЕРА: в тесной горизонтальной группе он
+            // иначе не отдаёт место соседнему блоку.
+            if (this.containerElement) {
+                // Флекс-элемент по умолчанию не сжимается ниже min-content своего
+                // содержимого — обнуляем и его порог, иначе сжимается только поле.
+                this.containerElement.style.minWidth = on ? '0' : '';
+            }
+        } catch (e) {}
+    }
+
     setMaxLength(maxLength) {
         this.maxLength = (typeof maxLength === 'number') ? (maxLength | 0) : (maxLength ? parseInt(maxLength, 10) : 0);
         if (this.element) {
@@ -6937,18 +7284,34 @@ class MultilineTextBox extends FormInput {
             this.element.cols = this.cols;
             try { this.element.wrap = this.wrap; } catch (_) {}
 
-            // Высота детерминирована числом строк (rows), не растягивается — иначе при замере
-            // авторазмера высота «гуляет», и под полем остаётся пустое место. Ширина — 100%
-            // контейнера, но min-width задаёт «желаемую» ширину по cols: в авторазмерных формах
-            // (setSizeToContent) grid-колонка 1fr растягивается под этот min-width по min-content,
-            // и форма становится шире под многострочное поле; в широкой форме width:100% всё равно
-            // перебивает (поле тянется на весь столбец). Так cols влияет на ширину без max-content
-            // контейнера — не раздувая формы с таблицами (ТЧ).
+            // Высота детерминирована числом строк (`rows`) — она задаётся атрибутом и от
+            // флексов не зависит.
+            //
+            // А вот ШИРИНА: контейнер поля это флекс-СТРОКА (подпись слева, контрол
+            // справа), поэтому `flex` здесь управляет шириной, а не высотой. Стояло
+            // `flex: 0 0 auto` — «не сжиматься», и поле забирало 100% ширины КОНТЕЙНЕРА
+            // поверх подписи и любого соседа: подпись «Key fingerprint» соседнего блока
+            // оказывалась под полем. Прежний комментарий путал оси, и правка «не
+            // растягиваться по высоте» на деле запрещала сжатие по ширине.
+            //
+            // Правильно: поле занимает ОСТАТОК строки и умеет сжиматься (`1 1 auto`).
+            // `min-width` по `cols` остаётся «желаемой» шириной — на ней держится
+            // авторазмер формы (`setSizeToContent` меряет min-content); в тесной
+            // горизонтальной группе этот порог снимает `setShrinkable`.
+            // «Желаемая» ширина по `cols` выражена БАЗИСОМ флекса, а не `min-width`:
+            // базис это предпочтение (на нём держится авторазмер формы), а `min-width`
+            // был жёстким полом — в узком окне поле вылезало за свой контейнер, сколько
+            // бы места ни оставалось. Итог: хочу `cols` знаков, но уступаю, если места нет.
             this.element.style.position = this.element.style.position || 'relative';
-            this.element.style.flex = '0 0 auto';
+            try { this.element.style.flex = `1 1 ${this.cols}ch`; } catch (_) { this.element.style.flex = '1 1 auto'; }
             this.element.style.width = '100%';
-            try { this.element.style.minWidth = this.cols + 'ch'; } catch (_) {}
+            this.element.style.minWidth = '0';
             this.element.style.boxSizing = 'border-box';
+            // Желаемая ширина, которую видит ТОЛЬКО замер авторазмера окна
+            // (`Form.setSizeToContent` вешает класс `ui-measuring`). В обычном состоянии
+            // порога нет — поле сжимается; иначе окно с многострочным полем открывалось
+            // бы либо узким, либо с горизонтальной прокруткой. Одно свойство, два режима.
+            try { this.element.style.setProperty('--mos-pref-width', this.cols + 'ch'); } catch (_) {}
 
             // Append into container
             try {
@@ -7017,6 +7380,146 @@ class MultilineTextBox extends FormInput {
     }
 }
 
+/**
+ * RunLogBox — ход длинной операции в окне формы: строки журнала + полоса прогресса.
+ *
+ * Подписывается на серверные события (`MySpaceEvents`) и фильтрует их по типу задачи,
+ * а НЕ по конкретному запуску: иначе форма пропустила бы и начало операции, и запуск,
+ * стартовавший по расписанию, пока окно открыто.
+ *
+ * Ничего не опрашивает: события приходят по тому же потоку, что и обновления списков.
+ */
+class RunLogBox extends UIObject {
+    constructor(parentElement = null, opts = {}) {
+        super();
+        this.parentElement = parentElement;
+        this.handler = opts.handler || null;
+        this.rows = opts.rows || 8;
+        this.caption = opts.caption || '';
+        this._lines = [];
+        this._unsubscribe = null;
+        this._runId = null;
+        // Флаг для Form.destroy: у контрола есть что освобождать (подписка на события).
+        this.__needsDispose = true;
+    }
+
+    /** Событие относится к нашему типу задачи? */
+    _mine(d) {
+        if (!d || !/^job(Started|Progress|Finished)$/.test(d.type || '')) return false;
+        if (!this.handler) return true;
+        // У `jobProgress` тип задачи известен из active-записи главного процесса;
+        // если по какой-то причине его нет — не отбрасываем строку молча, а
+        // показываем: потерянный ход операции хуже лишней строки.
+        return !d.handler || d.handler === this.handler;
+    }
+
+    append(text) {
+        if (text === undefined || text === null || text === '') return;
+        this._lines.push(String(text));
+        if (this._lines.length > 500) this._lines.splice(0, this._lines.length - 500);
+        if (this._logEl) {
+            this._logEl.value = this._lines.join('\n');
+            this._logEl.scrollTop = this._logEl.scrollHeight;   // всегда видно последнее
+        }
+    }
+
+    clear() { this._lines = []; if (this._logEl) this._logEl.value = ''; }
+
+    /** Полоса прогресса: доля известна — показываем её, неизвестна — «идёт работа». */
+    setProgress(done, total) {
+        if (!this._barFill) return;
+        this._bar.style.visibility = 'visible';
+        if (total > 0 && done >= 0) {
+            const pct = Math.max(0, Math.min(100, Math.round((done / total) * 100)));
+            this._barFill.classList.remove('ui-progress-indeterminate');
+            this._barFill.style.width = pct + '%';
+            this._barLabel.textContent = pct + '%';
+        } else {
+            this._barFill.classList.add('ui-progress-indeterminate');
+            this._barFill.style.width = '100%';
+            this._barLabel.textContent = '';
+        }
+    }
+
+    hideProgress() {
+        // visibility, а не display: полоса влияет на высоту блока, и её исчезновение
+        // не должно дёргать соседние элементы.
+        if (this._bar) this._bar.style.visibility = 'hidden';
+    }
+
+    Draw(container) {
+        if (!this.element) {
+            const wrap = document.createElement('div');
+            wrap.style.display = 'flex';
+            wrap.style.flexDirection = 'column';
+            wrap.style.gap = '4px';
+            wrap.style.width = '100%';
+            wrap.style.minWidth = '0';
+
+            if (this.caption) {
+                const lab = new Label(wrap);
+                lab.setText(this.caption + ':');
+                lab.Draw(wrap);
+            }
+
+            const ta = document.createElement('textarea');
+            ta.readOnly = true;
+            ta.rows = this.rows;
+            ta.className = 'ui-run-log';
+            ta.style.width = '100%';
+            ta.style.minWidth = '0';
+            ta.style.boxSizing = 'border-box';
+            wrap.appendChild(ta);
+            this._logEl = ta;
+
+            const bar = document.createElement('div');
+            bar.className = 'ui-progress';
+            bar.style.visibility = 'hidden';
+            const fill = document.createElement('div');
+            fill.className = 'ui-progress-fill';
+            const label = document.createElement('div');
+            label.className = 'ui-progress-label';
+            bar.appendChild(fill);
+            bar.appendChild(label);
+            wrap.appendChild(bar);
+            this._bar = bar; this._barFill = fill; this._barLabel = label;
+
+            this.element = wrap;
+            try { wrap._uiObject = this; } catch (e) {}
+
+            const self = this;
+            this._unsubscribe = window.MySpaceEvents.on((d) => {
+                if (!self._mine(d)) return;
+                if (d.type === 'jobStarted') {
+                    self._runId = d.runId;
+                    self.clear();
+                    self.append(__t('Started') + ': ' + (d.caption || d.handler || ''));
+                    self.setProgress(-1, 0);
+                    return;
+                }
+                if (d.type === 'jobProgress') {
+                    self.append(d.text);
+                    if (d.total > 0) self.setProgress(d.done, d.total);
+                    return;
+                }
+                if (d.type === 'jobFinished') {
+                    self.append(d.errorText ? (__t('Error: ') + d.errorText) : (d.resultText || __t('Done')));
+                    self.hideProgress();
+                    self._runId = null;
+                }
+            });
+        }
+        if (container) { try { container.appendChild(this.element); } catch (e) {} }
+        return this.element;
+    }
+
+    destroy() {
+        try { if (this._unsubscribe) this._unsubscribe(); } catch (e) {}
+        this._unsubscribe = null;
+        try { if (super.destroy) super.destroy(); } catch (e) {}
+    }
+}
+
 class Group extends UIObject {
     constructor(parentElement = null) {
         super();
@@ -7076,6 +7579,7 @@ class Group extends UIObject {
             }
             this.element.appendChild(legend);
 
+            // Умолчание — горизонталь (см. renderItem, case 'group').
             const orientation = this.orientation || 'horizontal';
             // Use CSS classes for layout; JS keeps positioning only
             if (orientation === 'vertical' || orientation === 'column') {
@@ -9184,6 +9688,48 @@ class Table extends UIObject {
         return false;
     }
 
+    // ── Текущая строка как СВОЙСТВО таблицы ────────────────────────────────────────
+    //
+    // До этого прикладной код хранил выбранную строку сам: заводил переменную модуля,
+    // подписывался на «строку выбрали» и «данные перечитали», пересчитывал её на каждом
+    // обновлении — и всё равно расходился с тем, что видит пользователь. Хуже: у
+    // DynamicTable `dataCache` это ОБЪЕКТ (ключ = глобальный индекс), а не массив, и
+    // копия кода `for (i < rows.length)` тихо не делала ничего (`undefined.length`),
+    // из-за чего кнопки, зависящие от выбора, оставались выключенными навсегда.
+    // Состояние выбора принадлежит таблице — она его и отдаёт.
+
+    /** Индекс текущей строки, либо -1. */
+    get currentRowIndex() {
+        const idx = this._activeRowIndex;
+        return (typeof idx === 'number' && idx >= 0) ? idx : -1;
+    }
+
+    /** Данные текущей (активной) строки, либо `null`, если строка не выбрана/не загружена. */
+    get currentRow() {
+        try {
+            const idx = this.currentRowIndex;
+            if (idx < 0) return null;
+            const rows = this.data_getRows(this.dataKey) || [];
+            const row = rows[idx];
+            if (!row || typeof row !== 'object') return null;
+            if (row.loaded === false) return null;                 // ещё не догружена
+            if (Object.keys(row).length === 0) return null;         // плейсхолдер пустой строки
+            return row;
+        } catch (e) { return null; }
+    }
+
+    /**
+     * Загруженные строки плотным массивом — то, что прикладной код обычно и имеет в виду
+     * под «строки таблицы». В отличие от `data_getRows`, не содержит пустых заглушек
+     * невыгруженных строк.
+     */
+    getRows() {
+        try {
+            return (this.data_getRows(this.dataKey) || [])
+                .filter(r => r && typeof r === 'object' && r.loaded !== false && Object.keys(r).length > 0);
+        } catch (e) { return []; }
+    }
+
     // Data helpers: encapsulate all _dataMap access for Table
     data_getRows(dataKey) {
         try {
@@ -9724,6 +10270,11 @@ class Table extends UIObject {
         td.style.borderRight = (c < this.columns.length - 1) ? '1px solid #c0c0c0' : '0';
         td.style.verticalAlign = 'top';
         if (isCheckboxCell) { try { td.classList.add('ui-cell-checkbox'); td.style.textAlign = 'center'; } catch (e) {} }
+        // Ячейка «только для чтения» помечается классом, и CSS убирает у неё кнопки
+        // редакторов (календарь, выпадашка, спиннеры). Гасить их флагами по одному
+        // пришлось бы у каждого типа контрола отдельно, и следующий тип снова про это
+        // забудет; правило же одно: нельзя править — не показывай средства правки.
+        try { if (this.readOnly || (col && col.readOnly)) td.classList.add('ui-cell-readonly'); } catch (e) {}
 
         const cellContainer = document.createElement('div');
         cellContainer.style.width = '100%';
@@ -9775,6 +10326,21 @@ class Table extends UIObject {
         // открывается только по кнопке выпадашки). На обычных полях формы (вне таблицы)
         // флага нет — там список открывается при активации поля, как и раньше.
         cellItem.properties = Object.assign({}, col.properties || {}, { noCaption: true, showBorder: false, inTable: true });
+        // Ячейка, которую править НЕЛЬЗЯ, не должна выглядеть редактируемой: календарь,
+        // спиннеры и кнопка выбора обещают действие, которого не будет. Само поле и так
+        // блокируется ниже (`isActive`), но кнопки рисуются независимо от этого —
+        // поэтому гасим их здесь, у источника.
+        if (this.readOnly || col.readOnly) {
+            cellItem.properties.spinButtons = false;
+            cellItem.properties.showSelectionButton = false;
+            cellItem.properties.showListButton = false;
+            cellItem.properties.readOnly = true;
+        }
+        // Ячейка таблицы, которая пишет правку сразу (`saveOnEdit`), НЕ делает форму
+        // «изменённой»: сохранять и отменять там уже нечего. Флаг едет на элемент, потому
+        // что пометку ставит общий обработчик поля (`createTextControl`), который про
+        // таблицу ничего не знает.
+        if (this.saveOnEdit) cellItem.suppressModified = true;
         // Propagate column-level readOnly into cellItem.properties and mark container
         if (col.readOnly) { cellItem.properties.readOnly = true; cellContainer.dataset.colReadonly = '1'; }
         cellItem.value = this.data_getValue(cellKey, (row && row[col.data]));
@@ -9938,8 +10504,18 @@ class Table extends UIObject {
 
                                     // Редактирование ячейки ТЧ помечает форму изменённой (dirty) →
                                     // как следствие триггерит form-level onChange (setModified).
-                                    // Раньше cell-edit не выставлял _modified.
-                                    try { if (this.appForm && typeof this.appForm.setModified === 'function') this.appForm.setModified(true); } catch (e) {}
+                                    //
+                                    // НО НЕ у таблицы, которая пишет правку сразу (`saveOnEdit`):
+                                    // там сохранять уже нечего и отменять нечего. Пометить форму
+                                    // изменённой значило бы соврать — заголовок получил бы «*», а
+                                    // при закрытии окно спросило бы «отменить несохранённые
+                                    // изменения?» и «отменило» бы то, что уже лежит в базе.
+                                    // Кнопки формы отвечают за СВОИ данные, а не за чужой журнал.
+                                    try {
+                                        if (!this.saveOnEdit && this.appForm && typeof this.appForm.setModified === 'function') {
+                                            this.appForm.setModified(true);
+                                        }
+                                    } catch (e) {}
 
                                     // Колоночное событие onChange: если у колонки лейаута описан
                                     // events.onChange — диспетчеризуем его через форму (аналог
@@ -9951,6 +10527,17 @@ class Table extends UIObject {
                                         if (ev && ev.type === 'change' && colDef && colDef.events && colDef.events.onChange
                                                 && this.appForm && typeof this.appForm.callClientBinding === 'function') {
                                             this.appForm.callClientBinding(colDef.events.onChange, [rowIndexLocal, newVal, displayVal]);
+                                        }
+                                    } catch (e) {}
+
+                                    // Таблица, которая САМА хранит свои записи (`saveOnEdit`),
+                                    // пишет правку ячейки сразу. Без этого правка меняла только
+                                    // кэш в памяти и молча пропадала: у списка нет кнопки
+                                    // «Сохранить», а методы отправки в этом классе были
+                                    // объявлены и оставлены неподключёнными.
+                                    try {
+                                        if (ev && ev.type === 'change' && this.saveOnEdit) {
+                                            this._saveCell(rowIndexLocal, colDef, newVal);
                                         }
                                     } catch (e) {}
                                 } catch (e) {}
@@ -10183,7 +10770,9 @@ class Table extends UIObject {
             } catch (e) {
                 console.error('[DynamicTable] onRowActivate error:', e);
             }
-            
+            // Сменился выбор — форма пересчитывает зависящие от него элементы сама.
+            try { if (this.appForm && typeof this.appForm._onTableStateChanged === 'function') this.appForm._onTableStateChanged(this); } catch (e) {}
+
             // attach global handlers to close editors on Escape
             // NOTE: Do NOT deactivate row on outside click - active row should remain active
             // even when focus moves to other UI elements (buttons, other forms, etc.)
@@ -10251,6 +10840,7 @@ class Table extends UIObject {
                 }
             }
             this.updateAllRowsReadOnly();
+            try { if (this.appForm && typeof this.appForm._onTableStateChanged === 'function') this.appForm._onTableStateChanged(this); } catch (e) {}
             if (this._docKeyHandler) {
                 try { document.removeEventListener('keydown', this._docKeyHandler); } catch (e) {}
                 this._docKeyHandler = null;
@@ -11873,6 +12463,31 @@ class DynamicTable extends Table {
         this.appName = options.appName || '';
         this.tableName = options.tableName || '';
         this.bufferRows = 10;
+        // Список сам ведёт текущую строку (как список 1С: первая строка активна сразу).
+        // Включается там, где выбор — часть работы с формой (relatedList), а не там,
+        // где активная строка означала бы «редактируем эту».
+        this.autoActivateFirstRow = !!options.autoActivateFirstRow;
+        // ── Когда правка ячейки пишется сразу, а когда копится до «Сохранить» ──────
+        //
+        // `saveOnEdit` предназначен ТОЛЬКО для списка САМОСТОЯТЕЛЬНЫХ записей — таких,
+        // которые живут независимо от открытой формы (журнал резервных копий,
+        // справочник в отдельном окне). У такого списка своей кнопки «Сохранить» нет и
+        // быть не должно, как и в списках 1С: правка ячейки есть правка записи.
+        //
+        // ТАБЛИЧНОЙ ЧАСТИ ДОКУМЕНТА это включать НЕЛЬЗЯ. Строки ТЧ принадлежат самому
+        // документу, их судьбу решают «Сохранить»/«Отмена» формы, и мгновенная запись
+        // сделала бы «Отмену» ложью. Поэтому умолчание — выключено, и включается флаг
+        // явно, у `relatedList` с `editable: true`.
+        //
+        // Второе следствие того же правила: такая таблица НЕ помечает форму изменённой
+        // (см. обработчик правки ячейки) — сохранять и отменять там нечего.
+        this.saveOnEdit = !!options.saveOnEdit;
+        // Режим редактирования и признак редактируемости базовый конструктор не получает
+        // (в super уходит лишь часть опций), поэтому ставим их здесь — иначе
+        // редактируемый список молча остаётся в режиме «сначала активируй строку», а
+        // прикладной код читает `editable` как false у заведомо редактируемой таблицы.
+        if (options.editMode) this.editMode = options.editMode;
+        if (options.editable !== undefined) this.editable = !!options.editable;
         // Явный выбор видимых колонок (имена полей модели) — сервер отдаст только их.
         this.serverFields = Array.isArray(options.serverFields) ? options.serverFields : null;
         // Точечные правки колонок из ЛЕЙАУТА: { имяПоля: { showTime, width, caption, properties } }.
@@ -12185,6 +12800,8 @@ class DynamicTable extends Table {
         if (tr) try { tr.classList.add('active'); } catch (e) {}
         try { this.updateAllRowsReadOnly(); } catch (e) {}
         try { if (typeof this.onRowActivate === 'function') this.onRowActivate(globalIndex); } catch (e) {}
+        // Сменился выбор — форма пересчитывает зависящие от него элементы сама.
+        try { if (this.appForm && typeof this.appForm._onTableStateChanged === 'function') this.appForm._onTableStateChanged(this); } catch (e) {}
         // Attach Escape handler to close editors
         if (!this._docKeyHandler) {
             this._docKeyHandler = (ev) => {
@@ -12228,6 +12845,7 @@ class DynamicTable extends Table {
         }
         this._activeRowIndex = -1;
         try { this.updateAllRowsReadOnly(); } catch (e) {}
+        try { if (this.appForm && typeof this.appForm._onTableStateChanged === 'function') this.appForm._onTableStateChanged(this); } catch (e) {}
         if (this._docKeyHandler) {
             try { document.removeEventListener('keydown', this._docKeyHandler); } catch (e) {}
             this._docKeyHandler = null;
@@ -12339,17 +12957,26 @@ class DynamicTable extends Table {
 
     async refresh() {
         this.showLoadingIndicator();
+        // Какая запись была выбрана ДО перечитывания. Индекс после обновления ничего не
+        // значит: строка могла уехать, исчезнуть или сдвинуться. Идентичность строки —
+        // её UID, по нему выбор и восстанавливается. Раньше этим занимался прикладной
+        // код каждой формы (и делал это с ошибками).
+        const prevUID = (() => { try { const r = this.currentRow; return r && r.UID; } catch (e) { return null; } })();
         // Reset all cached rows so stale cell content is replaced after reload
         this.dataCache = {};
         this._resetFilledRows();
         try {
             this.calculateVisibleRows();
             await this.loadData(this.firstVisibleRow);
+            try { this._restoreSelection(prevUID); } catch (e) {}
             // Декларативный колбэк «данные перезагружены» (events.onDataRefreshed
             // на элементе лейаута, напр. relatedList): форма может перечитать
             // зависимое состояние (кнопки и т.п.) из уже загруженных данных,
             // без второго RPC. Срабатывает и на первичной загрузке, и на SSE-refresh.
             try { if (typeof this.onDataRefreshed === 'function') this.onDataRefreshed(this); } catch (e) {}
+            // Состав строк изменился — пересчитать зависящие от него элементы формы
+            // (напр. кнопка, выключенная при пустом списке).
+            try { if (this.appForm && typeof this.appForm._onTableStateChanged === 'function') this.appForm._onTableStateChanged(this); } catch (e) {}
         } catch (error) {
             console.error('[DynamicTable] Refresh error:', error);
             if (typeof showAlert === 'function') {
@@ -12358,6 +12985,59 @@ class DynamicTable extends Table {
         } finally {
             this.hideLoadingIndicator();
         }
+    }
+
+    /**
+     * Записать правку одной ячейки в базу.
+     *
+     * Идёт через `dbGateway` серверным методом `updateRow` — то есть теми же RLS,
+     * хуками и SSE-оповещением, что и любое другое сохранение. Своего пути записи у
+     * таблицы нет и быть не должно.
+     */
+    async _saveCell(rowIndex, colDef, newVal) {
+        const field = colDef && colDef.data;
+        const row = this.dataCache && this.dataCache[rowIndex];
+        if (!field || !row || !row.UID || !this.tableName) return;
+        try {
+            const res = await callServerMethod(this.appName || 'uniForm', 'updateRow', {
+                tableName: this.tableName,
+                recordId: row.UID,
+                changes: { [field]: newVal }
+            });
+            if (res && res.error) {
+                // Молчаливый отказ здесь недопустим: пользователь видит новое значение в
+                // ячейке и уверен, что оно записано. Возвращаем прежнее и говорим прямо.
+                if (typeof showAlert === 'function') showAlert(__t('Error: ') + res.error);
+                try { await this.refresh(); } catch (e) {}
+            }
+        } catch (e) {
+            if (typeof showAlert === 'function') showAlert(__t('Error: ') + (e && e.message || e));
+            try { await this.refresh(); } catch (e2) {}
+        }
+    }
+
+    /**
+     * Восстановить выбор после перечитывания данных.
+     *
+     * Порядок попыток: та же запись по UID → первая строка (если список сам ведёт
+     * текущую строку, как в списках 1С) → снять выбор. Ключевое: выбор НЕ остаётся
+     * висеть на индексе, за которым теперь чужая запись.
+     */
+    _restoreSelection(prevUID) {
+        const rows = this.getRows();
+        if (prevUID) {
+            for (const r of rows) {
+                if (r && r.UID === prevUID) {
+                    if (this._activeRowIndex !== r.__index) this.activateRow(r.__index);
+                    return;
+                }
+            }
+        }
+        if (this.autoActivateFirstRow && rows.length) {
+            const first = rows[0];
+            if (first && typeof first.__index === 'number') { this.activateRow(first.__index); return; }
+        }
+        if (this.currentRowIndex >= 0) this.deactivateRow();
     }
 
     calculateVisibleRows() {
@@ -12665,36 +13345,15 @@ class DynamicTable extends Table {
                         console.log('[DynamicTable] session SSE connected for', this.appName, this.tableName);
                     };
 
+                    // Разбор — общий (см. MySpaceEvents.handleMessage): один поток на
+                    // окно несёт и обновления списков, и ход длинных операций, и у него
+                    // должен быть ОДИН обработчик, иначе события теряются у того, кто
+                    // подключился вторым.
                     ses.onmessage = (event) => {
-                        try {
-                            const d = JSON.parse(event.data);
-                            if (!d || d.type !== 'dataChanged') return;
-                            // 4.1: фильтр ПО КАЖДОМУ подписчику. Сессионный EventSource —
-                            // один на окно и несёт события ВСЕХ таблиц; реагировать должна
-                            // только та подписка, чьи app/tableName совпали с событием.
-                            // (Раньше фильтр шёл по this.* создателя ES → неродственные
-                            // таблицы окна рефрешились, а события не-создателя терялись.)
-                            const subs = window._dynamicTableSubscribers.get(sessionSharedKey);
-                            if (!subs) return;
-                            subs.forEach(sub => {
-                                try {
-                                    // Подписка реагирует на СВОЮ таблицу и на дополнительные
-                                    // наблюдаемые (extraWatchTables — напр. relatedList следит
-                                    // и за таблицей-связкой: invoice_bookings при списке invoices).
-                                    if (!sub || sub.appName !== d.app) return;
-                                    const watches = sub.tableName === d.tableName ||
-                                        (Array.isArray(sub.extraWatchTables) && sub.extraWatchTables.includes(d.tableName));
-                                    if (!watches) return;
-                                    sub.dataCache = {};
-                                    // Debounce SSE refresh to avoid rapid cascading refreshes
-                                    if (sub._sseRefreshTimer) clearTimeout(sub._sseRefreshTimer);
-                                    sub._sseRefreshTimer = setTimeout(() => {
-                                        sub._sseRefreshTimer = null;
-                                        if (typeof sub.refresh === 'function' && !sub._sseDestroyed) sub.refresh();
-                                    }, 300);
-                                } catch(e){}
-                            });
-                        } catch (e) { console.error('[DynamicTable] session SSE parse error', e); }
+                        // Шина объявлена в этом же файле выше; проверка — страховка от
+                        // порядка загрузки: без неё сбой здесь убил бы живое обновление
+                        // ВСЕХ списков окна, а не только журнал операции.
+                        if (window.MySpaceEvents) window.MySpaceEvents.handleMessage(event, sessionSharedKey);
                     };
 
                     ses.onerror = () => {

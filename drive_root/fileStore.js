@@ -26,6 +26,13 @@ const FILE_STORE_NS = 'client_files';
 const _minCache = new Map();
 const _langCache = new Map();
 
+// Тексты уже переведены под язык, а переводы (справочник `languages`, строки i18n
+// реестра) относятся к прежней базе. Подписка — рядом с кэшем; см. dbLifecycle.
+require('./dbLifecycle').onDatabaseReset('fileStore', () => {
+    _minCache.clear();
+    _langCache.clear();
+});
+
 // На слабом CPU terser (особенно для UI_classes.js ~505KB) — секунды чистого CPU
 // и блокировка event loop. После внедрения gzip (0.4) минификация даёт мало:
 // gzip жмёт сильнее и на порядок дешевле. Поэтому в рантайме по умолчанию НЕ

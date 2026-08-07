@@ -1215,6 +1215,25 @@ const _lookupCache = new Map(); // key → { val, ts }
 const _LOOKUP_CACHE_TTL = 30000; // 30с
 const _LOOKUP_CACHE_MAX = 500;
 
+// Подмена базы делает ВСЕ три кэша ложью: FK-представления, счётчики строк и списки
+// выпадашек относятся к данным, которых больше нет. Подписка стоит рядом с их
+// объявлением — перечислять кэши в коде восстановления запрещено (см. dbLifecycle).
+require('./dbLifecycle').onDatabaseReset('globalServerContext', async (ctx) => {
+    _fkDisplayCache.clear();
+    _countCache.clear();
+    _lookupCache.clear();
+    _tableNameLookup = null;
+    editSessions.clear();          // правки таблиц относятся к записям прежней базы
+    // Реестр предопределённых записей не просто чистится, а ПЕРЕЧИТЫВАЕТСЯ: пустой
+    // реестр — не «нет кэша», а «предопределённых записей не существует», и код,
+    // который ищет через `getDefaultValue`, начнёт молча получать null.
+    // При старте база может быть ещё не готова — тогда реестр наполнит штатный
+    // `reloadDefaultValues()` из main_server, поэтому отказ здесь не фатален.
+    defaultValuesCache = {};
+    if (ctx && ctx.reloadData === false) return;
+    try { await loadDefaultValuesFromDB(); } catch (e) { /* наполнится при старте */ }
+});
+
 function _lookupCacheGet(key) {
     const e = _lookupCache.get(key);
     if (!e) return undefined;

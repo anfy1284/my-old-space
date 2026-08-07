@@ -58,6 +58,51 @@ function validatePublicKey(pem) {
 }
 
 /**
+ * Проверить PEM ПРИВАТНОГО ключа и сказать, что именно не так.
+ *
+ * Зачем отдельная проверка, если восстановление и так упадёт. Затем, что падало оно с
+ * текстом «этот приватный ключ не подходит к копии — она зашифрована другой парой», и
+ * этот текст ВРАЛ в самом частом случае: администратор копировал в поле ПУБЛИЧНЫЙ ключ
+ * (он на виду, в форме настроек копирования), а сообщение отправляло его искать другую
+ * пару. Публичный ключ лежит на сервере и шифрует; приватный выдаётся один раз при
+ * генерации пары и на сервере отсутствует по построению — об этом и надо сказать.
+ *
+ * Проверка идёт ДО safety-выгрузки и до режима обслуживания: платить копией и простоем
+ * за опечатку в поле не за что.
+ *
+ * @param {string} pem
+ * @param {string} [passphrase]
+ * @returns {{ok: boolean, errorKey?: string, vars?: Object, fingerprint?: string}}
+ */
+function validatePrivateKey(pem, passphrase) {
+    const text = String(pem || '').trim();
+    if (!text) return { ok: false, errorKey: 'restore_err_key_required' };
+
+    if (/-----BEGIN (RSA )?PUBLIC KEY-----/.test(text)) {
+        return { ok: false, errorKey: 'restore_err_key_is_public' };
+    }
+
+    let key;
+    try {
+        key = crypto.createPrivateKey(passphrase ? { key: text, passphrase: String(passphrase) } : text);
+    } catch (e) {
+        const msg = String(e.message || '');
+        if (/passphrase|bad decrypt|DECODER/i.test(msg) && /ENCRYPTED/.test(text)) {
+            return { ok: false, errorKey: 'restore_err_key_passphrase', vars: { message: msg } };
+        }
+        return { ok: false, errorKey: 'restore_err_key_unparsable', vars: { message: msg } };
+    }
+    if (key.asymmetricKeyType !== 'rsa') {
+        return { ok: false, errorKey: 'restore_err_key_not_rsa', vars: { type: String(key.asymmetricKeyType) } };
+    }
+
+    // Отпечаток считается по ПУБЛИЧНОЙ части этой же пары — тем же способом, что и у
+    // публичного ключа. Значит его можно сравнить с отпечатком из заголовка копии и
+    // сказать «ключ от другой пары» ДО начала операции, а не на середине.
+    return { ok: true, fingerprint: fingerprint(crypto.createPublicKey(key)) };
+}
+
+/**
  * Породить пару ключей.
  *
  * Приватный ключ возвращается ВЫЗЫВАЮЩЕМУ и здесь никуда не сохраняется — решение,
@@ -112,4 +157,4 @@ function unwrapKey(privateKey, wrapped, passphrase) {
     );
 }
 
-module.exports = { fingerprint, validatePublicKey, generatePair, wrapKey, unwrapKey, MODULUS_BITS };
+module.exports = { fingerprint, validatePublicKey, validatePrivateKey, generatePair, wrapKey, unwrapKey, MODULUS_BITS };

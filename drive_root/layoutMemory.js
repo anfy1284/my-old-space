@@ -74,6 +74,13 @@ const _tableListSort = new Map();
 const _translatedCache = new Map();
 const _TRANSLATE_CACHE_DISABLED = process.env.LAYOUT_TRANSLATE_CACHE_DISABLE === '1';
 
+// Переведённые лейауты держат подписи на языке прежней базы (справочник `languages`
+// и строки `translations` едут внутри дампа). Сами лейауты не сбрасываем: их
+// регистрируют `init.js` приложений при старте процесса, а не база.
+require('./dbLifecycle').onDatabaseReset('layoutMemory', () => {
+    _translatedCache.clear();
+});
+
 
 
 /**

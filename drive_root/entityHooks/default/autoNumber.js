@@ -11,16 +11,30 @@
  *   4. Длина числовой части сохраняется (при переполнении растёт).
  *   5. Первая запись (MAX=null) — формат из params: prefix + padStart(length, '0').
  *
+ * НУМЕРАЦИЯ ВЕДЁТСЯ В РАЗРЕЗЕ ОРГАНИЗАЦИИ (как в 1С — по информационной базе, а у нас
+ * арендаторов несколько в одной). Инсталляция обслуживает несколько организаций, и
+ * общая сквозная нумерация означала бы, что счёт клиента А получает номер, зависящий от
+ * того, сколько документов завёл клиент Б: номера прыгают через десятки, а по журналу
+ * одной организации видны дыры, которых она себе не объясняет. Поэтому `MAX` берётся
+ * среди записей ТОЙ ЖЕ организации, и у каждой организации своя непрерывная нумерация.
+ *
+ * Сужение применяется, только если у таблицы ЕСТЬ реквизит области (`scopeField`).
+ * Таблицы ядра без организации (`scheduler_*`, `backup_files`, `db_versions`)
+ * нумеруются сквозным образом, как и раньше.
+ *
  * Параметры (entityConfig.hooks.beforeCreate[n].params):
- *   field   {string}      — имя поля для номера (обязательно)
- *   length  {number}      — длина числовой части для ПЕРВОЙ записи (по умолчанию 5)
- *   prefix  {string}      — префикс для ПЕРВОЙ записи (по умолчанию "")
- *   period  {string|null} — периодичность сброса: null/"year"/"month" (по умолчанию null)
+ *   field      {string}      — имя поля для номера (обязательно)
+ *   length     {number}      — длина числовой части для ПЕРВОЙ записи (по умолчанию 5)
+ *   prefix     {string}      — префикс для ПЕРВОЙ записи (по умолчанию "")
+ *   period     {string|null} — периодичность сброса: null/"year"/"month" (по умолчанию null)
+ *   scopeField {string|null} — реквизит области нумерации (по умолчанию "organizationId";
+ *                              `null` — сквозная нумерация по всей таблице)
  */
 
 'use strict';
 
 const { Op } = require('sequelize');
+const { resolveScopeValue } = require('./numberScope');
 
 module.exports = async function autoNumber(request, params, context) {
     const { field, length = 5, prefix = '', period = null } = params;
@@ -53,8 +67,12 @@ module.exports = async function autoNumber(request, params, context) {
     const Model = modelsDB[modelName];
     if (!Model) return;
 
+    // Область нумерации: своя непрерывная последовательность у каждой организации.
+    const scope = await resolveScopeValue(request, Model, params);
+
     // Строим фильтр периода
     const where = {};
+    if (scope.scoped) where[scope.field] = scope.value;
     if (period === 'year') {
         const now = new Date();
         const startOfYear = new Date(now.getFullYear(), 0, 1);
@@ -104,5 +122,6 @@ module.exports = async function autoNumber(request, params, context) {
     }
 
     request.data[field] = nextValue;
-    console.log(`[default.autoNumber] ${request.table}.${field} = "${request.data[field]}"`);
+    console.log(`[default.autoNumber] ${request.table}.${field} = "${request.data[field]}"`
+        + (scope.scoped ? ` (${scope.field}=${scope.value || '∅'})` : ''));
 };

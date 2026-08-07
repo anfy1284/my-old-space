@@ -80,7 +80,12 @@ async function runJob(msg) {
         // и без этого признака ручная копия вылетала бы по чужому лимиту.
         triggeredBy: msg.triggeredBy || 'schedule',
         params: msg.params || {},
-        log: (text) => send({ type: 'progress', runId: msg.runId, text: String(text) }),
+        // Ход работы. Второй аргумент — доля выполненного `{ done, total }`: без него
+        // пользователю остаётся смотреть на неподвижное окно и гадать, живо ли оно.
+        log: (text, progress) => send({
+            type: 'progress', runId: msg.runId, text: String(text),
+            done: progress && Number(progress.done), total: progress && Number(progress.total)
+        }),
         heartbeat: () => send({ type: 'heartbeat', runId: msg.runId }),
         isCancelled: () => current.cancelled === true
     };

@@ -34,7 +34,31 @@ const keys = require('./keys');
 const MAGIC = Buffer.from('MOSBAK01', 'ascii');
 const TRAILER_MAGIC = Buffer.from('MOSBAKEND', 'ascii');
 const FORMAT_VERSION = 1;
-const ALG_ID = 1;
+const ALG_ID = 1;                 // RSA-OAEP(DEK) + AES-256-GCM по чанкам
+
+/**
+ * Режим БЕЗ шифрования (решение владельца 2026-08-07).
+ *
+ * Зачем он нужен, если дамп содержит персональные данные всех клиентов. Долгосрочный
+ * архив живёт на отдельной домашней машине без выхода в интернет: она скачивает
+ * зашифрованные копии, расшифровывает своим ключом и хранит их УЖЕ расшифрованными —
+ * иначе через годы хранения архив упирается в утраченный ключ, а это нарушение уже не
+ * конфиденциальности, а ДОСТУПНОСТИ (Art. 32 DSGVO защищает и её, GoBD требует
+ * читаемости весь срок хранения).
+ *
+ * Отсюда два следствия, и оба обязательны:
+ *   1. ВОССТАНОВЛЕНИЕ обязано принимать незашифрованный файл — из домашнего архива
+ *      придёт именно такой;
+ *   2. СОЗДАВАТЬ незашифрованную копию можно только вручную, и она НЕ ОСТАЁТСЯ на
+ *      сервере: отдаётся потоком в скачивание. Сервер — самое уязвимое звено, а ключ
+ *      там нужен на минуты, а не на годы, поэтому «незашифрованный файл лежит в
+ *      каталоге копий» — это риск без выгоды.
+ *
+ * Формат контейнера тот же: magic, заголовок, чанки, трейлер с SHA-256 открытого
+ * текста. Меняется только тело чанка — оно не шифруется и не несёт тега
+ * аутентификации. Целостность по-прежнему проверяется трейлером.
+ */
+const ALG_NONE = 0;
 const TAG_LEN = 16;
 const NONCE_LEN = 12;
 const NONCE_PREFIX_LEN = 4;
@@ -61,13 +85,13 @@ function chunkNonce(noncePrefix, index) {
  * Собрать байты заголовка (всё до первого чанка).
  * @returns {{bytes: Buffer, hash: Buffer, headerJson: Object}}
  */
-function buildHeaderBytes(wrappedKey, headerObj) {
+function buildHeaderBytes(wrappedKey, headerObj, algId) {
     const headerJson = Buffer.from(JSON.stringify(headerObj), 'utf8');
 
     const prefix = Buffer.alloc(12);
     MAGIC.copy(prefix, 0);
     prefix.writeUInt8(FORMAT_VERSION, 8);
-    prefix.writeUInt8(ALG_ID, 9);
+    prefix.writeUInt8(algId === undefined ? ALG_ID : algId, 9);
     prefix.writeUInt16BE(wrappedKey.length, 10);
 
     const lenBuf = Buffer.alloc(4);
@@ -94,16 +118,22 @@ class EncryptStream extends Transform {
     constructor(opts) {
         super();
         const chunkSize = Number(opts.chunkSize) || DEFAULT_CHUNK_SIZE;
-        const dek = crypto.randomBytes(32);
-        const noncePrefix = crypto.randomBytes(NONCE_PREFIX_LEN);
 
-        const header = Object.assign({}, opts.header, {
-            chunkSize,
-            noncePrefix: noncePrefix.toString('hex')
-        });
+        // Отсутствие публичного ключа — это ЯВНЫЙ выбор режима без шифрования, а не
+        // «забыли ключ»: предусловия выгрузки (`checkPreconditions`) требуют ключ и
+        // пропускают эту проверку только по явному флагу ручного запуска.
+        const plain = !opts.publicKeyPem;
+        this._algId = plain ? ALG_NONE : ALG_ID;
+        this._tagLen = plain ? 0 : TAG_LEN;
 
-        const wrapped = keys.wrapKey(opts.publicKeyPem, dek);
-        const built = buildHeaderBytes(wrapped, header);
+        const dek = plain ? null : crypto.randomBytes(32);
+        const noncePrefix = plain ? null : crypto.randomBytes(NONCE_PREFIX_LEN);
+
+        const header = Object.assign({}, opts.header, { chunkSize, encrypted: !plain });
+        if (!plain) header.noncePrefix = noncePrefix.toString('hex');
+
+        const wrapped = plain ? Buffer.alloc(0) : keys.wrapKey(opts.publicKeyPem, dek);
+        const built = buildHeaderBytes(wrapped, header, this._algId);
 
         this._dek = dek;
         this._noncePrefix = noncePrefix;
@@ -121,12 +151,22 @@ class EncryptStream extends Transform {
     get headerLength() { return this._headerBytes.length; }
 
     _emitChunk(plain, isFinal) {
+        const lenBuf = Buffer.alloc(4);
+
+        if (this._algId === ALG_NONE) {
+            // Тело как есть, без тега. Обрамление то же (длина + тело), поэтому читатель
+            // разбирает поток одним кодом, отличая режимы только по длине тега.
+            lenBuf.writeUInt32BE(plain.length, 0);
+            this.push(Buffer.concat([lenBuf, plain]));
+            this._index++;
+            return;
+        }
+
         const cipher = crypto.createCipheriv('aes-256-gcm', this._dek, chunkNonce(this._noncePrefix, this._index));
         cipher.setAAD(chunkAAD(this._headerHash, this._index, isFinal));
         const body = Buffer.concat([cipher.update(plain), cipher.final()]);
         const tag = cipher.getAuthTag();
 
-        const lenBuf = Buffer.alloc(4);
         lenBuf.writeUInt32BE(body.length, 0);
         this.push(Buffer.concat([lenBuf, tag, body]));
         this._index++;
@@ -176,7 +216,7 @@ function parseHeader(head) {
     const formatVersion = head.readUInt8(8);
     const algId = head.readUInt8(9);
     if (formatVersion !== FORMAT_VERSION) throw new Error(`Неподдерживаемая версия формата: ${formatVersion}`);
-    if (algId !== ALG_ID) throw new Error(`Неподдерживаемый алгоритм: ${algId}`);
+    if (algId !== ALG_ID && algId !== ALG_NONE) throw new Error(`Неподдерживаемый алгоритм: ${algId}`);
 
     const wrappedLen = head.readUInt16BE(10);
     const wrappedEnd = 12 + wrappedLen;
@@ -239,10 +279,21 @@ class DecryptStream extends Transform {
             if (/обрезан|слишком мал/.test(e.message)) return false;
             throw e;
         }
-        this._dek = keys.unwrapKey(this._privateKeyPem, parsed.wrappedKey, this._passphrase);
+        this._algId = parsed.algId;
+        this._tagLen = parsed.algId === ALG_NONE ? 0 : TAG_LEN;
         this._headerHash = parsed.headerHash;
-        this._noncePrefix = Buffer.from(String(parsed.header.noncePrefix || ''), 'hex');
-        if (this._noncePrefix.length !== NONCE_PREFIX_LEN) throw new Error('В заголовке нет корректного noncePrefix');
+
+        if (parsed.algId === ALG_NONE) {
+            // Ключ не нужен и НЕ спрашивается: копия из домашнего архива приходит
+            // расшифрованной. Требовать ключ здесь значило бы сделать невозможным
+            // ровно тот сценарий, ради которого режим и заведён.
+            this._dek = null;
+            this._noncePrefix = null;
+        } else {
+            this._dek = keys.unwrapKey(this._privateKeyPem, parsed.wrappedKey, this._passphrase);
+            this._noncePrefix = Buffer.from(String(parsed.header.noncePrefix || ''), 'hex');
+            if (this._noncePrefix.length !== NONCE_PREFIX_LEN) throw new Error('В заголовке нет корректного noncePrefix');
+        }
         this.header = parsed.header;
         this._buffer = this._buffer.subarray(parsed.headerBytes.length);
         this._state = 'chunks';
@@ -266,7 +317,7 @@ class DecryptStream extends Transform {
     _tryChunk(atEnd) {
         if (this._buffer.length < 4) return false;
         const cipherLen = this._buffer.readUInt32BE(0);
-        const total = 4 + TAG_LEN + cipherLen;
+        const total = 4 + this._tagLen + cipherLen;
         if (this._buffer.length < total + TRAILER_LEN) {
             if (!atEnd) return false;
             throw new Error('Файл резервной копии обрезан: чанк не помещается до конца файла');
@@ -277,17 +328,24 @@ class DecryptStream extends Transform {
         if (!isFinal && rest < TRAILER_LEN) throw new Error('Файл резервной копии повреждён: неверная длина чанка');
         if (isFinal && !atEnd) return false;      // ждём конца потока — вдруг данные ещё идут
 
-        const tag = this._buffer.subarray(4, 4 + TAG_LEN);
-        const body = this._buffer.subarray(4 + TAG_LEN, total);
+        const body = this._buffer.subarray(4 + this._tagLen, total);
 
-        const decipher = crypto.createDecipheriv('aes-256-gcm', this._dek, chunkNonce(this._noncePrefix, this._index));
-        decipher.setAAD(chunkAAD(this._headerHash, this._index, isFinal));
-        decipher.setAuthTag(tag);
         let plain;
-        try {
-            plain = Buffer.concat([decipher.update(body), decipher.final()]);
-        } catch (e) {
-            throw new Error(`Чанк ${this._index} не проходит проверку подлинности — файл повреждён или подделан`);
+        if (this._algId === ALG_NONE) {
+            // Тега нет — целостность проверяет трейлер (SHA-256 всего открытого текста).
+            // Это слабее поканальной аутентификации: подмену середины файла мы заметим
+            // только в конце, а не на первом же испорченном чанке. Цена режима.
+            plain = Buffer.from(body);
+        } else {
+            const tag = this._buffer.subarray(4, 4 + this._tagLen);
+            const decipher = crypto.createDecipheriv('aes-256-gcm', this._dek, chunkNonce(this._noncePrefix, this._index));
+            decipher.setAAD(chunkAAD(this._headerHash, this._index, isFinal));
+            decipher.setAuthTag(tag);
+            try {
+                plain = Buffer.concat([decipher.update(body), decipher.final()]);
+            } catch (e) {
+                throw new Error(`Чанк ${this._index} не проходит проверку подлинности — файл повреждён или подделан`);
+            }
         }
 
         this._plainSize += plain.length;
@@ -339,5 +397,5 @@ class DecryptStream extends Transform {
 
 module.exports = {
     EncryptStream, DecryptStream, parseHeader,
-    MAGIC, TRAILER_MAGIC, FORMAT_VERSION, ALG_ID, TRAILER_LEN, DEFAULT_CHUNK_SIZE
+    MAGIC, TRAILER_MAGIC, FORMAT_VERSION, ALG_ID, ALG_NONE, TRAILER_LEN, DEFAULT_CHUNK_SIZE
 };

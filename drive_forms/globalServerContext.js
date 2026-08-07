@@ -16,6 +16,19 @@ const log = require('../drive_root/log');
 const _loadAppsCache = new Map();
 const _LOADAPPS_CACHE_ON = process.env.LOADAPPS_CACHE_DISABLE !== '1';
 
+// Бандл собран под язык и роль ПРЕЖНЕЙ базы, контекст сессии — тоже. После подмены
+// базы и то и другое ложь: сессии ушли вместе со старой схемой, язык пользователя
+// приехал из дампа. Namespace'ы `memory_store` чистятся отдельно — они живут в другом
+// процессе и переживают даже перезапуск сервера. Подписка — рядом с кэшами.
+require('../drive_root/dbLifecycle').onDatabaseReset('drive_forms/globalServerContext', async () => {
+    _loadAppsCache.clear();
+    _languageFieldUID = undefined;
+    const ms = require('../drive_root/memory_store');
+    for (const ns of ['session_context', 'session_users', 'session_meta', 'user_roles', 'datasets']) {
+        await ms.clearNamespace(ns);
+    }
+});
+
 async function loadApps(user, sessionID) {
   const accessRole = await getUserAccessRole(user);
   log.debug(`[loadApps] Loading apps for user: ${user ? user.name : 'null'}, role: ${accessRole}`);

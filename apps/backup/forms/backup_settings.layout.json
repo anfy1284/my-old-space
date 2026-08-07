@@ -9,9 +9,7 @@
                     "i18n": "backup_create_now_btn"
                 },
                 "icon": "/apps/general_icons/resources/public/16x16/backup.png",
-                "events": {
-                    "onClick": "createFull"
-                },
+                "menuOnClick": true,
                 "menu": [
                     {
                         "caption": {
@@ -34,6 +32,16 @@
                 ]
             },
             {
+                "name": "btnCreatePlain",
+                "caption": {
+                    "i18n": "backup_create_plain_btn"
+                },
+                "icon": "/apps/general_icons/resources/public/16x16/download.png",
+                "events": {
+                    "onClick": "createPlain"
+                }
+            },
+            {
                 "name": "btnDownload",
                 "caption": {
                     "i18n": "backup_download_btn"
@@ -41,6 +49,28 @@
                 "icon": "/apps/general_icons/resources/public/16x16/download.png",
                 "events": {
                     "onClick": "downloadSelected"
+                },
+                "enabledWhen": {
+                    "currentRow": "backupFilesTable",
+                    "where": {
+                        "missing": false
+                    }
+                }
+            },
+            {
+                "name": "btnRestoreOrg",
+                "caption": {
+                    "i18n": "backup_restore_org_btn"
+                },
+                "icon": "/apps/general_icons/resources/public/16x16/restore.png",
+                "events": {
+                    "onClick": "restoreOrganization"
+                },
+                "enabledWhen": {
+                    "currentRow": "backupFilesTable",
+                    "where": {
+                        "missing": false
+                    }
                 }
             },
             {
@@ -51,6 +81,9 @@
                 "icon": "/apps/general_icons/resources/public/16x16/delete.png",
                 "events": {
                     "onClick": "deleteSelected"
+                },
+                "enabledWhen": {
+                    "currentRow": "backupFilesTable"
                 }
             },
             {
@@ -81,6 +114,24 @@
                     "rows": 5
                 },
                 "data": "statusText"
+            }
+        ]
+    },
+    {
+        "type": "group",
+        "name": "grpRun",
+        "caption": {
+            "i18n": "backup_run_group"
+        },
+        "layout": [
+            {
+                "type": "runLog",
+                "name": "runLog",
+                "caption": "",
+                "properties": {
+                    "handler": "backup.create",
+                    "rows": 7
+                }
             }
         ]
     },
@@ -174,6 +225,58 @@
     },
     {
         "type": "group",
+        "name": "grpRecovery",
+        "caption": {
+            "i18n": "backup_recovery_group"
+        },
+        "layout": [
+            {
+                "type": "label",
+                "name": "recoveryHint",
+                "caption": {
+                    "i18n": "backup_recovery_hint"
+                }
+            },
+            {
+                "type": "group",
+                "name": "grpRecoveryRow",
+                "noBorder": true,
+                "horizontal": true,
+                "layout": [
+                    {
+                        "type": "textbox",
+                        "name": "recoveryState",
+                        "caption": {
+                            "i18n": "backup_recovery_state_field"
+                        },
+                        "readOnly": true,
+                        "data": "recoveryState"
+                    },
+                    {
+                        "type": "textbox",
+                        "name": "recoveryPassword",
+                        "caption": {
+                            "i18n": "backup_recovery_password_field"
+                        },
+                        "data": "recoveryPassword"
+                    },
+                    {
+                        "type": "button",
+                        "name": "btnSetRecovery",
+                        "caption": {
+                            "i18n": "backup_recovery_set_btn"
+                        },
+                        "icon": "/apps/general_icons/resources/public/16x16/key.png",
+                        "events": {
+                            "onClick": "setRecoveryPassword"
+                        }
+                    }
+                ]
+            }
+        ]
+    },
+    {
+        "type": "group",
         "name": "grpScope",
         "caption": {
             "i18n": "backup_scope_group"
@@ -212,8 +315,42 @@
                 "properties": {
                     "tableName": "backup_files",
                     "appName": "uniForm",
+                    "editable": true,
+                    "columnOverrides": {
+                        "fileName": {
+                            "readOnly": true
+                        },
+                        "date": {
+                            "readOnly": true
+                        },
+                        "scopeType": {
+                            "readOnly": true
+                        },
+                        "scopeOrganizationName": {
+                            "readOnly": true
+                        },
+                        "triggeredBy": {
+                            "readOnly": true
+                        },
+                        "rowsTotal": {
+                            "readOnly": true
+                        },
+                        "sizeBytes": {
+                            "readOnly": true
+                        },
+                        "verifyStatus": {
+                            "readOnly": true
+                        },
+                        "acked": {
+                            "readOnly": true
+                        },
+                        "missing": {
+                            "readOnly": true
+                        }
+                    },
                     "fields": [
                         "date",
+                        "title",
                         "fileName",
                         "scopeType",
                         "scopeOrganizationName",
@@ -225,10 +362,6 @@
                         "missing"
                     ],
                     "visibleRows": 10
-                },
-                "events": {
-                    "onDataRefreshed": "onFilesRefreshed",
-                    "onRowActivate": "onFileSelected"
                 }
             }
         ]

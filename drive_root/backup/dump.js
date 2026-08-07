@@ -27,37 +27,10 @@ const serialize = require('./serialize');
 const DUMP_FORMAT = 'mos-logical-1';
 const PAGE_SIZE = 1000;
 
-/**
- * Каноническая сериализация — основа `configHash` (ТЗ §6.4 п.1).
- *
- * Хэшировать определения «как есть» нельзя: значение запляшет от порядка ключей в
- * объектах и порядка обхода приложений, и после каждого рестарта появится «новая
- * версия структуры» на ровном месте. Поэтому сортируем ключи и таблицы.
- */
-function canonical(value) {
-    if (Array.isArray(value)) return value.map(canonical);
-    if (value && typeof value === 'object') {
-        const out = {};
-        for (const k of Object.keys(value).sort()) {
-            const v = value[k];
-            if (typeof v === 'function') continue;          // `defaultValue: () => …` волатильна
-            out[k] = canonical(v);
-        }
-        return out;
-    }
-    return value;
-}
-
-/** Снимок структуры в каноническом виде + его хэш. */
-function modelsSnapshot(models) {
-    const snapshot = canonical(
-        (models || [])
-            .map(m => ({ name: m.name, tableName: m.tableName, fields: m.fields, options: m.options, entityConfig: m.entityConfig || null }))
-            .sort((a, b) => String(a.tableName).localeCompare(String(b.tableName)))
-    );
-    const hash = 'sha256:' + crypto.createHash('sha256').update(JSON.stringify(snapshot)).digest('hex');
-    return { snapshot, configHash: hash };
-}
+// Каноническая сериализация и снимок структуры живут в `db/modelsHash`: тем же
+// хэшем идентифицируется версия структуры в журнале `db_versions`, и двух реализаций
+// у идентичности версии быть не должно.
+const { canonical, modelsSnapshot } = require('../db/modelsHash');
 
 /**
  * Сверить фактические таблицы БД с моделями (ТЗ §0, страховка).
@@ -105,7 +78,13 @@ function createPayloadStream(opts) {
         plannedTables: plan.tables.length
     };
 
-    const progress = (text) => { try { if (onProgress) onProgress(text); } catch (e) { /* журнал не должен ронять выгрузку */ } };
+    // Второй аргумент — доля выполненного: сколько таблиц плана пройдено из скольких.
+    // Без неё полоса прогресса может только «крутиться», не отвечая на вопрос «сколько
+    // ещё ждать».
+    const progress = (text, done) => {
+        try { if (onProgress) onProgress(text, { done, total: plan.tables.length }); }
+        catch (e) { /* журнал не должен ронять выгрузку */ }
+    };
     const line = (obj) => JSON.stringify(obj) + '\n';
 
     async function* generate() {
@@ -131,6 +110,7 @@ function createPayloadStream(opts) {
         // же вставка после восстановления упадёт с «duplicate key».
         yield line({ kind: 'sequences', values: {} });
 
+        let tablesDone = 0;
         for (const entry of plan.tables) {
             const where = dumpScope.type === 'organization'
                 ? scope.buildWhere(entry.filter, dumpScope.organizationId, q)
@@ -138,7 +118,10 @@ function createPayloadStream(opts) {
 
             yield line({ kind: 'table', table: entry.table, cls: entry.cls, filtered: !!where });
 
-            const fields = (entry.model && entry.model.fields) || {};
+            // Служебные отметки времени входят в выгрузку наравне с прикладными полями
+            // (см. serialize.modelFields): без них восстановление проставило бы всем
+            // строкам момент восстановления.
+            const fields = serialize.modelFields(entry.model);
             const hash = crypto.createHash('sha256');
             let count = 0;
             let afterUID = null;
@@ -167,7 +150,11 @@ function createPayloadStream(opts) {
 
             stats.tables[entry.table] = { rows: count, sha256: hash.digest('hex'), cls: entry.cls };
             stats.totalRows += count;
-            if (count) progress(`${entry.table}: ${count}`);
+            tablesDone++;
+            // Сообщаем о КАЖДОЙ таблице, а не только о непустых: иначе полоса прогресса
+            // стоит на месте всё время, пока идут пустые таблицы, и операция выглядит
+            // зависшей.
+            progress(`${entry.table}: ${count}`, tablesDone);
         }
 
         yield line({ kind: 'summary', totalRows: stats.totalRows, tables: stats.tables });

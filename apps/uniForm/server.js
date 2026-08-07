@@ -27,6 +27,72 @@ const ICON_JOURNAL   = '/apps/general_icons/resources/public/16x16/journal.png';
 const ICON_CATALOG   = '/apps/general_icons/resources/public/16x16/catalog.png';  // список справочника
 
 /**
+ * Контекст ВЫЗОВА серверного обработчика формы — тот же, что у обычного RPC.
+ *
+ * Событие формы (`onLoadData`, `onSave`, `onBeforeSave`) — такой же вызов прикладного
+ * кода, как и `/server-call`, и обязано получать такой же `ctx`. Раньше сюда уезжал
+ * один `sessionID`, поэтому проверка `ctx.role` в обработчике отвергала даже
+ * администратора — и форма открывалась ПУСТЫМ окном без единого сообщения. Каждый
+ * автор формы был вынужден дорезолвивать роль сам (заплатка `requireAdmin` в
+ * `apps/backup`), то есть писать в прикладном коде то, что знает ядро.
+ *
+ * Роль всё равно резолвится рядом — она нужна для `getServerScript`; здесь просто
+ * не выбрасывается.
+ *
+ * @param {string} sessionID
+ * @param {string} [knownRole] — уже посчитанная роль (не резолвим второй раз)
+ * @returns {Promise<{sessionID: string, user: Object|null, role: string|null}>}
+ */
+async function buildEventContext(sessionID, knownRole) {
+    let user = null;
+    let role = knownRole || null;
+    try {
+        const gCtx = require('../../drive_root/globalServerContext');
+        user = sessionID ? await gCtx.getUserBySessionID(sessionID) : null;
+        if (!role && user) {
+            const formsCtx = require('../../drive_forms/globalServerContext');
+            role = await formsCtx.getUserAccessRole(user);
+        }
+    } catch (e) {
+        console.error('[uniForm/buildEventContext] error:', e && e.message || e);
+    }
+    return { sessionID, user, role };
+}
+
+/**
+ * Данные формы от `onLoadData` → внутренняя форма (массив `{name, value}`).
+ *
+ * Обработчику разрешено вернуть ОБЫЧНЫЙ объект `{ поле: значение }` — это очевидная
+ * запись, и именно её пишут по первому впечатлению. Раньше принимался только массив:
+ * объект проходил без ошибки, `_dataMap` оставался пустым, и форма молча открывалась
+ * пустой — контракт без диагностики. Теперь обе формы равноправны, а мусор (строка,
+ * число) не проглатывается молча, а называется в журнале.
+ *
+ * @param {*} data — то, что вернул обработчик в поле `data`
+ * @param {string} where — откуда вызвано, для сообщения в журнал
+ * @returns {Array<Object>}
+ */
+function normalizeLoadedData(data, where) {
+    if (data === null || data === undefined) return [];
+    if (Array.isArray(data)) return data;
+    if (typeof data === 'object') {
+        return Object.entries(data).map(([name, value]) => {
+            // Значение может быть уже полной записью ({value, selection, options…}) —
+            // тогда берём её как есть, лишь проставив имя.
+            if (value && typeof value === 'object' && !Array.isArray(value)
+                && (Object.prototype.hasOwnProperty.call(value, 'value')
+                    || Object.prototype.hasOwnProperty.call(value, 'selection')
+                    || Object.prototype.hasOwnProperty.call(value, 'options'))) {
+                return Object.assign({ name, tabularSection: false }, value);
+            }
+            return { name, value, tabularSection: false };
+        });
+    }
+    console.error(`[uniForm/${where}] onLoadData вернул data типа ${typeof data} — ожидается объект { поле: значение } или массив [{name, value}]`);
+    return [];
+}
+
+/**
  * Определяет иконку по умолчанию для таблицы с учётом режима (запись/список).
  * 1. Явно заданная иконка из layoutMemory (formIcon для записи, listIcon для списка).
  * 2. Иконка по entityType: документ → document/journal, справочник → catalog.
@@ -192,8 +258,8 @@ async function getLayoutWithData(params, sessionID) {
                         const entry    = serverScriptStore.getServerScript(binding.serverScript, userRole || '*');
                         const fn       = entry && entry.scriptObj && entry.scriptObj[binding.fn || 'onLoadData'];
                         if (typeof fn === 'function') {
-                            const result = await fn({ tableName, params }, { sessionID });
-                            listData = (result && result.data) || [];
+                            const result = await fn({ tableName, params }, await buildEventContext(sessionID, userRole));
+                            listData = normalizeLoadedData(result && result.data, 'list');
                             if (result && result.caption && Array.isArray(clLayout) && clLayout[0]) {
                                 clLayout[0].caption = result.caption;
                             }
@@ -240,7 +306,13 @@ async function getLayoutWithData(params, sessionID) {
                     appName: config.name,
                     tableName: tableName,
                     visibleRows: 10,
-                    editable: true,
+                    // Автоматически построенный журнал документов/справочника —
+                    // ТОЛЬКО ПРОСМОТР. Запись правится в своей форме, где действуют её
+                    // проверки и кнопки «Сохранить»/«Отмена»; править сущность прямо в
+                    // списке — не то, чего ждёт пользователь, открывая журнал.
+                    // Прикладной лейаут может включить редактирование явно
+                    // (`editable: true`) — тогда правка ячейки пишется в базу.
+                    editable: false,
                     showToolbar: true,
                     initialSort: _initialSort
                 }
@@ -395,7 +467,7 @@ async function applyChanges(payload, sessionID) {
                     const entry = serverScriptStore.getServerScript(binding.serverScript, userRole || '*');
                     const fn = entry && entry.scriptObj && entry.scriptObj[binding.fn || 'onSave'];
                     if (typeof fn === 'function') {
-                        const result = await fn({ changes, tableName }, { sessionID });
+                        const result = await fn({ changes, tableName }, await buildEventContext(sessionID, userRole));
                         return result || { ok: true };
                     }
                 }
@@ -764,7 +836,7 @@ async function dispatchServerEvent(eventName, payload, { tableName, sessionID })
             const entry = serverScriptStore.getServerScript(binding.serverScript, userRole || '*');
             const fn = entry && entry.scriptObj && entry.scriptObj[binding.fn || eventName];
             if (typeof fn === 'function') {
-                await fn(payload, { sessionID });
+                await fn(payload, await buildEventContext(sessionID, userRole));
                 console.log(`[uniForm] server event "${eventName}" handled for ${tableName}`);
             }
             break;
@@ -959,9 +1031,9 @@ async function generateFormSpec(tableName, params, sessionID) {
                 const entry = serverScriptStore.getServerScript(binding.serverScript, userRole || '*');
                 const fn = entry && entry.scriptObj && entry.scriptObj[binding.fn || 'onLoadData'];
                 if (typeof fn === 'function') {
-                    const result = await fn({ tableName, params }, { sessionID });
+                    const result = await fn({ tableName, params }, await buildEventContext(sessionID, userRole));
                     const layout = JSON.parse(JSON.stringify(customLayoutObj.layout || []));
-                    const data = (result && result.data) || [];
+                    const data = normalizeLoadedData(result && result.data, 'generateFormSpec');
                     if (result && result.caption && layout[0]) layout[0].caption = result.caption;
                     // Автозаполнение для новых записей
                     if (!params || (!params.recordID && !params.recordId && !params.id)) {
@@ -1692,10 +1764,47 @@ function getMultiInstanceTables() {
     return map;
 }
 
+/**
+ * Обновить отдельные поля ОДНОЙ записи по её UID.
+ *
+ * Нужен редактируемому списку: у него нет формы записи и кнопки «Сохранить», а правка
+ * ячейки обязана попадать в базу. Идёт через `dbGateway`, то есть под теми же RLS,
+ * хуками и оповещением, что и обычное сохранение, — собственного пути записи у списка
+ * быть не должно.
+ */
+async function updateRow(params, sessionID) {
+    const { tableName, recordId, changes } = params || {};
+    if (!tableName || !recordId || !changes || typeof changes !== 'object') {
+        return { ok: false, error: await tForSession('no_table_context', sessionID) };
+    }
+    try {
+        const dbGW = require('../../drive_root/dbGateway');
+        // Правка из списка проходит ТУ ЖЕ проверку, что и сохранение формы: иначе у
+        // записи появляется второй путь в базу, мимо контроля прикладного кода
+        // (`onBeforeSave` умеет отменить сохранение — напр. контроль дат брони).
+        await dispatchServerEvent('onBeforeSave', {
+            tableName, record: null, changes, parentUID: recordId, isNew: false
+        }, { tableName, sessionID });
+
+        await dbGW.execute({
+            operation: 'update', table: tableName,
+            where: { UID: recordId }, data: changes,
+            context: { sessionID }
+        });
+        // Списки в других окнах обязаны увидеть правку.
+        try { dynamicTableMethods.notifyTableChange(tableName, 'update', recordId); } catch (e) {}
+        return { ok: true };
+    } catch (e) {
+        console.error('[uniForm/updateRow] error:', e && e.message || e);
+        return { ok: false, error: (e && e.message) || String(e) };
+    }
+}
+
 module.exports = {
     getData,
     getLayoutWithData,
     applyChanges,
+    updateRow,
     deleteRecord,
     getMultiInstanceTables,
     generateFormSpec,
@@ -1713,5 +1822,22 @@ module.exports = {
     // SSE-оповещение об изменении таблицы — для серверного кода, меняющего данные
     // мимо applyChanges (программное создание/перезаполнение документов): подписанные
     // DynamicTable/relatedList обновятся так же, как после сохранения формы.
-    notifyTableChange: dynamicTableMethods.notifyTableChange
+    /**
+     * Оповестить открытые списки об изменении таблицы.
+     *
+     * В ПРОЦЕССЕ-ВОРКЕРЕ рассылать некому: SSE-подключения браузеров живут в главном
+     * процессе, и вызов здесь просто уходил в пустоту — из-за этого список копий
+     * появлялся в форме только после её перезагрузки. Поэтому воркер не рассылает, а
+     * ПЕРЕДАЁТ событие главному процессу тем же каналом, что и ход выполнения.
+     *
+     * Разводка сидит ЗДЕСЬ, в единственной точке, а не у вызывающих: обработчик
+     * регламентной задачи пишет один и тот же код независимо от того, где он исполняется.
+     */
+    notifyTableChange(tableName, action, rowId, rowData = null) {
+        if (process.env.MOS_SCHEDULER_WORKER === '1' && typeof process.send === 'function') {
+            try { process.send({ type: 'notifyTable', table: tableName, action, rowId: rowId || null }); } catch (e) {}
+            return;
+        }
+        return dynamicTableMethods.notifyTableChange(tableName, action, rowId, rowData);
+    }
 };

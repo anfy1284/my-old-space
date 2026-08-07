@@ -4,100 +4,16 @@
 // __SERVER_SCRIPT__ заменяется там на реальное имя серверного скрипта.
 // Сигнатура обработчиков: function(eventArgs..., ctx), ctx = { form, fnParams }.
 // Файл обязан заканчиваться `return { ... }` — этого требует loadScript().
+//
+// Здесь только СПЕЦИФИКА этой формы: создать копию, сгенерировать ключи, скачать
+// выбранное, удалить, открыть расписание. Обвязка (доступ к контролам, текущая
+// строка таблицы, доступность кнопок по выбору, скачивание файла) — в ядре:
+// form.getControl / table.currentRow / "enabledWhen" в лейауте / MySpace.downloadFile.
 
-var selectedFileUID = null;
-var selectedFileMissing = false;
-
-function ctrl(form, name) {
-    return (form && form.controlsMap && form.controlsMap[name]) || null;
-}
-
-function setStatusText(form, text) {
-    var c = ctrl(form, 'statusText');
-    if (c && typeof c.setValue === 'function' && text !== undefined && text !== null) {
-        try { c.setValue(text); } catch (e) { /* контрол ещё не готов */ }
-    }
-}
-
-function setEnabled(form, name, on) {
-    var b = ctrl(form, name);
-    if (b && typeof b.setEnabled === 'function') b.setEnabled(!!on);
-}
-
-/**
- * Скачивание — обычной навигацией браузера, а не fetch: файл может весить сотни
- * мегабайт, и тянуть его в память вкладки, чтобы потом отдать как blob, незачем.
- * Права проверяет сам роут, поэтому ссылка безопасна.
- */
-function downloadViaBrowser(url) {
-    var a = document.createElement('a');
-    a.href = url;
-    a.style.display = 'none';
-    document.body.appendChild(a);
-    a.click();
-    setTimeout(function () { try { document.body.removeChild(a); } catch (e) {} }, 0);
-}
-
-/**
- * Текущая строка списка копий.
- *
- * Читается из самого контрола (`_activeRowIndex` + `dataCache`), а не хранится
- * параллельно в переменной формы: у `relatedList` нет события выбора строки, и своя
- * копия состояния всё равно разъезжалась бы с тем, что видит пользователь.
- * Правильное место для этого — свойство «текущая строка» у таблицы в ядре (задача B13).
- */
-function currentFile(form) {
-    var tbl = ctrl(form, 'backupFilesTable');
-    if (!tbl) return null;
-    var rows = tbl.dataCache || [];
-    var idx = (typeof tbl._activeRowIndex === 'number' && tbl._activeRowIndex >= 0) ? tbl._activeRowIndex : -1;
-    if (idx < 0 || idx >= rows.length) return null;
-    return rows[idx] || null;
-}
-
-/** Строка журнала копий выбрана — включаем зависимые кнопки. */
-function onFileSelected(row, ctx) {
-    var form = ctx && ctx.form;
-    var data = row && (row.data || row);
-    selectedFileUID = (data && data.UID) || null;
-    selectedFileMissing = !!(data && data.missing);
-    // Кнопка неприменимого действия остаётся видимой и выключается, а не прячется:
-    // иначе командная панель прыгает и непонятно, куда делось действие.
-    setEnabled(form, 'btnDownload', !!selectedFileUID && !selectedFileMissing);
-    setEnabled(form, 'btnDeleteFile', !!selectedFileUID);
-}
-
-/** Журнал перечитался (SSE) — прежняя выборка могла исчезнуть. */
-function onFilesRefreshed(tbl, ctx) {
-    var form = (ctx && ctx.form) || (tbl && tbl.appForm);
-    if (!form) return;
-    var rows = (tbl && tbl.dataCache) || [];
-    var stillThere = false;
-    for (var i = 0; i < rows.length; i++) {
-        if (rows[i] && rows[i].UID === selectedFileUID) { stillThere = true; selectedFileMissing = !!rows[i].missing; break; }
-    }
-    if (!stillThere) { selectedFileUID = null; selectedFileMissing = false; }
-    // Кнопки доступны, пока в списке есть хоть одна копия: конкретную строку берём
-    // в момент нажатия из самой таблицы (см. currentFile).
-    setEnabled(form, 'btnDownload', rows.length > 0);
-    setEnabled(form, 'btnDeleteFile', rows.length > 0);
-}
-
-function downloadSelected(ev, ctx) {
-    var rec = currentFile(ctx && ctx.form);
-    if (!rec || !rec.UID) { showAlert(__t('backup_err_no_selection')); return; }
-    if (rec.missing) { showAlert(__t('backup_err_no_selection')); return; }
-    downloadViaBrowser('/api/apps/backup/download/' + encodeURIComponent(rec.UID));
-}
-
-async function deleteSelected(ev, ctx) {
-    var form = ctx && ctx.form;
-    var rec = currentFile(form);
-    if (!rec || !rec.UID) { showAlert(__t('backup_err_no_selection')); return; }
-    var ok = await showConfirm(__t('backup_delete_confirm'));
-    if (!ok) return;
-    var res = await callServer('__SERVER_SCRIPT__', 'deleteBackup', { uid: rec.UID });
-    if (!res || res.error) { showAlert(__t('Error: ') + ((res && res.error) || '')); return; }
+/** Копия, выбранная в журнале. Текущую строку ведёт сама таблица. */
+function selectedFile(form) {
+    var tbl = form && form.getControl('backupFilesTable');
+    return tbl ? tbl.currentRow : null;
 }
 
 /** Общая часть запуска: несохранённые настройки сначала сохраняем. */
@@ -108,9 +24,20 @@ async function startBackup(form, scope, organizationId) {
         await form.doAction('save');
         if (form.needsSave()) return;   // сохранение не удалось, ошибка уже показана
     }
+
+    // Лимит копий уже занят — новая вытеснит старую. Пользователь должен узнать об
+    // этом ДО запуска и по имени файла, а не обнаружить пропажу потом.
+    var prev = await callServer('__SERVER_SCRIPT__', 'previewRetention', {});
+    if (prev && prev.willDelete && prev.willDelete.length) {
+        var names = prev.willDelete.map(function (f) { return '• ' + f.fileName; }).join('\n');
+        var agreed = await showConfirm(__t('backup_retention_warn_msg') + '\n\n' + names);
+        if (!agreed) return;
+    }
+
     var res = await callServer('__SERVER_SCRIPT__', 'createNow', { scope: scope, organizationId: organizationId });
     if (!res || res.error) { showAlert(__t('Error: ') + ((res && res.error) || '')); return; }
-    showAlert(res.message || __t('backup_run_started_msg'));
+    // Сообщения «запущено» больше нет: ход операции виден в самой форме (runLog),
+    // и модальное окно поверх него только мешает смотреть.
 }
 
 async function createFull(ev, ctx) {
@@ -126,16 +53,43 @@ async function createFull(ev, ctx) {
  */
 async function createForOrganization(ev, ctx) {
     var form = ctx && ctx.form;
-    var c = ctrl(form, 'scopeOrganizationId');
-    var orgId = c && typeof c.getValue === 'function' ? c.getValue() : null;
+    var orgId = form && form.getControlValue('scopeOrganizationId');
     if (!orgId) {
         showAlert(__t('backup_err_scope_org_required'));
+        var c = form && form.getControl('scopeOrganizationId');
         if (c && typeof c.focus === 'function') { try { c.focus(); } catch (e) {} }
         return;
     }
     var confirmed = await showConfirm(__t('backup_org_scope_confirm'));
     if (!confirmed) return;
     await startBackup(form, 'organization', orgId);
+}
+
+function downloadSelected(ev, ctx) {
+    var rec = selectedFile(ctx && ctx.form);
+    if (!rec || !rec.UID) { showAlert(__t('backup_err_no_selection')); return; }
+    MySpace.downloadFile('/api/apps/backup/download/' + encodeURIComponent(rec.UID));
+}
+
+async function deleteSelected(ev, ctx) {
+    var rec = selectedFile(ctx && ctx.form);
+    if (!rec || !rec.UID) { showAlert(__t('backup_err_no_selection')); return; }
+    var ok = await showConfirm(__t('backup_delete_confirm'));
+    if (!ok) return;
+    var res = await callServer('__SERVER_SCRIPT__', 'deleteBackup', { uid: rec.UID });
+    if (!res || res.error) { showAlert(__t('Error: ') + ((res && res.error) || '')); return; }
+}
+
+/**
+ * Восстановить организацию из выбранной копии.
+ *
+ * Форму подтверждения открывает ядро (uniForm), данные для неё готовит сервер: здесь
+ * только повод. Приватный ключ вводит администратор — на сервере его нет и быть не должно.
+ */
+async function restoreOrganization(ev, ctx) {
+    var rec = selectedFile(ctx && ctx.form);
+    if (!rec || !rec.UID) { showAlert(__t('backup_err_no_selection')); return; }
+    await MySpace.open('uniForm', { mode: 'record', dbTable: 'backup_restore_full', fileUID: rec.UID });
 }
 
 /**
@@ -150,13 +104,11 @@ async function generateKeys(ev, ctx) {
     var res = await callServer('__SERVER_SCRIPT__', 'generateKeys', {});
     if (!res || res.error) { showAlert(__t('Error: ') + ((res && res.error) || '')); return; }
 
-    var pub = ctrl(form, 'publicKeyPem');
-    if (pub && typeof pub.setValue === 'function') pub.setValue(res.publicKeyPem);
-    var fp = ctrl(form, 'keyFingerprint');
-    if (fp && typeof fp.setValue === 'function') fp.setValue(res.keyFingerprint);
-    setStatusText(form, res.statusText);
+    form.setControlValue('publicKeyPem', res.publicKeyPem);
+    form.setControlValue('keyFingerprint', res.keyFingerprint);
+    form.setControlValue('statusText', res.statusText);
 
-    downloadViaBrowser(res.downloadUrl);
+    MySpace.downloadFile(res.downloadUrl, 'backup-private-key.pem');
     showAlert(__t('backup_private_key_saved_msg'));
 }
 
@@ -164,22 +116,39 @@ async function generateKeys(ev, ctx) {
 async function openSchedule(ev, ctx) {
     var res = await callServer('__SERVER_SCRIPT__', 'getTaskUID', {});
     if (!res || res.error) { showAlert(__t('Error: ') + ((res && res.error) || '')); return; }
-    if (window.MySpace && typeof window.MySpace.open === 'function') {
-        await window.MySpace.open('uniForm', { mode: 'record', dbTable: 'scheduler_tasks', recordId: res.taskUID });
-    }
+    await MySpace.open('uniForm', { mode: 'record', dbTable: 'scheduler_tasks', recordId: res.taskUID });
 }
 
-/** Стартовая настройка формы — form-level onReady, а не onChange. */
-async function onFormReady(ctx) {
+/**
+ * Задать аварийный пароль восстановления (ТЗ §6.2а, путь 1).
+ * Введённое значение сразу стирается из поля: показывать его дальше незачем, а хранить
+ * в разметке формы — тем более.
+ */
+async function setRecoveryPassword(ev, ctx) {
     var form = ctx && ctx.form;
-    if (!form) return;
-    // Кнопки не гасим: события таблицы могут не прийти, а строка всё равно
-    // читается в момент нажатия (currentFile). Выключенная навсегда кнопка хуже,
-    // чем кнопка, честно сказавшая «сначала выберите копию».
+    var res = await callServer('__SERVER_SCRIPT__', 'setRecoveryPassword', {
+        recoveryPassword: form.getControlValue('recoveryPassword')
+    });
+    form.setControlValue('recoveryPassword', '');
+    if (!res || res.error) { showAlert(__t('Error: ') + ((res && res.error) || '')); return; }
+    form.setControlValue('recoveryState', res.state || '');
+    showAlert(res.message || '');
+}
+
+/**
+ * Незашифрованная копия — сразу в скачивание, на сервере не сохраняется.
+ *
+ * Предупреждение обязательно и стоит ПЕРЕД действием: файл уедет с сервера открытым
+ * и будет лежать в архиве годами. Пользователь должен согласиться осознанно, а не
+ * обнаружить это через год.
+ */
+async function createPlain(ev, ctx) {
+    var ok = await showConfirm(__t('backup_create_plain_confirm'));
+    if (!ok) return;
+    MySpace.downloadFile('/api/apps/backup/download-plain?scope=full', 'backup-plain.mosbak');
 }
 
 return {
-    onFormReady, onFileSelected, onFilesRefreshed,
-    createFull, createForOrganization, downloadSelected, deleteSelected,
-    generateKeys, openSchedule
+    createFull, createPlain, createForOrganization, downloadSelected, deleteSelected,
+    restoreOrganization, generateKeys, openSchedule, setRecoveryPassword
 };

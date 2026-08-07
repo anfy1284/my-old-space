@@ -958,6 +958,13 @@
                         "i18n": "backup_organization_field"
                     }
                 },
+                "title": {
+                    "type": "STRING",
+                    "allowNull": true,
+                    "caption": {
+                        "i18n": "backup_title_field"
+                    }
+                },
                 "fileName": {
                     "type": "STRING",
                     "allowNull": false,
@@ -1130,6 +1137,96 @@
                     "allowNull": true,
                     "caption": {
                         "i18n": "backup_tables_field"
+                    }
+                }
+            },
+            "options": {
+                "timestamps": true
+            }
+        },
+        {
+            "name": "DbVersions",
+            "tableName": "db_versions",
+            "entityConfig": {
+                "entityType": "document",
+                "presentation": "configHash"
+            },
+            "fields": {
+                "organizationId": {
+                    "type": "STRING",
+                    "allowNull": true,
+                    "caption": {
+                        "i18n": "dbver_organization_field"
+                    }
+                },
+                "configHash": {
+                    "type": "STRING",
+                    "allowNull": false,
+                    "defaultValue": "",
+                    "caption": {
+                        "i18n": "dbver_config_hash_field"
+                    }
+                },
+                "actualHash": {
+                    "type": "STRING",
+                    "allowNull": false,
+                    "defaultValue": "",
+                    "caption": {
+                        "i18n": "dbver_actual_hash_field"
+                    }
+                },
+                "dialect": {
+                    "type": "STRING",
+                    "allowNull": false,
+                    "defaultValue": "",
+                    "caption": {
+                        "i18n": "dbver_dialect_field"
+                    }
+                },
+                "appVersion": {
+                    "type": "STRING",
+                    "allowNull": false,
+                    "defaultValue": "",
+                    "caption": {
+                        "i18n": "dbver_app_version_field"
+                    }
+                },
+                "frameworkVersion": {
+                    "type": "STRING",
+                    "allowNull": false,
+                    "defaultValue": "",
+                    "caption": {
+                        "i18n": "dbver_framework_version_field"
+                    }
+                },
+                "origin": {
+                    "type": "STRING",
+                    "allowNull": false,
+                    "defaultValue": "migration",
+                    "caption": {
+                        "i18n": "dbver_origin_field"
+                    },
+                    "inputType": "emunList",
+                    "options": [
+                        {
+                            "value": "migration",
+                            "caption": {
+                                "i18n": "dbver_origin_migration"
+                            }
+                        },
+                        {
+                            "value": "restore",
+                            "caption": {
+                                "i18n": "dbver_origin_restore"
+                            }
+                        }
+                    ]
+                },
+                "modelsSnapshot": {
+                    "type": "TEXT",
+                    "allowNull": true,
+                    "caption": {
+                        "i18n": "dbver_snapshot_field"
                     }
                 }
             },

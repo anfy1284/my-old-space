@@ -15,6 +15,33 @@ if (!global._dynamicTableSseClients) {
 // 4.1: окно серверного коалесцирования SSE-событий одной таблицы (мс).
 const SSE_COALESCE_MS = process.env.SSE_COALESCE_MS ? Number(process.env.SSE_COALESCE_MS) : 250;
 
+/**
+ * Отправить произвольное событие ВСЕМ сессионным SSE-клиентам (`/app/events`).
+ *
+ * Тот же канал, по которому ходят `dataChanged`, но для событий, не связанных с
+ * конкретной таблицей: ход длинной операции, её начало и конец. Отдельный канал
+ * заводить незачем — окно и так держит один поток.
+ *
+ * Функция МОДУЛЬНАЯ, а не внутри `registerDynamicTableMethods`: события не
+ * принадлежат приложению, и звать её должно ядро (планировщик), не поднимая
+ * реестр таблиц.
+ */
+function broadcastSessionEvent(messageObj) {
+    if (!global._sessionSseClients) return 0;
+    const message = JSON.stringify(messageObj);
+    let sent = 0;
+    for (const [sid, set] of global._sessionSseClients.entries()) {
+        const dead = [];
+        set.forEach(client => {
+            try { client.res.write(`data: ${message}\n\n`); sent++; }
+            catch (e) { dead.push(client); }
+        });
+        dead.forEach(c => set.delete(c));
+        if (set.size === 0) global._sessionSseClients.delete(sid);
+    }
+    return sent;
+}
+
 function normalizeColumnsFromFields(fields, rows) {
     if (!fields) {
         // Infer fields from first row keys
@@ -204,12 +231,25 @@ function registerDynamicTableMethods(appName, config = {}) {
                     .filter(Boolean);
             }
 
+            // Порядок по умолчанию — из реестра (`layoutMemory.registerListSort`),
+            // ЕДИНОЙ точкой для всех потребителей: обычного списка, встроенной таблицы
+            // и списка связанных документов. Раньше он применялся только к
+            // автогенерируемому списку, и та же таблица в форме показывалась в порядке
+            // «как легло в базу» — например, копии базы старыми записями сверху.
+            let effectiveSort = Array.isArray(sort) ? sort : [];
+            if (!effectiveSort.length) {
+                try {
+                    const regSort = require('../drive_root/layoutMemory').getListSort(tableName);
+                    if (Array.isArray(regSort) && regSort.length) effectiveSort = regSort;
+                } catch (e) { /* реестр может быть не поднят — не повод не отдать данные */ }
+            }
+
             // Вызов глобальной функции получения сырых данных
             const raw = await globalServerContext.getDynamicTableData({
                 modelName,
                 firstRow,
                 visibleRows,
-                sort: sort || [],
+                sort: effectiveSort,
                 filters: filters || [],
                 fieldConfig: fieldConfig,
                 sessionID: sessionID
@@ -455,4 +495,4 @@ function registerDynamicTableMethods(appName, config = {}) {
     };
 }
 
-module.exports = { registerDynamicTableMethods };
+module.exports = { registerDynamicTableMethods, broadcastSessionEvent };

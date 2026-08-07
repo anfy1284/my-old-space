@@ -29,27 +29,15 @@ const HANDLER = 'backup.create';
 module.exports = function (modelsDB, Utilities) {
 
     /**
-     * Роль проверяется на сервере: скрытая кнопка — не защита.
+     * Проверки роли в каждом RPC здесь НЕТ — и не должно быть.
      *
-     * Роль РЕЗОЛВИТСЯ ПО СЕССИИ, а не берётся из `ctx.role`: при диспетче событий формы
-     * (`onLoadData`, `onSave`) фреймворк передаёт только `sessionID`, и проверка по
-     * `ctx.role` отвергала даже администратора — форма открывалась пустым окном.
+     * Гейт следует из регистрации: `loadServerScript('backup.actions', …, 'admin')` в
+     * `init.js` не отдаёт этот модуль никому, кроме администратора (проверяет
+     * `serverScriptStore.getServerScript` — и в роуте `/server-call`, и при диспетче
+     * событий формы), а `saveLayout({ roles: 'admin' })` не отдаёт ему лейаут. Ручная
+     * проверка в каждой функции была бы копией того, что ядро уже делает, причём такой,
+     * которую однажды забудут написать в новой функции.
      */
-    async function requireAdmin(ctx) {
-        const sessionID = ctx && ctx.sessionID;
-        let role = ctx && ctx.role;
-        if (!role && sessionID) {
-            const globalCtx = require('../../../drive_root/globalServerContext');
-            const user = await globalCtx.getUserBySessionID(sessionID);
-            role = user ? await formsCtx.getUserAccessRole(user) : null;
-            if (ctx && !ctx.user && user) ctx.user = user;
-        }
-        if (role !== 'admin') {
-            const e = new Error(await tForSession('backup_err_admin_only', sessionID));
-            e.userMessage = e.message;
-            throw e;
-        }
-    }
 
     /**
      * Задание `backup.create` этой инсталляции. Создаётся выключенным при первом
@@ -114,6 +102,11 @@ module.exports = function (modelsDB, Utilities) {
             ? await tfForSession('backup_status_key_set', sessionID, { fingerprint: String(s.keyFingerprint || '').slice(0, 23) })
             : await tForSession('backup_status_key_missing', sessionID));
 
+        // Что умеет восстановление на сегодня — сказать ЗДЕСЬ, а не оставлять
+        // пользователя гадать, почему в панели есть «восстановить организацию» и нет
+        // «восстановить всю базу». Мёртвая выключенная кнопка была бы хуже строки текста.
+        lines.push(await tForSession('backup_status_restore_scope', sessionID));
+
         // Неизвестные объекты: логическая выгрузка их не видит, и молчать об этом нельзя.
         try {
             const globalCtx = require('../../../drive_root/globalServerContext');
@@ -131,33 +124,57 @@ module.exports = function (modelsDB, Utilities) {
 
     return {
 
-        /**
-         * Загрузка формы: настройки из файла + состояние.
-         *
-         * `data` — МАССИВ элементов `{ name, value }`, а не объект-словарь: таков
-         * контракт `onLoadData` у uniForm (эталон — `organization_settings.server.js`).
-         * Объект проходит без ошибки, но форма молча остаётся пустой.
-         */
+        /** Загрузка формы: настройки из файла + состояние. */
         async onLoadData(params, ctx) {
-            await requireAdmin(ctx);
             const s = backup.settings.read();
-            const values = {
-                storageDir: s.storageDir,
-                keepScheduled: s.keepScheduled,
-                keepManual: s.keepManual,
-                publicKeyPem: s.publicKeyPem,
-                keyFingerprint: s.keyFingerprint,
-                statusText: await buildStatusText(ctx.sessionID)
-            };
             return {
-                data: Object.entries(values).map(([name, value]) => ({ name, value, tabularSection: false })),
+                data: {
+                    storageDir: s.storageDir,
+                    keepScheduled: s.keepScheduled,
+                    keepManual: s.keepManual,
+                    publicKeyPem: s.publicKeyPem,
+                    keyFingerprint: s.keyFingerprint,
+                    recoveryPassword: '',
+                    recoveryState: await tForSession(
+                        require('../../../drive_root/recoveryPassword').isSet()
+                            ? 'backup_recovery_state_set' : 'backup_recovery_state_unset',
+                        ctx.sessionID),
+                    statusText: await buildStatusText(ctx.sessionID)
+                },
                 caption: await tForSession('backup_app_caption', ctx.sessionID)
+            };
+        },
+
+        /**
+         * Задать аварийный пароль восстановления вводом (ТЗ §6.2а, путь 1).
+         *
+         * Три пути к паролю не роскошь: форма годится, пока система жива; генерация с
+         * однократным показом закрывает первичную настройку («пустое поле до случая»
+         * означает, что в нужный момент пароля не окажется); консольный скрипт нужен
+         * тогда, когда войти в систему уже нельзя, — то есть ровно тогда, когда пароль
+         * и требуется. Здесь — первый путь.
+         *
+         * Пароль НЕ сохраняется в поле формы и не уходит в журнал: в файл пишется
+         * только хэш, и запись атомарна с сохранением реквизитов подключения к базе.
+         */
+        async setRecoveryPassword(params, ctx) {
+            const recovery = require('../../../drive_root/recoveryPassword');
+            const pwd = String((params && params.recoveryPassword) || '');
+            try {
+                await recovery.set(pwd);
+            } catch (e) {
+                return { error: await tfForSession(e.errorKey || 'backup_recovery_write_failed', ctx.sessionID, { message: e.message }) };
+            }
+            require('../../../drive_root/maintenance').audit(`RECOVERY_PWD_SET user=${ctx.user && ctx.user.UID}`);
+            return {
+                ok: true,
+                state: await tForSession('backup_recovery_state_set', ctx.sessionID),
+                message: await tForSession('backup_recovery_saved', ctx.sessionID)
             };
         },
 
         /** Сохранение: пишем в файл, а не в БД. Ключ проверяем ДО записи. */
         async onSave(params, ctx) {
-            await requireAdmin(ctx);
             const d = Object.assign({}, (params && params.changes) || (params && params.data) || {});
             delete d.__tabularSections;
             const patch = {};
@@ -193,7 +210,6 @@ module.exports = function (modelsDB, Utilities) {
          * к которому никто не знает ключа.
          */
         async generateKeys(params, ctx) {
-            await requireAdmin(ctx);
             const pair = backup.keys.generatePair();
             backup.settings.write({ publicKeyPem: pair.publicKeyPem, keyFingerprint: pair.fingerprint });
 
@@ -211,11 +227,39 @@ module.exports = function (modelsDB, Utilities) {
         },
 
         /**
+         * Какая копия будет вытеснена ретеншном, если создать ещё одну.
+         *
+         * Спрашивается ДО запуска: «сколько копий хранить» это настройка, а «вот эта
+         * копия сейчас исчезнет» — событие, и узнавать о нём постфактум по пропавшему
+         * файлу недопустимо. Считается тем же `selectForPruning`, что и само
+         * прореживание, — второго набора правил быть не должно.
+         */
+        async previewRetention(params, ctx) {
+            const s = backup.settings.read();
+            const triggeredBy = 'manual';                       // из формы запуск всегда ручной
+            const rows = await dbGateway.execute({
+                operation: 'read', table: 'backup_files',
+                where: {}, options: { raw: true }, context: { sessionID: ctx.sessionID }
+            }) || [];
+
+            // Моделируем БУДУЩЕЕ состояние: список + ещё одна копия, которая вот-вот появится.
+            const future = rows.filter(r => !r.missing).concat([{
+                UID: '__new__', triggeredBy, createdAt: new Date()
+            }]);
+            const doomed = backup.selectForPruning(future, s).filter(f => f.UID !== '__new__');
+
+            return {
+                willDelete: doomed.map(f => ({ fileName: f.fileName, triggeredBy: f.triggeredBy, date: f.createdAt })),
+                keepManual: s.keepManual,
+                keepScheduled: s.keepScheduled
+            };
+        },
+
+        /**
          * «Создать сейчас» — ставит запуск задания. Разовая область передаётся
          * параметрами запуска, а не скрытым каналом между формой и обработчиком.
          */
         async createNow(params, ctx) {
-            await requireAdmin(ctx);
             const s = backup.settings.read();
             if (!s.publicKeyPem) return { error: await tForSession('backup_err_key_empty', ctx.sessionID) };
 
@@ -235,7 +279,6 @@ module.exports = function (modelsDB, Utilities) {
 
         /** Удалить копию: сначала файл, потом запись — осиротевшая запись честнее осиротевшего файла. */
         async deleteBackup(params, ctx) {
-            await requireAdmin(ctx);
             const uid = params && params.uid;
             if (!uid) return { error: await tForSession('backup_err_no_selection', ctx.sessionID) };
             const context = { sessionID: ctx.sessionID };
@@ -256,14 +299,12 @@ module.exports = function (modelsDB, Utilities) {
 
         /** UID задания — чтобы открыть его форму и настроить расписание. */
         async getTaskUID(params, ctx) {
-            await requireAdmin(ctx);
             const task = await ensureTask(ctx);
             return { taskUID: task.UID };
         },
 
         /** Обновить панель состояния без перезагрузки формы. */
         async getStatus(params, ctx) {
-            await requireAdmin(ctx);
             return { statusText: await buildStatusText(ctx.sessionID) };
         }
     };

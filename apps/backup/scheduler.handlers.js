@@ -13,10 +13,17 @@
  * эффектов. См. drive_root/scheduler/registry.js.
  */
 
+const fs = require('fs');
+const path = require('path');
 const dbGateway = require('../../drive_root/dbGateway');
 const log = require('../../drive_root/log');
 
 const TABLE = 'backup_files';
+
+/** Файл копии всё ещё лежит на диске? (прореживание могло отложить удаление) */
+function fsExists(storageDir, fileName) {
+    try { return fs.existsSync(path.join(storageDir, fileName)); } catch (e) { return false; }
+}
 
 module.exports = function (modelsDB, Utilities) {
     return {
@@ -78,6 +85,16 @@ module.exports = function (modelsDB, Utilities) {
                 const previousSize = alive.reduce((mx, f) => Math.max(mx, Number(f.sizeBytes) || 0), 0);
 
                 const { models } = globalCtx.collectMergedModelDefs();
+
+                // Версия структуры БД в заголовок копии (ТЗ §3.1 п. 1). `actualHash`
+                // здесь принципиален: именно с ним при полном восстановлении сверяется
+                // структура, воссозданная по снимку моделей из дампа. Без него сверить
+                // «фреймворк построил ТО ЖЕ САМОЕ» нечем — `configHash` совпадёт всегда,
+                // потому что считается по тому же снимку.
+                const dbVersions = require('../../drive_root/db/dbVersions');
+                let version = null;
+                try { version = await dbVersions.latest(sequelize); } catch (e) { version = null; }
+
                 const result = await backup.createBackup({
                     sequelize, models,
                     scope: scopeType === 'organization'
@@ -86,10 +103,13 @@ module.exports = function (modelsDB, Utilities) {
                     meta: {
                         appVersion: process.env.npm_package_version || '',
                         frameworkVersion: (function () { try { return require('../../package.json').version; } catch (e) { return ''; } })(),
-                        dbVersion: null
+                        dbVersion: version ? Number(version.number) || 0 : 0,
+                        actualHash: (version && version.actualHash) || ''
                     },
                     previousSize,
-                    onProgress: (text) => { try { ctx.log(text); } catch (e) {} }
+                    // Доля выполненного считается по таблицам плана: полоса прогресса
+                    // должна показывать долю, а не «что-то происходит».
+                    onProgress: (text, progress) => { try { ctx.log(text, progress); } catch (e) {} }
                 });
                 ctx.heartbeat();
 
@@ -102,7 +122,7 @@ module.exports = function (modelsDB, Utilities) {
                         sha256: result.sha256,
                         keyFingerprint: result.keyFingerprint,
                         configHash: result.configHash,
-                        dbVersion: 0,
+                        dbVersion: version ? Number(version.number) || 0 : 0,
                         triggeredBy,
                         scopeType,
                         scopeOrganizationId: scopeType === 'organization' ? scopeOrgId : null,
@@ -124,7 +144,11 @@ module.exports = function (modelsDB, Utilities) {
                 let pruned = 0;
                 for (const f of doomed) {
                     try {
-                        backup.deleteFile(storageDir, f.fileName);
+                        // Файл может быть сейчас занят (идёт восстановление из него) —
+                        // тогда и запись журнала оставляем: иначе копия останется на диске
+                        // без записи, то есть станет невидимой и вечной.
+                        const removed = backup.deleteFile(storageDir, f.fileName);
+                        if (!removed && fsExists(storageDir, f.fileName)) continue;
                         await call('delete', { where: { UID: f.UID } });
                         pruned++;
                     } catch (e) {

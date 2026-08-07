@@ -6,36 +6,25 @@
  * этой таблицы — бросает ошибку, прерывая сохранение. Сама запись (update) исключается
  * из проверки по UID.
  *
+ * УНИКАЛЬНОСТЬ ПРОВЕРЯЕТСЯ В РАЗРЕЗЕ ОРГАНИЗАЦИИ — той же областью, в которой выдаёт
+ * номера `default.autoNumber` (общий модуль `numberScope`). Иначе получается пара,
+ * которая противоречит сама себе: автонумерация считает `MAX` по своей организации и
+ * выдаёт номер, а проверка ищет совпадение по ВСЕЙ таблице и этот же номер отвергает,
+ * потому что он занят у соседнего арендатора. Обе стороны обязаны понимать область
+ * одинаково.
+ *
  * Включается/отключается на уровне сущности: entityConfig.uniqueNumber (по умолчанию true).
  * Навешивается централизованно в drive_root/db/entityNumber.js, как и автонумерация.
  *
  * Параметры (entityConfig.hooks[event][n].params):
- *   field {string} — имя проверяемого поля (по умолчанию "number")
+ *   field      {string}      — имя проверяемого поля (по умолчанию "number")
+ *   scopeField {string|null} — реквизит области (по умолчанию "organizationId")
  */
 
 'use strict';
 
 const { Op } = require('sequelize');
-
-// Достаёт UID текущей записи из where. Важно: к моменту запуска хука (root-уровень)
-// app-level RLS-middleware уже мог обернуть исходный where в { [Op.and]: [ {UID}, {Op.or:[…]} ] },
-// поэтому прямого where.UID может не быть — рекурсивно ищем равенство по UID
-// (строковое значение), проходя массивы Op.and / Op.or.
-function _extractSelfUID(where) {
-    if (!where || typeof where !== 'object') return null;
-    const direct = where.UID || where.uid;
-    if (typeof direct === 'string') return direct;
-    for (const opKey of [Op.and, Op.or]) {
-        const arr = where[opKey];
-        if (Array.isArray(arr)) {
-            for (const sub of arr) {
-                const found = _extractSelfUID(sub);
-                if (found) return found;
-            }
-        }
-    }
-    return null;
-}
+const { resolveScopeValue, extractSelfUID: _extractSelfUID } = require('./numberScope');
 
 module.exports = async function uniqueNumber(request, params, context) {
     const { field = 'number' } = params || {};
@@ -59,6 +48,11 @@ module.exports = async function uniqueNumber(request, params, context) {
         || null;
     const where = { [field]: value };
     if (selfUID) where.UID = { [Op.ne]: selfUID };
+
+    // Та же область, что у автонумерации: одинаковый номер у РАЗНЫХ организаций —
+    // норма, а не дубликат.
+    const scope = await resolveScopeValue(request, Model, params || {});
+    if (scope.scoped) where[scope.field] = scope.value;
 
     let dup = null;
     try {

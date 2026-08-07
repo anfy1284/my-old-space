@@ -253,6 +253,32 @@ html, body {
   gap: 10px;
 }
 
+/* Ячейка «только для чтения»: без кнопок редакторов (календарь, выпадашка, спиннеры).
+   Правило одно на все типы контролов — нельзя править, не показывай средства правки.
+   Само поле остаётся: в нём читается значение, отформатированное своим контролом.
+   Точность правила поднята намеренно: кнопки внутри безрамочных контейнеров ячеек
+   принудительно показывает рантайм-стиль (`.ui-input-no-border … button` с
+   `!important`), и правило меньшей точности он перебивает. */
+td.ui-cell-readonly button,
+td.ui-cell-readonly .ui-input-container button,
+td.ui-cell-readonly .ui-input-container > button { display: none !important; }
+
+/* Замер авторазмера окна (`Form.setSizeToContent`): многострочное поле на это время
+   заявляет свою желаемую ширину (`--mos-pref-width` по `cols`), чтобы окно открылось
+   достаточно широким. В обычном состоянии порога нет — поле сжимается вместе с окном. */
+.ui-measuring textarea { min-width: var(--mos-pref-width, 0); }
+
+/* В ГОРИЗОНТАЛЬНОМ ряду место уступают поля ввода, а не соседи.
+   Флекс-элемент по умолчанию не сжимается ниже min-content своего содержимого, и
+   поле с длинным значением выталкивало из ряда кнопку рядом с собой (её было видно
+   как полоску у края). Сокращать должно то, у чего есть чем сократиться: у поля
+   есть прокрутка текста, у кнопки и подписи — ничего. */
+.ui-group.horizontal .ui-input-container,
+.ui-group.horizontal .ui-input-container input,
+.ui-group.horizontal .ui-input-container textarea {
+    min-width: 0;
+}
+
 /* Vertical / column layout */
 .ui-group.vertical,
 .ui-group.column {
@@ -398,7 +424,20 @@ html, body {
   flex: 0 0 auto;
 }
 
-.ui-button { background-color: var(--color-mid); border-top:2px solid var(--color-light); border-left:2px solid var(--color-light); border-right:2px solid #808080; border-bottom:2px solid #808080; font-family: MS Sans Serif, sans-serif; font-size:11px; cursor:default; outline:none; box-sizing:border-box; display:inline-flex; align-items:center; justify-content:center; }
+/* Широкая таблица прокручивается САМА, а не тащит за собой всю форму.
+   Флекс-элемент по умолчанию не сжимается ниже min-content своего содержимого —
+   поэтому таблица с суммой колонок шире окна раздувала контент формы, и
+   горизонтальная прокрутка появлялась у ОКНА. Обнуляем порог по всей цепочке
+   «контент формы → группа → таблица»: у таблицы своя прокрутка тела уже есть. */
+.ui-form-content > *,
+.ui-group,
+.ui-dynamictable {
+  min-width: 0;
+}
+
+/* `white-space: nowrap` — подпись кнопки не переносится: кнопка панели должна быть
+   шириной по своему тексту, а не втрое выше соседей из-за переноса на три строки. */
+.ui-button { background-color: var(--color-mid); border-top:2px solid var(--color-light); border-left:2px solid var(--color-light); border-right:2px solid #808080; border-bottom:2px solid #808080; font-family: MS Sans Serif, sans-serif; font-size:11px; cursor:default; outline:none; box-sizing:border-box; display:inline-flex; align-items:center; justify-content:center; white-space: nowrap; }
 
 /* Default form button (layout flag "default": true) — Win95 marks the Enter-default
    button with a heavier dark outline inside the raised border. */
@@ -413,7 +452,20 @@ html, body {
 
 .ui-label { display:inline-block; box-sizing:border-box; font-size:11px; font-family: MS Sans Serif, sans-serif; color:var(--color-text); }
 
-.ui-toolbar { display:flex; align-items:center; box-sizing:border-box; background-color: var(--color-mid); }
+/* Кнопки панели — одной высоты.
+   `align-items:center` оставлял каждую кнопку при своей высоте: стоило одной вырасти
+   (длинная подпись перенеслась на две строки) — и ряд становился рваным. `stretch`
+   тянет ВСЕ кнопки до высоты самой высокой, как и должно быть у панели инструментов.
+   У таблиц кнопки фиксированного размера (22×22), там растягивать нечего. */
+.ui-toolbar { display:flex; align-items:stretch; box-sizing:border-box; background-color: var(--color-mid); }
+.ui-toolbar.table-toolbar { align-items: center; }
+
+/* Кнопки не помещаются в ширину окна — панель переносится на следующую строку.
+   Резать ряд по краю нельзя (кнопка «Расписание» просто исчезала за границей), а
+   растягивать окно под панель — тем более: ширину окна выбирает пользователь.
+   `align-items: stretch` работает построчно, поэтому в каждом ряду кнопки остаются
+   одной высоты. У таблиц панель фиксированной ширины — там переносить нечего. */
+.ui-toolbar:not(.table-toolbar) { flex-wrap: wrap; row-gap: 3px; }
 .ui-toolbar.compact { padding:0; gap:0; }
 .ui-toolbar:not(.compact):not(.table-toolbar) { padding:5px; gap:5px; }
 .ui-toolbar.table-toolbar { padding: 0; gap: 0; }
@@ -813,6 +865,67 @@ input[type="checkbox"],
 @keyframes mos-busy-marquee {
     0%   { transform: translateX(-100%); }
     100% { transform: translateX(250%); }
+}
+
+/* ── Ход длинной операции в форме (class RunLogBox) ───────────────────────── */
+
+/* Журнал хода: моноширинный, чтобы столбцы «таблица: строк» не плясали */
+.ui-run-log {
+    font-family: 'Lucida Console', 'Courier New', monospace;
+    font-size: 11px;
+    background: #ffffff;
+    border-top: 2px solid #404040;
+    border-left: 2px solid #404040;
+    border-right: 2px solid var(--color-light);
+    border-bottom: 2px solid var(--color-light);
+    padding: 4px;
+    outline: none;
+    resize: none;
+}
+
+/* Полоса прогресса — тот же Win95-жёлоб, что и у глобального индикатора */
+.ui-progress {
+    position: relative;
+    height: 16px;
+    overflow: hidden;
+    background-color: #ffffff;
+    border: 1px solid #808080;
+    box-shadow: inset 1px 1px 0px #000000, inset -1px -1px 0px var(--color-light);
+}
+
+.ui-progress-fill {
+    position: absolute;
+    top: 1px;
+    bottom: 1px;
+    left: 0;
+    width: 0;
+    background-image: repeating-linear-gradient(
+        to right,
+        #000080 0px,
+        #000080 8px,
+        transparent 8px,
+        transparent 11px
+    );
+    transition: width 120ms linear;
+}
+
+/* Доля неизвестна — бегущий блок вместо заполнения */
+.ui-progress-fill.ui-progress-indeterminate {
+    width: 40% !important;
+    transition: none;
+    animation: mos-busy-marquee 1.1s linear infinite;
+}
+
+.ui-progress-label {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: MS Sans Serif, Tahoma, Arial, sans-serif;
+    font-size: 11px;
+    color: var(--color-text);
+    pointer-events: none;
 }
 
 /* ── Контрол выбора цвета (class Color) ───────────────────────────────────── */

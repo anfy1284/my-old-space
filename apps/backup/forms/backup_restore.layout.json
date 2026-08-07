@@ -1,0 +1,185 @@
+[
+    {
+        "type": "commandBar",
+        "hiddenButtons": [
+            "ok",
+            "save"
+        ],
+        "extraButtons": [
+            {
+                "name": "btnPickFile",
+                "caption": {
+                    "i18n": "restore_full_upload_btn"
+                },
+                "icon": "/apps/general_icons/resources/public/16x16/open.png",
+                "events": {
+                    "onClick": "pickFile"
+                }
+            },
+            {
+                "name": "btnAnalyze",
+                "caption": {
+                    "i18n": "restore_analyze_btn"
+                },
+                "icon": "/apps/general_icons/resources/public/16x16/preview.png",
+                "events": {
+                    "onClick": "analyzeDump"
+                }
+            },
+            {
+                "name": "btnRestore",
+                "caption": {
+                    "i18n": "restore_run_btn"
+                },
+                "icon": "/apps/general_icons/resources/public/16x16/restore.png",
+                "enabled": false,
+                "events": {
+                    "onClick": "runRestore"
+                }
+            }
+        ]
+    },
+    {
+        "type": "group",
+        "name": "grpSource",
+        "orientation": "vertical",
+        "caption": {
+            "i18n": "restore_source_group"
+        },
+        "alignFields": true,
+        "layout": [
+            {
+                "type": "recordSelector",
+                "name": "fileUID",
+                "data": "fileUID",
+                "caption": {
+                    "i18n": "restore_full_file_field"
+                },
+                "properties": {
+                    "selection": {
+                        "table": "backup_files",
+                        "idField": "UID",
+                        "displayField": "fileName"
+                    }
+                }
+            },
+            {
+                "type": "textbox",
+                "name": "uploadName",
+                "data": "uploadName",
+                "readOnly": true,
+                "caption": {
+                    "i18n": "restore_full_uploaded_field"
+                }
+            },
+            {
+                "type": "textbox",
+                "name": "fileInfo",
+                "caption": {
+                    "i18n": "restore_file_info_field"
+                },
+                "readOnly": true,
+                "data": "fileInfo"
+            },
+            {
+                "type": "recordSelector",
+                "name": "organizationId",
+                "data": "organizationId",
+                "caption": {
+                    "i18n": "restore_target_org_field"
+                },
+                "properties": {
+                    "selection": {
+                        "table": "organizations",
+                        "idField": "UID",
+                        "displayField": "name"
+                    }
+                }
+            }
+        ]
+    },
+    {
+        "type": "group",
+        "name": "grpKey",
+        "orientation": "vertical",
+        "caption": {
+            "i18n": "restore_key_group"
+        },
+        "layout": [
+            {
+                "type": "label",
+                "name": "keyHint",
+                "caption": {
+                    "i18n": "restore_key_hint"
+                }
+            },
+            {
+                "type": "group",
+                "name": "grpKeyRow",
+                "orientation": "horizontal",
+                "noBorder": true,
+                "layout": [
+                    {
+                        "type": "button",
+                        "name": "btnPickKey",
+                        "caption": {
+                            "i18n": "restore_key_pick_btn"
+                        },
+                        "icon": "/apps/general_icons/resources/public/16x16/key.png",
+                        "events": {
+                            "onClick": "pickKeyFile"
+                        }
+                    },
+                    {
+                        "type": "textbox",
+                        "name": "keyState",
+                        "data": "keyState",
+                        "readOnly": true,
+                        "caption": {
+                            "i18n": "restore_key_state_field"
+                        }
+                    }
+                ]
+            }
+        ]
+    },
+    {
+        "type": "group",
+        "name": "grpReport",
+        "orientation": "vertical",
+        "caption": {
+            "i18n": "restore_report_group"
+        },
+        "layout": [
+            {
+                "type": "textarea",
+                "name": "reportText",
+                "caption": "",
+                "readOnly": true,
+                "properties": {
+                    "rows": 14
+                },
+                "data": "reportText"
+            }
+        ]
+    },
+    {
+        "type": "group",
+        "name": "grpConfirm",
+        "orientation": "vertical",
+        "caption": {
+            "i18n": "restore_confirm_group"
+        },
+        "alignFields": true,
+        "layout": [
+            {
+                "type": "textbox",
+                "name": "confirmName",
+                "caption": {
+                    "i18n": "restore_confirm_name_field"
+                },
+                "data": "confirmName"
+            }
+        ]
+    }
+]

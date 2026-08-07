@@ -208,6 +208,92 @@ async function createBackup(opts) {
 }
 
 /**
+ * Незашифрованная копия ПОТОКОМ, без записи на диск сервера (решение владельца 2026-08-07).
+ *
+ * Зачем режим существует — см. `container.js` (ALG_NONE). Здесь важно ДРУГОЕ: почему он
+ * устроен потоком, а не «создать файл и дать ссылку».
+ *
+ * Незашифрованный дамп содержит персональные данные всех клиентов. Пока он лежит в
+ * каталоге копий, он уязвим ровно там, где аргумент «за годы хранения ключ потеряется»
+ * не работает: на сервере ключ нужен на минуты. Поэтому такой копии на сервере не
+ * возникает вовсе — байты идут из снимка сразу в HTTP-ответ. Нет объекта — нет риска;
+ * это сильнее любой пометки «осторожно, не шифровано».
+ *
+ * Отсюда же ограничения, которые НЕ обсуждаются:
+ *   · только ручной запуск (расписание такого не делает никогда);
+ *   · в журнал `backup_files` не попадает — записи без файла там не нужны;
+ *   · внешнему хранилищу не отдаётся.
+ *
+ * Цена: выгрузка идёт в главном процессе, а не в воркере (решение 0.0.2 про изоляцию
+ * касается ПЛАНОВОЙ выгрузки в файл). Обмен осознанный: поток отдаётся непрерывно,
+ * поэтому таймаутов прокси не возникает, а операция редкая и ручная.
+ *
+ * @param {Object} opts — `{ sequelize, models, scope, meta, onProgress }`
+ * @returns {Promise<{stream: Readable, fileName: string, stats: Object, finish: Function}>}
+ */
+async function createPlainStream(opts) {
+    const { sequelize, models } = opts;
+    const dumpScope = opts.scope || { type: 'full' };
+    const now = new Date();
+    const meta = Object.assign({ dbName: (sequelize.config && sequelize.config.database) || '' }, opts.meta || {});
+
+    const nb = await dialect.checkNonBlocking(sequelize);
+    if (!nb.ok) {
+        const e = new Error(`Предусловие не выполнено: ${nb.errorKey}`);
+        e.errorKey = nb.errorKey; e.vars = nb.vars;
+        throw e;
+    }
+
+    // Имя говорит о том, что файл НЕ зашифрован, прямо в себе: он уедет на чужую машину
+    // и будет там лежать годами, а к тому времени объяснять будет некому.
+    const fileName = buildFileName(meta.dbName, dumpScope, meta.dbVersion, now)
+        .replace(FILE_EXT, `-PLAIN${FILE_EXT}`);
+
+    const transaction = await dialect.beginSnapshot(sequelize);
+    let payload, tap;
+    try {
+        payload = dump.createPayloadStream({
+            sequelize, models, transaction, scope: dumpScope, meta,
+            onProgress: opts.onProgress || (() => {})
+        });
+        tap = new TapStream();
+
+        const encryptor = new container.EncryptStream({
+            publicKeyPem: null,                       // явный выбор режима без шифрования
+            header: {
+                dbName: meta.dbName,
+                createdAt: now.toISOString(),
+                dumpFormat: dump.DUMP_FORMAT,
+                appVersion: meta.appVersion || '',
+                frameworkVersion: meta.frameworkVersion || '',
+                dbVersion: meta.dbVersion || null,
+                configHash: payload.stats.configHash,
+                actualHash: meta.actualHash || '',
+                sourceDialect: dialect.nameOf(sequelize),
+                keyFingerprint: '',
+                scope: dumpScope
+            }
+        });
+
+        const { pipeline } = require('stream');
+        const { PassThrough } = require('stream');
+        const out = new PassThrough();
+        pipeline(payload.stream, zlib.createGzip({ level: 6 }), encryptor, tap, out, (err) => {
+            // Снимок закрывается ВСЕГДА: незакрытая read-транзакция в Postgres держит
+            // очистку мёртвых версий строк, а оборвать скачивание пользователь может
+            // в любой момент.
+            transaction.rollback().catch(() => {});
+            if (err) out.destroy(err);
+        });
+
+        return { stream: out, fileName, stats: payload.stats, tap };
+    } catch (e) {
+        try { await transaction.rollback(); } catch (e2) {}
+        throw e;
+    }
+}
+
+/**
  * Выбрать лишние копии для удаления — ДВА независимых лимита (ТЗ §1).
  *
  * Раздельный подсчёт принципиален: ручную копию делают ровно перед рискованной
@@ -235,21 +321,166 @@ function selectForPruning(files, limits) {
     return doomed;
 }
 
+// ── Защита файла, с которым сейчас работают ─────────────────────────────────────
+//
+// Восстановление читает файл копии, а обязательная safety-выгрузка перед ним создаёт
+// НОВУЮ копию и тем самым запускает прореживание — которое способно удалить как раз
+// тот файл, из которого мы восстанавливаемся (ручных копий хранится три, и каждое
+// восстановление добавляет одну). Поймано живым прогоном: восстановление упало с
+// ENOENT на собственном источнике.
+//
+// Отметка — ФАЙЛОМ рядом с копией, а не флагом в памяти: прореживание выполняется в
+// ДРУГОМ процессе (воркере планировщика), и переменная процесса до него не доедет.
+// Брошенная после аварии отметка не блокирует уборку вечно — у неё есть срок годности.
+
+const IN_USE_SUFFIX = '.inuse';
+const IN_USE_TTL_MS = 6 * 60 * 60 * 1000;
+
+/** Пометить файл используемым. Возвращает функцию снятия отметки. */
+function markInUse(storageDir, fileName) {
+    const marker = path.join(storageDir, fileName + IN_USE_SUFFIX);
+    try { fs.writeFileSync(marker, String(Date.now()), 'utf8'); } catch (e) {
+        log.warn(`[backup] Не удалось пометить ${fileName} используемым: ${e.message}`);
+    }
+    return () => { try { if (fs.existsSync(marker)) fs.unlinkSync(marker); } catch (e) {} };
+}
+
+/** Занят ли файл сейчас (с учётом срока годности отметки). */
+function isInUse(storageDir, fileName) {
+    const marker = path.join(storageDir, fileName + IN_USE_SUFFIX);
+    if (!fs.existsSync(marker)) return false;
+    try {
+        const ts = Number(fs.readFileSync(marker, 'utf8')) || 0;
+        if (Date.now() - ts > IN_USE_TTL_MS) { fs.unlinkSync(marker); return false; }
+    } catch (e) { /* нечитаемая отметка — считаем занятым, это безопаснее */ }
+    return true;
+}
+
 /**
  * Удалить файл копии с диска.
  *
  * Зовётся ТОЛЬКО после того, как новая копия успешно создана и проверена (ТЗ §1):
  * удалять старое до создания нового — значит на время операции остаться без копий.
+ * Файл, с которым сейчас работают (восстановление, скачивание), не удаляется —
+ * проверка стоит ЗДЕСЬ, в единственной точке удаления, а не у вызывающих.
  */
 function deleteFile(storageDir, fileName) {
     const p = path.join(storageDir, fileName);
     if (!fs.existsSync(p)) return false;
+    if (isInUse(storageDir, fileName)) {
+        log.info(`[backup] Копия ${fileName} сейчас используется — удаление отложено`);
+        return false;
+    }
     fs.unlinkSync(p);
     log.info(`[backup] Удалена устаревшая копия ${fileName}`);
     return true;
 }
 
+// ── Сверка журнала копий с каталогом хранения ────────────────────────────────────
+//
+// Таблица `backup_files` едет ВНУТРИ дампа как обычные данные. Значит после полного
+// восстановления она описывает каталог ЧУЖОГО момента: часть перечисленных файлов на
+// этом диске уже удалена ретеншном, а реально лежащие копии — в том числе safety-копия,
+// снятая прямо перед восстановлением, — в журнале отсутствуют.
+//
+// Последствия обе стороны имеют скверные: пользователь видит ссылки в никуда, а
+// невидимая копия НИКОГДА не будет прорежена и останется на диске навсегда. Причём
+// невидимой оказывается самая ценная копия на сервере — та, что страхует только что
+// выполненную операцию.
+//
+// Поэтому сверка делает две вещи: помечает пропавшее и УСЫНОВЛЯЕТ найденное.
+//
+// `SYSTEM_SESSION_ID` здесь законен: это собственная служебная таблица механизма, а
+// сверка идёт при старте и после восстановления, когда пользовательской сессии нет.
+
+const SYSTEM_SESSION_ID = '__SYS_INTERNAL__';
+
+async function reconcileJournal() {
+    const dbGateway = require('../dbGateway');
+    const settings = settingsStore.read();
+    const dir = settingsStore.ensureStorage(settings);
+
+    const onDisk = new Set(
+        fs.readdirSync(dir).filter(f => f.toLowerCase().endsWith(FILE_EXT))
+    );
+
+    const rows = await dbGateway.execute({
+        operation: 'read', table: 'backup_files', where: {}, options: { raw: true },
+        context: { sessionID: SYSTEM_SESSION_ID }
+    }) || [];
+
+    const known = new Set();
+    let marked = 0, unmarked = 0, adopted = 0;
+
+    for (const rec of rows) {
+        known.add(rec.fileName);
+        const exists = onDisk.has(rec.fileName);
+        if (exists === !rec.missing) continue;                 // пометка и так верна
+        await dbGateway.execute({
+            operation: 'update', table: 'backup_files',
+            where: { UID: rec.UID }, data: { missing: !exists },
+            context: { sessionID: SYSTEM_SESSION_ID }
+        });
+        if (exists) unmarked++; else marked++;
+    }
+
+    for (const fileName of onDisk) {
+        if (known.has(fileName)) continue;
+        // Заголовок копии лежит открытым текстом — приватный ключ не нужен.
+        let header = null;
+        try { header = require('./restore').readHeader(path.join(dir, fileName)); }
+        catch (e) { log.warn(`[backup] ${fileName} не опознан как копия: ${e.message}`); continue; }
+
+        const st = fs.statSync(path.join(dir, fileName));
+        const scope = header.scope || { type: 'full' };
+        await dbGateway.execute({
+            operation: 'create', table: 'backup_files',
+            data: {
+                organizationId: '',
+                fileName,
+                sizeBytes: st.size,
+                // Контрольную сумму не пересчитываем: файл может весить гигабайты, а
+                // сверка идёт при старте сервера. Пустое значение честнее выдуманного.
+                sha256: '',
+                keyFingerprint: header.keyFingerprint || '',
+                configHash: header.configHash || '',
+                dbVersion: Number(header.dbVersion) || 0,
+                // Повод в заголовке не хранится. Считаем копию РУЧНОЙ: у ручных лимит
+                // меньше, поэтому усыновлённые файлы не копятся, и ручная копия никогда
+                // не вытесняется плановыми — то есть ошибка в эту сторону безопасна.
+                triggeredBy: 'manual',
+                scopeType: scope.type || 'full',
+                scopeOrganizationId: scope.organizationId || '',
+                scopeOrganizationName: scope.organizationName || '',
+                rowsTotal: 0,
+                verifyStatus: 'none',
+                acked: false,
+                missing: false
+            },
+            context: { sessionID: SYSTEM_SESSION_ID }
+        });
+        adopted++;
+    }
+
+    if (marked || unmarked || adopted) {
+        log.info(`[backup] Журнал копий сверен с каталогом: помечено отсутствующими ${marked}, `
+            + `восстановлено в наличии ${unmarked}, добавлено найденных ${adopted}`);
+        try { require('../../apps/uniForm/server.js').notifyTableChange('backup_files', 'update', null); }
+        catch (e) { /* оповещение не важнее сверки */ }
+    }
+    return { marked, unmarked, adopted };
+}
+
 module.exports = {
-    createBackup, checkPreconditions, selectForPruning, deleteFile, buildFileName,
-    settings: settingsStore, keys, container, dialect, dump, FILE_EXT
+    createBackup, createPlainStream, checkPreconditions, selectForPruning, deleteFile, buildFileName,
+    markInUse, isInUse, reconcileJournal,
+    settings: settingsStore, keys, container, dialect, dump, FILE_EXT,
+    // Восстановление одной организации (ТЗ §6.6) — отдельная процедура, а не режим
+    // выгрузки; подключается лениво, чтобы выгрузка не тянула его код.
+    get restore() { return require('./restore'); },
+    // Полное восстановление (ТЗ §6.1–§6.5) — третья самостоятельная процедура:
+    // у неё другие гарантии (живая база не разрушается), другой режим работы сервера
+    // (обслуживание) и другой исполнитель (дочерний процесс).
+    get restoreFull() { return require('./restoreFull'); },
+    get restoreFullRunner() { return require('./restoreFullRunner'); }
 };

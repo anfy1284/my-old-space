@@ -126,6 +126,11 @@ function invalidateCache() {
     _valueCache.clear();
 }
 
+// Переводы справочных ДАННЫХ (`translations`) едут внутри дампа, значит после подмены
+// базы закэшированные значения относятся к записям, которых больше нет. Подписка —
+// рядом с кэшем (см. dbLifecycle).
+require('./dbLifecycle').onDatabaseReset('translationMiddleware', invalidateCache);
+
 /**
  * Translatable field names for a table, or null if none.
  * @param {string} tableName

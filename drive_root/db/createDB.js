@@ -464,28 +464,13 @@ async function renameTruncatedIndexes(sequelize, transaction, modelsDefs) {
   return renamed;
 }
 
-async function createAll() {
-  await ensureDatabase();
-  const sequelize = getSequelizeInstance();
-
-  // 1. Collect all models from all levels (drive_root -> drive_forms -> apps)
-  const { models: allModelsDef, defaultValuesByLevel } = collectAllModels();
-  const { associations: allAssociations } = globalServerContext.collectAllModelDefs();
-
-  // 2. Merge model definitions (handle models declared on multiple levels)
-  const mergedModelsDef = mergeModelDefinitions(allModelsDef);
-  console.log(`[MIGRATION] Total models after merge: ${mergedModelsDef.length}`);
-
-  // Call user event handler to modify models before DB creation
-  await triggerProjectEvent('onModelsPostCollect', {
-      mergedModelsDef,
-      allAssociations,
-      sequelize,
-      projectRoot: process.env.PROJECT_ROOT
-  });
-
-  // Build dependency graph based on fields.references to determine create order
-  function computeCreateOrder(modelsDefs) {
+// Build dependency graph based on fields.references to determine create order.
+//
+// Вынесено на уровень модуля намеренно: тот же порядок нужен строителю ТЕНЕВОЙ схемы
+// при полном восстановлении (`db/schemaBuilder.js`). Копия алгоритма означала бы, что
+// однажды схема соберётся в двух разных порядках — и разойдётся только на цикле ссылок,
+// то есть в самый неудачный момент.
+function computeCreateOrder(modelsDefs) {
     const nameByTable = new Map(); // tableName -> def
     for (const def of modelsDefs) {
       nameByTable.set(def.tableName, def);
@@ -550,18 +535,55 @@ async function createAll() {
     }
 
     return order;
-  }
+}
 
-  const createOrderTableNames = computeCreateOrder(mergedModelsDef);
-  const createOrderDefs = createOrderTableNames.map(tn => mergedModelsDef.find(d => d.tableName === tn)).filter(Boolean);
-
-  // 3. Initialize Sequelize Models
+/**
+ * Определить модели Sequelize по слитым определениям и применить ассоциации.
+ *
+ * Вынесено на уровень модуля: тем же кодом строится ТЕНЕВАЯ схема при полном
+ * восстановлении, только по снимку моделей из дампа и с параметром `schema`.
+ * Определять модели вторым способом нельзя — расхождение проявилось бы как «данные
+ * легли не туда», а это самый дорогой класс ошибок.
+ *
+ * @param {Object} sequelize
+ * @param {Array<Object>} mergedModelsDef — СЛИТЫЕ определения (после onModelsPostCollect)
+ * @param {Array<Object>} [allAssociations]
+ * @param {Object} [opts] — `{ schema }`: строить в указанной схеме СУБД, `{ quiet }`
+ * @returns {Object} имя модели → модель Sequelize
+ */
+function defineModels(sequelize, mergedModelsDef, allAssociations, opts = {}) {
   const models = {};
+  // Таблицы, известные этому набору, — чтобы понять, что можно квалифицировать схемой.
+  const knownTables = new Set(mergedModelsDef.map(d => d.tableName));
+  const byName = new Map(mergedModelsDef.map(d => [d.name, d.tableName]));
+
   for (const def of mergedModelsDef) {
     const fields = {};
-    for (const [field, opts] of Object.entries(def.fields)) {
-      const type = Sequelize.DataTypes[opts.type];
-      fields[field] = { ...opts, type };
+    for (const [field, fieldOpts] of Object.entries(def.fields)) {
+      const type = Sequelize.DataTypes[fieldOpts.type];
+      fields[field] = { ...fieldOpts, type };
+
+      // Внешний ключ в теневой схеме обязан ссылаться ВНУТРЬ неё.
+      //
+      // `references: { model: 'users' }` Sequelize превращает в `REFERENCES "users"`
+      // без имени схемы, а неквалифицированное имя резолвится по `search_path`, то есть
+      // в ЖИВУЮ `public`. Теневые таблицы оказались бы привязаны к живым: во-первых,
+      // вставка проверялась бы по чужим данным, во-вторых, после переключения схем
+      // ссылки указывали бы в схему отката. Поэтому цель ссылки квалифицируется явно.
+      if (opts.schema && fields[field].references) {
+        const ref = fields[field].references;
+        let target = ref.model;
+        if (typeof target === 'string') {
+          if (!knownTables.has(target) && byName.has(target)) target = byName.get(target);
+          if (knownTables.has(target)) {
+            fields[field] = {
+              ...fields[field],
+              references: { ...ref, model: { tableName: target, schema: opts.schema } }
+            };
+          }
+        }
+      }
+
         if (fields[field].defaultValue === "GENERATE_UID" || (typeof fields[field].defaultValue === 'function' && fields[field].defaultValue.name === 'uidGenerator')) {
           fields[field].defaultValue = function() {
             const crypto = require('crypto');
@@ -572,18 +594,20 @@ async function createAll() {
           };
           }
     }
-    models[def.name] = sequelize.define(def.name, fields, { ...def.options, tableName: def.tableName });
+    const modelOptions = { ...def.options, tableName: def.tableName };
+    if (opts.schema) modelOptions.schema = opts.schema;
+    models[def.name] = sequelize.define(def.name, fields, modelOptions);
   }
 
-  for (const assoc of allAssociations) {
+  for (const assoc of (allAssociations || [])) {
     const sourceModel = models[assoc.source];
     const targetModel = models[assoc.target];
-    
+
     if (!sourceModel || !targetModel) {
       console.warn(`[MIGRATION] Association ${assoc.source}.${assoc.type}(${assoc.target}) - model not found`);
       continue;
     }
-    
+
     try {
       const options = {};
       if (assoc.foreignKey) {
@@ -593,11 +617,54 @@ async function createAll() {
         Object.assign(options, assoc.options);
       }
       sourceModel[assoc.type](targetModel, options);
-      console.log(`[MIGRATION] Applied association: ${assoc.source}.${assoc.type}(${assoc.target})`);
+      if (!opts.quiet) console.log(`[MIGRATION] Applied association: ${assoc.source}.${assoc.type}(${assoc.target})`);
     } catch (e) {
       console.error(`[MIGRATION] Error applying association ${assoc.source}.${assoc.type}(${assoc.target}):`, e.message);
     }
   }
+
+  return models;
+}
+
+/**
+ * Полная инициализация базы: миграция схемы + досев `defaultValues` + `onDatabasePostInit`.
+ *
+ * Это ТА САМАЯ «стартовая фаза», ради вызываемости которой затевался рефакторинг
+ * (ТЗ §6.2). У неё два потребителя и одна реализация:
+ *   1. запуск сервера — `main_server.js` порождает этот файл процессом (CLI-вход внизу);
+ *   2. ПОСЛЕ полного восстановления — `backup/restoreFull` зовёт функцию прямо в
+ *      процессе сервера. Именно поэтому восстановление не требует ни перезапуска, ни
+ *      супервизора: миграция — обычная функция, а не свойство запуска процесса.
+ *
+ * @param {Object} [options] — `{ sequelize }`: работать с переданным подключением
+ *   (иначе создаётся собственное и закрывается в конце)
+ */
+async function createAll(options = {}) {
+  await ensureDatabase();
+  const ownSequelize = !options.sequelize;
+  const sequelize = options.sequelize || getSequelizeInstance();
+
+  // 1. Collect all models from all levels (drive_root -> drive_forms -> apps)
+  const { models: allModelsDef, defaultValuesByLevel } = collectAllModels();
+  const { associations: allAssociations } = globalServerContext.collectAllModelDefs();
+
+  // 2. Merge model definitions (handle models declared on multiple levels)
+  const mergedModelsDef = mergeModelDefinitions(allModelsDef);
+  console.log(`[MIGRATION] Total models after merge: ${mergedModelsDef.length}`);
+
+  // Call user event handler to modify models before DB creation
+  await triggerProjectEvent('onModelsPostCollect', {
+      mergedModelsDef,
+      allAssociations,
+      sequelize,
+      projectRoot: process.env.PROJECT_ROOT
+  });
+
+  const createOrderTableNames = computeCreateOrder(mergedModelsDef);
+  const createOrderDefs = createOrderTableNames.map(tn => mergedModelsDef.find(d => d.tableName === tn)).filter(Boolean);
+
+  // 3. Initialize Sequelize Models
+  const models = defineModels(sequelize, mergedModelsDef, allAssociations);
 
   // Start transaction for all migration operations (skip global transaction for SQLite to avoid file locks)
   const isSqlite = sequelize.getDialect && sequelize.getDialect() === 'sqlite';
@@ -1154,8 +1221,33 @@ async function createAll() {
       console.error('[MIGRATION] ensureIndexes failed:', e.message);
     }
 
+    // Версия структуры БД (ТЗ §6.4). Считается ПОСЛЕ миграции и только тогда
+    // осмысленна: до неё фактическая структура ещё не соответствует моделям.
+    // Новая запись появляется, только если изменился один из двух хэшей —
+    // повторный старт без правки моделей журнал не засоряет.
+    try {
+      // Хэш считается по РАНТАЙМ-слиянию (`collectMergedModelDefs`), а не по
+      // определениям миграции. Это не придирка: `configHash` — глобальная для продукта
+      // идентичность версии структуры, и она обязана быть ОДНА. Слияние здесь и в
+      // рантайме различается деталями (например, объединением списков индексов), и
+      // если считать хэш по миграционному набору, то журнал версий и заголовок
+      // резервной копии получат РАЗНЫЕ значения «хэша той же самой структуры» —
+      // сравнить их станет невозможно, а именно ради сравнения хэш и заведён.
+      // (Фактическая структура при этом совпадает — это проверено `actualHash`.)
+      const runtimeModels = globalServerContext.collectMergedModelDefs().models;
+      await require('./dbVersions').record(sequelize, runtimeModels, {
+        appVersion: process.env.npm_package_version || '',
+        frameworkVersion: (function () { try { return require('../../package.json').version; } catch (e) { return ''; } })(),
+        origin: process.env.MOS_DB_INIT_ORIGIN || 'migration'
+      });
+    } catch (e) {
+      // Журнал версий не должен ронять старт сервера: без него система работает,
+      // просто теряет след истории структуры.
+      console.error('[MIGRATION] dbVersions.record failed:', e.message);
+    }
+
     // Call user event handler after full database init
-    await triggerProjectEvent('onDatabasePostInit', { 
+    await triggerProjectEvent('onDatabasePostInit', {
         sequelize, 
         projectRoot: process.env.PROJECT_ROOT,
         level: LEVEL
@@ -1172,10 +1264,30 @@ async function createAll() {
     throw error;
   }
 
-  await sequelize.close();
+  // Своё подключение закрываем, чужое — нет: закрыв пул сервера, мы оставили бы
+  // приложение без базы сразу после восстановления.
+  if (ownSequelize) await sequelize.close();
 }
 
-createAll().catch(e => {
-  console.error('Error creating database:', e);
-  process.exit(1);
-});
+module.exports = {
+  createAll,
+  /** Синоним под смыслом вызова из кода, а не из командной строки. */
+  initDatabase: createAll,
+  defineModels,
+  computeCreateOrder,
+  collectAllModels,
+  mergeModelDefinitions,
+  triggerProjectEvent,
+  getSequelizeInstance
+};
+
+// CLI-вход. Файл одновременно и модуль (его зовёт восстановление), и скрипт (его
+// порождает `main_server.js` при старте) — поэтому автозапуск только когда файл
+// запущен напрямую. Без этой проверки любой `require` этого модуля начинал бы
+// миграцию базы как побочный эффект.
+if (require.main === module) {
+  createAll().catch(e => {
+    console.error('Error creating database:', e);
+    process.exit(1);
+  });
+}

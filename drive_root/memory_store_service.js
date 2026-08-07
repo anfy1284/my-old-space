@@ -41,6 +41,25 @@ async function handle(req, res) {
     }
   }
 
+  // Очистка пространства имён. Нужна событию `onDatabaseReset`: сервис — отдельный
+  // процесс и переживает перезапуск сервера, поэтому после подмены базы он один
+  // способен вернуть сессии и справочники прежней базы.
+  if (req.method === 'POST' && parsed.pathname === '/clear') {
+    let body = '';
+    req.on('data', (c) => body += c);
+    req.on('end', async () => {
+      try {
+        const payload = body ? JSON.parse(body) : {};
+        // localOnly: мы И ЕСТЬ сервис — трансляция вернула бы запрос нам же.
+        await memoryStore.clearNamespace(payload.ns || undefined, { localOnly: true });
+        return sendJSON(res, 200, { ok: true });
+      } catch (e) {
+        return sendJSON(res, 500, { ok: false, error: String(e) });
+      }
+    });
+    return;
+  }
+
   if ((req.method === 'POST' && parsed.pathname === '/set') || (req.method === 'POST' && parsed.pathname === '/del')) {
     let body = '';
     req.on('data', (c) => body += c);

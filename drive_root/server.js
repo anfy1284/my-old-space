@@ -145,8 +145,25 @@ function isStaticPath(url) {
         || url === '/favicon.svg';
 }
 
+const maintenance = require('./maintenance');
+const maintenanceServer = require('./maintenanceServer');
+
 async function handleRequest(req, res) {
     log.debug('[drive_root] Request:', req.method, req.url);
+
+    // ── Режим обслуживания: 503 всему, кроме страницы состояния ─────────────────
+    //
+    // Гейт стоит ПЕРВЫМ, до маршрутизации и до создания сессии. Причина: в момент
+    // переключения схем состав таблиц под работающим приложением меняется, и любой
+    // параллельный запрос упадёт — вместе со старой схемой уходит и таблица `sessions`.
+    // Внешнее API бэкапа (`/api/apps/backup/*`) тоже получает 503 (приёмка §9 п. 30):
+    // внешнее хранилище не должно ни скачивать файлы с сервера, который в этот момент
+    // подменяет базу, ни получать список, не соответствующий действительности.
+    if (maintenance.isActive()) {
+        if (await maintenanceServer.handle(req, res)) return;
+        maintenanceServer.sendUnavailable(req, res);
+        return;
+    }
 
     // Universal App API routing: /api/apps/:appName/...
     if (req.url.startsWith('/api/apps/')) {
@@ -493,11 +510,35 @@ async function handleRequest(req, res) {
                 res.end('404 Not Found');
                 return;
             }
+            // Версия в адресе стилей и скриптов приложения.
+            //
+            // Заголовков кэширования мало: браузер, однажды сохранивший файл под
+            // прежним `max-age`, держит его сутки и нового заголовка не спрашивает —
+            // правка вида доходит до пользователя только после жёсткого обновления.
+            // Меняющийся адрес обходит уже испорченный кэш сразу и навсегда снимает
+            // вопрос «почему я не вижу изменений».
+            //
+            // Версия — время правки файла: меняется ровно тогда, когда меняется файл,
+            // и не заставляет перекачивать неизменное.
+            const stamped = String(data).replace(
+                /(href|src)="(\/[a-z0-9_\-]+\/res\/public\/[^"?]+\.(?:css|js))"/gi,
+                (m, attr, url) => {
+                    let v = '';
+                    try {
+                        const rel = url.replace(/^\/[a-z0-9_\-]+\/res\/public\//i, '');
+                        v = String(Math.floor(fs.statSync(path.join(appDir, 'resources', 'public', rel)).mtimeMs));
+                    } catch (e) { v = String(Date.now()); }   // файл не найден — не кэшируем вовсе
+                    return `${attr}="${url}?v=${v}"`;
+                }
+            );
+
             res.writeHead(200, {
                 'Content-Type': 'text/html; charset=utf-8',
+                // Сама страница — всегда свежая, иначе версии в ссылках не обновятся.
+                'Cache-Control': 'no-cache',
                 'Content-Security-Policy': "default-src 'self' 'unsafe-eval' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://maps.googleapis.com; connect-src 'self' https://maps.googleapis.com https://places.googleapis.com; img-src 'self' data: https://maps.gstatic.com https://*.googleapis.com; font-src 'self' https://fonts.gstatic.com"
             });
-            res.end(data);
+            res.end(stamped);
         });
     } else if (req.url.startsWith(`/${appAlias}`)) {
         try {
