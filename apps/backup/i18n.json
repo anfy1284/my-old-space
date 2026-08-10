@@ -434,7 +434,7 @@
     "restore_confirm_group": {
         "en": "Confirmation",
         "ru": "Подтверждение",
-        "de": "Bestatigung",
+        "de": "Bestätigung",
         "pl": "Potwierdzenie"
     },
     "restore_file_info_field": {
@@ -474,10 +474,10 @@
         "pl": "Przywroc"
     },
     "restore_hint_analyze_first": {
-        "en": "Paste the private key, choose the organization and press Analyze. Nothing is changed until you confirm.",
-        "ru": "Вставьте приватный ключ, выберите организацию и нажмите «Проанализировать». До подтверждения ничего не меняется.",
-        "de": "Privaten Schlussel einfugen, Organisation wahlen und Analysieren drucken. Bis zur Bestatigung wird nichts geandert.",
-        "pl": "Wklej klucz prywatny, wybierz organizacje i nacisnij Analizuj. Do potwierdzenia nic nie jest zmieniane."
+        "en": "Select the private key file, choose the organization and press Analyze. Nothing is changed until you confirm.",
+        "ru": "Выберите файл приватного ключа и организацию, затем нажмите «Проанализировать». До подтверждения ничего не меняется.",
+        "de": "Wählen Sie die Datei mit dem privaten Schlüssel und die Organisation und drücken Sie Analysieren. Bis zur Bestätigung wird nichts geändert.",
+        "pl": "Wybierz plik klucza prywatnego i organizację, a następnie naciśnij Analizuj. Do potwierdzenia nic nie jest zmieniane."
     },
     "restore_confirm_hint": {
         "en": "To run the restore, type the organization name exactly: {{name}}",
@@ -518,7 +518,7 @@
     "restore_rep_type_changed": {
         "en": "column {{table}}.{{column}}: type changed {{from}} -> {{to}}",
         "ru": "колонка {{table}}.{{column}}: тип изменился {{from}} → {{to}}",
-        "de": "Spalte {{table}}.{{column}}: Typ geandert {{from}} -> {{to}}",
+        "de": "Spalte {{table}}.{{column}}: Typ geändert {{from}} → {{to}}",
         "pl": "kolumna {{table}}.{{column}}: typ zmieniony {{from}} -> {{to}}"
     },
     "restore_rep_table_missing_now": {
@@ -548,8 +548,8 @@
     "restore_rep_dangling": {
         "en": "Dangling references to global reference data: {{count}}. Restore is blocked - the reference data has changed since the backup was taken.",
         "ru": "Висячих ссылок на глобальные справочники: {{count}}. Восстановление заблокировано — справочники изменились после снятия копии.",
-        "de": "Hangende Verweise auf globale Stammdaten: {{count}}. Wiederherstellung blockiert - die Stammdaten haben sich seit der Sicherung geandert.",
-        "pl": "Wiszace odwolania do slownikow globalnych: {{count}}. Przywracanie zablokowane - slowniki zmienily sie po utworzeniu kopii."
+        "de": "Hängende Verweise auf globale Stammdaten: {{count}}. Wiederherstellung blockiert — die Stammdaten haben sich seit der Sicherung geändert.",
+        "pl": "Wiszące odwołania do słowników globalnych: {{count}}. Przywracanie zablokowane — słowniki zmieniły się po utworzeniu kopii."
     },
     "restore_rep_cycle": {
         "en": "Reference cycle between tables ({{list}}), and foreign key checks cannot be disabled on this installation. Restore is not possible.",
@@ -560,8 +560,8 @@
     "restore_rep_plan_head": {
         "en": "Rows per table (- delete / + insert):",
         "ru": "Строки по таблицам (− удалить / + вставить):",
-        "de": "Zeilen je Tabelle (- loschen / + einfugen):",
-        "pl": "Wiersze wg tabel (- usunac / + wstawic):"
+        "de": "Zeilen je Tabelle (− löschen / + einfügen):",
+        "pl": "Wiersze wg tabel (− usunąć / + wstawić):"
     },
     "restore_rep_totals": {
         "en": "Total: {{del}} rows will be deleted, {{ins}} inserted.",
@@ -588,10 +588,10 @@
         "pl": "Wybierz przywracana organizacje."
     },
     "restore_err_key_required": {
-        "en": "Paste the private key - the server does not store it.",
-        "ru": "Вставьте приватный ключ — на сервере его нет.",
-        "de": "Fugen Sie den privaten Schlussel ein - der Server speichert ihn nicht.",
-        "pl": "Wklej klucz prywatny - serwer go nie przechowuje."
+        "en": "Select the private key file — the server does not store it.",
+        "ru": "Выберите файл приватного ключа — на сервере его нет.",
+        "de": "Wählen Sie die Datei mit dem privaten Schlüssel — der Server speichert sie nicht.",
+        "pl": "Wybierz plik klucza prywatnego — serwer go nie przechowuje."
     },
     "restore_err_file_missing": {
         "en": "The backup file is not in the storage directory.",
@@ -644,8 +644,8 @@
     "restore_err_blocked": {
         "en": "Restore is blocked by the checks - see the report. Nothing was changed.",
         "ru": "Восстановление заблокировано проверками — см. отчёт. Ничего не изменено.",
-        "de": "Wiederherstellung durch die Prufungen blockiert - siehe Bericht. Nichts wurde geandert.",
-        "pl": "Przywracanie zablokowane przez kontrole - patrz raport. Nic nie zostalo zmienione."
+        "de": "Wiederherstellung durch die Prüfungen blockiert — siehe Bericht. Nichts wurde geändert.",
+        "pl": "Przywracanie zablokowane przez kontrole — patrz raport. Nic nie zostało zmienione."
     },
     "restore_err_failed": {
         "en": "Restore failed and was rolled back: {{message}}. The organization data is unchanged.",
@@ -666,10 +666,10 @@
         "pl": "tabela {{table}}: kopia nie zawiera znacznikow czasu - przywrocone wiersze otrzymaja biezacy czas"
     },
     "restore_err_bad_key": {
-        "en": "This private key does not match the backup - it was encrypted with a different key pair.",
+        "en": "This private key does not match the backup — it was encrypted with a different key pair.",
         "ru": "Этот приватный ключ не подходит к копии — она зашифрована другой парой ключей.",
-        "de": "Dieser private Schlussel passt nicht zur Sicherung - sie wurde mit einem anderen Schlusselpaar verschlusselt.",
-        "pl": "Ten klucz prywatny nie pasuje do kopii - zostala zaszyfrowana inna para kluczy."
+        "de": "Dieser private Schlüssel passt nicht zur Sicherung — sie wurde mit einem anderen Schlüsselpaar verschlüsselt.",
+        "pl": "Ten klucz prywatny nie pasuje do kopii — została zaszyfrowana inną parą kluczy."
     },
     "backup_run_group": {
         "en": "Operation progress",
@@ -1152,10 +1152,10 @@
         "pl": "To klucz PUBLICZNY. Do przywracania potrzebny jest PRYWATNY — plik wydany jednorazowo przy generowaniu pary (backup-private-key.pem)."
     },
     "restore_err_key_unparsable": {
-        "en": "The private key could not be read: {{message}}. Paste the whole PEM file, including the BEGIN and END lines.",
-        "ru": "Приватный ключ не прочитан: {{message}}. Вставьте PEM-файл целиком, вместе со строками BEGIN и END.",
-        "de": "Der private Schlüssel konnte nicht gelesen werden: {{message}}. Fügen Sie die gesamte PEM-Datei ein, samt BEGIN- und END-Zeilen.",
-        "pl": "Nie udało się odczytać klucza prywatnego: {{message}}. Wklej cały plik PEM, razem z liniami BEGIN i END."
+        "en": "The private key could not be read: {{message}}. Select the .pem file as it was handed out, unedited, with its BEGIN and END lines.",
+        "ru": "Приватный ключ не прочитан: {{message}}. Выберите файл .pem в том виде, как он был выдан, не редактируя, — вместе со строками BEGIN и END.",
+        "de": "Der private Schlüssel konnte nicht gelesen werden: {{message}}. Wählen Sie die .pem-Datei so, wie sie ausgegeben wurde — unverändert, samt BEGIN- und END-Zeilen.",
+        "pl": "Nie udało się odczytać klucza prywatnego: {{message}}. Wybierz plik .pem w postaci, w jakiej został wydany — bez zmian, razem z liniami BEGIN i END."
     },
     "restore_err_key_passphrase": {
         "en": "The private key is protected by a passphrase, and it was not supplied.",

@@ -299,8 +299,16 @@ async function createPlainStream(opts) {
  * Раздельный подсчёт принципиален: ручную копию делают ровно перед рискованной
  * операцией, и она не должна вылететь из-за трёх ночных запусков.
  *
+ * ПОДТВЕРЖДЁННОСТЬ (`acked`) — необязательное УСЛОВИЕ УДАЛЕНИЯ, а не третья группа.
+ * При `pruneOnlyAcked` копия, которую внешнее хранилище ещё не забрало, из списка на
+ * удаление исключается: сервер хранит последние копии, а долгий архив ведёт хранилище,
+ * и удалять то, что до него не доехало, — значит терять поколение молча. Защита не
+ * бессрочна: молчащее хранилище иначе забьёт диск, поэтому через `keepUnackedMaxDays`
+ * копия прореживается на общих основаниях. Лимиты при этом НЕ пересчитываются —
+ * защищённые копии просто не удаляются, и их накопление видно в панели состояния.
+ *
  * @param {Array<Object>} files — записи `backup_files` (нужны `triggeredBy`, `createdAt`, `UID`)
- * @param {Object} limits — `{ keepScheduled, keepManual }`
+ * @param {Object} limits — `{ keepScheduled, keepManual, pruneOnlyAcked, keepUnackedMaxDays }`
  * @returns {Array<Object>} что удалять
  */
 function selectForPruning(files, limits) {
@@ -318,7 +326,19 @@ function selectForPruning(files, limits) {
         const sorted = groups[g].slice().sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
         doomed.push(...sorted.slice(keep[g]));
     }
-    return doomed;
+    if (!limits || !limits.pruneOnlyAcked) return doomed;
+
+    const graceMs = Math.max(0, Number(limits.keepUnackedMaxDays) || 0) * 24 * 60 * 60 * 1000;
+    return doomed.filter((f) => {
+        if (f.acked) return true;
+        const age = Date.now() - new Date(f.createdAt || 0).getTime();
+        if (age > graceMs) {
+            log.warn(`[backup] Копия ${f.fileName} не подтверждена хранилищем, но старше `
+                + `${limits.keepUnackedMaxDays} дн. — прореживается`);
+            return true;
+        }
+        return false;
+    });
 }
 
 // ── Защита файла, с которым сейчас работают ─────────────────────────────────────
@@ -475,6 +495,9 @@ module.exports = {
     createBackup, createPlainStream, checkPreconditions, selectForPruning, deleteFile, buildFileName,
     markInUse, isInUse, reconcileJournal,
     settings: settingsStore, keys, container, dialect, dump, FILE_EXT,
+    // Вход внешнего хранилища по подписи (ТЗ §5). Отдельный модуль, а не часть `keys`:
+    // это другая пара ключей с другим сроком жизни и другим местом хранения.
+    get apiAuth() { return require('./apiAuth'); },
     // Восстановление одной организации (ТЗ §6.6) — отдельная процедура, а не режим
     // выгрузки; подключается лениво, чтобы выгрузка не тянула его код.
     get restore() { return require('./restore'); },

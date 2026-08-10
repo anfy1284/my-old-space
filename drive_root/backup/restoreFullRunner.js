@@ -430,4 +430,195 @@ function emitProgress(m) {
     });
 }
 
-module.exports = { execute, afterDatabaseReady, reopenPool, probeState, makeSafetyDump };
+
+/**
+ * ПОВТОР восстановления со страницы обслуживания (ТЗ §6.2, «выход из тупика»).
+ *
+ * Зачем отдельная функция, а не `execute`. Мы уже в аварии: флаг обслуживания поднят,
+ * приложения могут быть не загружены вовсе (сервер стартовал с флагом и не инициализировал
+ * базу), планировщика нет. В таком состоянии `execute` неприменим — он начинает с
+ * safety-выгрузки заданием планировщика, а её здесь некому исполнить.
+ *
+ * Почему safety-выгрузка НЕ снимается повторно:
+ *   · копия текущего состояния уже снята первой попыткой — именно она и есть путь назад;
+ *   · снимать копию с базы, про которую мы только что решили, что она непригодна, —
+ *     значит тратить место и время на заведомый мусор;
+ *   · если переключение состоялось, прежнее состояние цело в схеме `rollback_*`, и это
+ *     защита надёжнее выгрузки: она мгновенна.
+ *
+ * Флаг обслуживания НЕ снимается до успеха. В этом весь смысл повтора: чтобы добраться
+ * до этой операции, не надо открывать систему пользователям.
+ *
+ * @param {Object} opts — `{ filePath, privateKeyPem, passphrase, userId }`
+ * @returns {Promise<Object>}
+ */
+/**
+ * Проверки, которые обязаны отработать ДО ответа странице обслуживания.
+ *
+ * Вынесены отдельно не ради красоты. Повтор идёт минутами, поэтому страница получает
+ * ответ сразу и дальше следит за фазой, — а при таком порядке ошибка ключа успевала
+ * уехать в фазу `failed`, и администратор видел «запущено» вместо «ключ от другой пары».
+ * Ровно та же беда, что уже ловилась на обычной форме восстановления: про ключ надо
+ * говорить прямо и до начала работ, а не намёком в журнале.
+ *
+ * Дёшево: читается только заголовок копии, ничего не пишется. Поэтому `retry` зовёт
+ * это же сам — двойная проверка здесь ничего не стоит, а запуск в обход страницы
+ * (из сценария, из теста) остаётся защищённым.
+ *
+ * @returns {Promise<Object>} `{ ok: true, info }` либо `{ ok: false, errorKey, vars }`
+ */
+async function precheckRetry(opts) {
+    const sequelize = require('../db/sequelize_instance');
+
+    if (!maintenance.isActive()) {
+        return { ok: false, errorKey: 'maint_err_not_in_maintenance' };
+    }
+
+    const info = await restoreFull.inspect(sequelize, opts.filePath);
+    if (info.scopeType !== 'full') return { ok: false, errorKey: 'restore_err_scope_not_full' };
+
+    // Ключ нужен только зашифрованной копии; для незашифрованной его не спрашиваем вовсе.
+    if (info.encrypted) {
+        const keys = require('./keys');
+        const check = keys.validatePrivateKey(opts.privateKeyPem, opts.passphrase);
+        if (!check.ok) return { ok: false, errorKey: check.errorKey, vars: check.vars };
+        const header = info.header || {};
+        if (header.keyFingerprint && header.keyFingerprint !== check.fingerprint) {
+            return {
+                ok: false, errorKey: 'restore_err_key_other_pair',
+                vars: {
+                    expected: String(header.keyFingerprint).slice(0, 26),
+                    actual: String(check.fingerprint).slice(0, 26)
+                }
+            };
+        }
+    }
+    return { ok: true, info };
+}
+
+async function retry(opts) {
+    const sequelize = require('../db/sequelize_instance');
+    const startedAt = Date.now();
+    const fileName = path.basename(opts.filePath);
+
+    const pre = await precheckRetry(opts);
+    if (!pre.ok) return pre;
+    const info = pre.info;
+
+    let rollbacksBefore = [];
+    try { rollbacksBefore = await dialect.listRollbackSchemas(sequelize); } catch (e) { rollbacksBefore = []; }
+
+    maintenance.update({
+        phase: 'starting', reason: 'restore_retry', sourceFile: fileName,
+        mode: info.mode, error: null, byUser: String(opts.userId || 'recovery-admin')
+    }, true);
+    restore.audit(`RESTORE_RETRY_START file=${fileName} mode=${info.mode} by=${opts.userId || 'recovery-admin'}`);
+
+    // Пул закрываем: соединения не должны держать объекты живой схемы в момент
+    // переименования. Запросов извне и так нет — сервер отдаёт 503.
+    try { await sequelize.close(); } catch (e) { log.warn(`[restoreFull] Пул не закрыт: ${e.message}`); }
+
+    const run = await runWorker({
+        filePath: opts.filePath,
+        privateKeyPem: opts.privateKeyPem,
+        passphrase: opts.passphrase,
+        onProgress: (m) => {
+            try {
+                maintenance.update({ phase: m.phase });
+                maintenance.appendLog(`${m.phase}: ${m.text}`, m.progress || null);
+            } catch (e) { log.warn(`[restoreFull] Прогресс не записан: ${e.message}`); }
+        }
+    });
+
+    reopenPool(sequelize);
+
+    if (!run.ok) {
+        const err = run.error || {};
+        let switched = !!err.switched;
+        if (err.unknownState) {
+            const probe = await probeState(sequelize, rollbacksBefore);
+            switched = probe.switched !== false;      // неизвестность трактуем в худшую сторону
+        }
+        // Флаг остаётся в ЛЮБОМ случае: мы в аварии, и пускать пользователей не за чем.
+        maintenance.update({
+            phase: switched ? 'failed_after_switch' : 'failed',
+            switched, error: err.errorKey || err.message || 'unknown'
+        }, true);
+        restore.audit(`RESTORE_RETRY_FAILED file=${fileName} switched=${switched} error=${err.errorKey || err.message}`);
+        return { ok: false, errorKey: err.errorKey || 'restore_full_err_failed', vars: err.vars, message: err.message };
+    }
+
+    const result = run.result || {};
+    maintenance.update({ phase: 'migration', switched: true, rollbackSchema: result.rollbackSchema || '' }, true);
+    maintenance.appendLog('migration: приведение структуры к текущей версии приложения');
+
+    try {
+        await afterDatabaseReady({ reason: 'restore', migrate: true, origin: 'restore' });
+    } catch (e) {
+        maintenance.update({ phase: 'migration_failed', error: e.message }, true);
+        restore.audit(`RESTORE_RETRY_MIGRATION_FAILED file=${fileName} error=${e.message}`);
+        log.error(`[restoreFull] Миграция после повтора: ${e.stack || e.message}`);
+        return { ok: false, errorKey: 'restore_err_migration', message: e.message, maintenance: true };
+    }
+
+    restore.audit(
+        `RESTORE_RETRY_OK file=${fileName} rows=${result.totalRows} `
+        + `rollback=${result.rollbackSchema} ms=${Date.now() - startedAt}`
+    );
+    maintenance.clear({ who: String(opts.userId || 'recovery-admin'), note: 'restore retry completed' });
+    try { await dialect.dropStaleRollbacks(sequelize, { keep: 1, maxKeep: 3, olderThanDays: 7 }); } catch (e) {}
+
+    log.info(`[restoreFull] Повтор восстановления завершён: ${result.totalRows} строк`);
+    return {
+        ok: true, totalRows: result.totalRows,
+        tables: Object.keys(result.tables || {}).length,
+        rollbackSchema: result.rollbackSchema,
+        durationMs: Date.now() - startedAt
+    };
+}
+
+/**
+ * Копии, ПРИГОДНЫЕ для повтора, — читаются С ДИСКА, а не из журнала `backup_files`.
+ *
+ * Журнал живёт в базе, а база в этот момент как раз и есть предмет аварии: она может
+ * быть подменена наполовину, содержать список файлов чужого момента или не открываться
+ * вовсе. Каталог хранения — единственный источник, которому здесь можно верить.
+ * Заголовок копии читается без приватного ключа.
+ */
+function listRestorableFiles() {
+    const settingsStore2 = require('./settings');
+    const out = [];
+    let dir;
+    try { dir = settingsStore2.storagePath(); } catch (e) { return out; }
+    let names = [];
+    try { names = fs.readdirSync(dir).filter(f => f.toLowerCase().endsWith('.mosbak')); } catch (e) { return out; }
+
+    for (const fileName of names) {
+        const full = path.join(dir, fileName);
+        let info = null;
+        try { info = restore.readContainerInfo(full); } catch (e) { continue; }   // не наш файл
+        const h = info.header || {};
+        const scope = h.scope || {};
+        let size = 0;
+        try { size = fs.statSync(full).size; } catch (e) {}
+        out.push({
+            fileName,
+            createdAt: h.createdAt || '',
+            scopeType: scope.type || 'full',
+            encrypted: info.encrypted,
+            keyFingerprint: h.keyFingerprint || '',
+            dbVersion: h.dbVersion || 0,
+            size
+        });
+    }
+    // Сортируем по МОМЕНТУ СНЯТИЯ из заголовка, а не по имени файла: имя начинается с
+    // области копии, и по алфавиту копии организаций уезжают выше более свежих полных.
+    out.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt))
+        || b.fileName.localeCompare(a.fileName));
+    return out;
+}
+
+module.exports = {
+    execute, retry, precheckRetry, listRestorableFiles,
+    afterDatabaseReady, reopenPool, probeState, makeSafetyDump
+};

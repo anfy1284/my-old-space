@@ -1117,6 +1117,13 @@
                         "i18n": "backup_acked_field"
                     }
                 },
+                "ackedAt": {
+                    "type": "DATE",
+                    "allowNull": true,
+                    "caption": {
+                        "i18n": "backup_acked_at_field"
+                    }
+                },
                 "missing": {
                     "type": "BOOLEAN",
                     "allowNull": false,

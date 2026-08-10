@@ -148,7 +148,68 @@ async function createPlain(ev, ctx) {
     MySpace.downloadFile('/api/apps/backup/download-plain?scope=full', 'backup-plain.mosbak');
 }
 
+// ── Внешние хранилища: вход по криптоключу ──────────────────────────────────────
+
+/** Хранилище, выбранное в таблице. Текущую строку, как и в журнале копий, ведёт таблица. */
+function selectedClient(form) {
+    var tbl = form && form.getControl('apiClientsTable');
+    return tbl ? tbl.currentRow : null;
+}
+
+/** Перерисовать таблицу после изменения реестра: список приходит с сервера целиком. */
+function applyClients(form, clients) {
+    if (!form || !clients) return;
+    form.setControlValue('apiClientsTable', clients);
+}
+
+/**
+ * Зарегистрировать хранилище по его ПУБЛИЧНОМУ ключу.
+ *
+ * Приватный ключ сюда вставлять не надо и нельзя — сервер об этом скажет прямо, но
+ * лучше, чтобы человек и не пробовал: смысл схемы в том, что секрет не покидает машину
+ * хранилища.
+ */
+async function addApiClient(ev, ctx) {
+    var form = ctx && ctx.form;
+    var pem = form && form.getControlValue('apiClientKeyPem');
+    if (!pem || !String(pem).trim()) { showAlert(__t('backup_api_err_key_empty')); return; }
+
+    var res = await callServer('__SERVER_SCRIPT__', 'addApiClient', {
+        name: form.getControlValue('apiClientName'),
+        publicKeyPem: pem
+    });
+    if (!res || res.error) { showAlert(__t('Error: ') + ((res && res.error) || '')); return; }
+
+    form.setControlValue('apiClientKeyPem', '');
+    form.setControlValue('apiClientName', '');
+    applyClients(form, res.clients);
+    showAlert(res.message || '');
+}
+
+async function toggleApiClient(ev, ctx) {
+    var form = ctx && ctx.form;
+    var row = selectedClient(form);
+    if (!row || !row.id) { showAlert(__t('backup_api_err_no_selection')); return; }
+
+    var res = await callServer('__SERVER_SCRIPT__', 'toggleApiClient', { id: row.id });
+    if (!res || res.error) { showAlert(__t('Error: ') + ((res && res.error) || '')); return; }
+    applyClients(form, res.clients);
+}
+
+async function removeApiClient(ev, ctx) {
+    var form = ctx && ctx.form;
+    var row = selectedClient(form);
+    if (!row || !row.id) { showAlert(__t('backup_api_err_no_selection')); return; }
+
+    var ok = await showConfirm(__t('backup_api_remove_confirm'));
+    if (!ok) return;
+    var res = await callServer('__SERVER_SCRIPT__', 'removeApiClient', { id: row.id });
+    if (!res || res.error) { showAlert(__t('Error: ') + ((res && res.error) || '')); return; }
+    applyClients(form, res.clients);
+}
+
 return {
     createFull, createPlain, createForOrganization, downloadSelected, deleteSelected,
-    restoreOrganization, generateKeys, openSchedule, setRecoveryPassword
+    restoreOrganization, generateKeys, openSchedule, setRecoveryPassword,
+    addApiClient, toggleApiClient, removeApiClient
 };

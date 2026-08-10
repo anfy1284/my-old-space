@@ -171,8 +171,95 @@ async function syncUniqueConstraints(sequelize, transaction, tableName, desiredS
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────
+// Входящие внешние ключи перестраиваемых таблиц
+//
+// Миграция изменённой таблицы идёт через `DROP TABLE ... CASCADE` с
+// последующим воссозданием и возвратом данных. CASCADE молча уносит
+// FK-ограничения СОСЕДНИХ таблиц, которые ссылались на перестраиваемую.
+// Вернуть их некому: фаза «пересинхронизировать все модели» обещает в
+// комментарии «FKs restored», но `Model.sync()` для УЖЕ существующей
+// таблицы — пустая операция (умеет только CREATE TABLE IF NOT EXISTS).
+//
+// Цена ошибки: после добавления одного реквизита в справочник база
+// перестаёт защищать ссылки на него. Колонка и данные на месте, расчёты
+// работают (они ходят по UID), и потому дефект незаметен — до дня, когда
+// кто-то удалит запись справочника, на которую ссылаются документы.
+// Проверено на `guest_types`: добавление поля снесло FK у
+// `booking_guests.guestTypeId` и `invoice_lines.guestTypeId`, тогда как
+// все прочие FK этих же таблиц уцелели.
+//
+// Определение снимается через `pg_get_constraintdef` — так возвращаются
+// ТОЧНЫЕ `ON UPDATE`/`ON DELETE`, а не догадка о них по модели.
+// ─────────────────────────────────────────────────────────────────────
+
+/**
+ * Снимает определения FK, которые ссылаются НА перестраиваемые таблицы со
+ * стороны таблиц, которые сами НЕ перестраиваются. Последние исключены
+ * намеренно: их `DROP` + `sync()` воссоздаст вместе со своими ссылками.
+ * @returns {Promise<Array<{src_table: string, name: string, def: string}>>}
+ */
+async function collectInboundForeignKeys(sequelize, transaction, migratingTables) {
+  if (sequelize.getDialect() !== 'postgres') return [];
+  if (!migratingTables || !migratingTables.length) return [];
+  try {
+    return await sequelize.query(
+      `SELECT src.relname AS src_table, con.conname AS name,
+              pg_get_constraintdef(con.oid) AS def
+         FROM pg_constraint con
+         JOIN pg_class src ON src.oid = con.conrelid
+         JOIN pg_class tgt ON tgt.oid = con.confrelid
+         JOIN pg_namespace n ON n.oid = src.relnamespace
+        WHERE con.contype = 'f'
+          AND n.nspname = current_schema()
+          AND tgt.relname IN (:tables)
+          AND src.relname NOT IN (:tables)`,
+      { transaction, replacements: { tables: migratingTables }, type: require('sequelize').QueryTypes.SELECT }
+    );
+  } catch (err) {
+    console.error('[MIGRATION] Не удалось снять входящие внешние ключи:', err.message || err);
+    return [];
+  }
+}
+
+/**
+ * Возвращает снятые FK. Звать ТОЛЬКО после восстановления данных: пока
+ * строки родительской таблицы не вернулись, ограничение не пройдёт проверку.
+ *
+ * Неудача не роняет старт (база уже рабочая), но и не замалчивается: FK не
+ * встал — значит в данных есть ссылки в никуда, и об этом нужно знать.
+ */
+async function restoreInboundForeignKeys(sequelize, transaction, savedFks) {
+  if (sequelize.getDialect() !== 'postgres') return;
+  if (!savedFks || !savedFks.length) return;
+  let restored = 0;
+  for (const fk of savedFks) {
+    try {
+      await sequelize.query('SAVEPOINT restore_fk', { transaction });
+      await sequelize.query(
+        `ALTER TABLE "${fk.src_table}" ADD CONSTRAINT "${fk.name}" ${fk.def}`,
+        { transaction }
+      );
+      await sequelize.query('RELEASE SAVEPOINT restore_fk', { transaction });
+      restored++;
+    } catch (err) {
+      await sequelize.query('ROLLBACK TO SAVEPOINT restore_fk', { transaction });
+      const msg = String(err.message || err);
+      // Уже на месте (таблицу-источник тоже пересоздали) — штатный исход.
+      if (/already exists|уже существует/i.test(msg)) continue;
+      console.error(
+        `[MIGRATION] НЕ восстановлен внешний ключ ${fk.name} (${fk.src_table}): ${msg}\n` +
+        `[MIGRATION] Таблица осталась без защиты ссылочной целостности — проверьте данные на «висячие» ссылки.`
+      );
+    }
+  }
+  if (restored > 0) console.log(`[MIGRATION] Восстановлено входящих внешних ключей: ${restored}`);
+}
+
 module.exports = {
   normalizeType,
   compareSchemas,
-  syncUniqueConstraints
+  syncUniqueConstraints,
+  collectInboundForeignKeys,
+  restoreInboundForeignKeys
 };

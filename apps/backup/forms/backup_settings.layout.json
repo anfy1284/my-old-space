@@ -225,6 +225,150 @@
     },
     {
         "type": "group",
+        "name": "grpApi",
+        "caption": {
+            "i18n": "backup_api_group"
+        },
+        "layout": [
+            {
+                "type": "label",
+                "name": "apiHint",
+                "caption": {
+                    "i18n": "backup_api_hint"
+                }
+            },
+            {
+                "type": "table",
+                "name": "apiClientsTable",
+                "data": "apiClients",
+                "columns": [
+                    {
+                        "caption": {
+                            "i18n": "backup_api_client_name_col"
+                        },
+                        "data": "name",
+                        "width": 200,
+                        "inputType": "textbox"
+                    },
+                    {
+                        "caption": {
+                            "i18n": "backup_api_client_state_col"
+                        },
+                        "data": "stateText",
+                        "width": 110,
+                        "inputType": "textbox"
+                    },
+                    {
+                        "caption": {
+                            "i18n": "backup_api_client_seen_col"
+                        },
+                        "data": "lastSeenText",
+                        "width": 190,
+                        "inputType": "textbox"
+                    },
+                    {
+                        "caption": {
+                            "i18n": "backup_api_client_fp_col"
+                        },
+                        "data": "fingerprint",
+                        "autoWidth": true,
+                        "inputType": "textbox"
+                    }
+                ],
+                "properties": {
+                    "readOnly": true,
+                    "visibleRows": 4,
+                    "hiddenButtons": [
+                        "recordAdd",
+                        "recordDelete",
+                        "recordOpen",
+                        "listSettings"
+                    ]
+                }
+            },
+            {
+                "type": "textarea",
+                "name": "apiClientKeyPem",
+                "caption": {
+                    "i18n": "backup_api_new_key_field"
+                },
+                "properties": {
+                    "rows": 4
+                },
+                "data": "apiClientKeyPem"
+            },
+            {
+                "type": "group",
+                "name": "grpApiRow",
+                "noBorder": true,
+                "horizontal": true,
+                "layout": [
+                    {
+                        "type": "textbox",
+                        "name": "apiClientName",
+                        "caption": {
+                            "i18n": "backup_api_new_name_field"
+                        },
+                        "data": "apiClientName"
+                    },
+                    {
+                        "type": "button",
+                        "name": "btnApiAdd",
+                        "caption": {
+                            "i18n": "backup_api_add_btn"
+                        },
+                        "icon": "/apps/general_icons/resources/public/16x16/add.png",
+                        "events": {
+                            "onClick": "addApiClient"
+                        }
+                    },
+                    {
+                        "type": "button",
+                        "name": "btnApiToggle",
+                        "caption": {
+                            "i18n": "backup_api_toggle_btn"
+                        },
+                        "icon": "/apps/general_icons/resources/public/16x16/cancel.png",
+                        "events": {
+                            "onClick": "toggleApiClient"
+                        }
+                    },
+                    {
+                        "type": "button",
+                        "name": "btnApiRemove",
+                        "caption": {
+                            "i18n": "backup_api_remove_btn"
+                        },
+                        "icon": "/apps/general_icons/resources/public/16x16/delete.png",
+                        "events": {
+                            "onClick": "removeApiClient"
+                        }
+                    }
+                ]
+            },
+            {
+                "type": "checkbox",
+                "name": "pruneOnlyAcked",
+                "caption": {
+                    "i18n": "backup_api_prune_acked_field"
+                },
+                "data": "pruneOnlyAcked"
+            },
+            {
+                "type": "integer",
+                "name": "keepUnackedMaxDays",
+                "caption": {
+                    "i18n": "backup_api_unacked_days_field"
+                },
+                "properties": {
+                    "width": 90
+                },
+                "data": "keepUnackedMaxDays"
+            }
+        ]
+    },
+    {
+        "type": "group",
         "name": "grpRecovery",
         "caption": {
             "i18n": "backup_recovery_group"

@@ -186,6 +186,97 @@ const ACTIONS = {
         return { ok: true };
     },
 
+
+    /**
+     * Копии, пригодные для восстановления, — читаются С ДИСКА.
+     *
+     * Журнал `backup_files` живёт в базе, а база в этот момент и есть предмет аварии.
+     * Каталог хранения — единственный источник, которому здесь можно верить.
+     */
+    async listFiles() {
+        const runner = require('./backup/restoreFullRunner');
+        const st = maintenance.read() || {};
+        const files = runner.listRestorableFiles();
+        return {
+            ok: true,
+            sourceFile: st.sourceFile || '',        // файл прерванной попытки — подсветить
+            files: files.filter(f => f.scopeType === 'full')
+        };
+    },
+
+    /**
+     * ПОВТОРИТЬ восстановление, не снимая блокировку (ТЗ §6.2, «выход из тупика»).
+     *
+     * Тем же действием разворачивается и safety-выгрузка: это тот же файл в том же
+     * каталоге, отличается только выбор в списке. Двух отдельных кнопок для одной
+     * операции заводить незачем.
+     *
+     * Ответ отдаётся СРАЗУ: восстановление идёт минутами, а ход операции виден в том же
+     * состоянии, которое страница и так опрашивает.
+     */
+    async restoreFromFile(payload) {
+        if (_restoreRunning) return { ok: false, errorKey: 'maint_err_restore_running' };
+
+        const runner = require('./backup/restoreFullRunner');
+        const settingsStore = require('./backup/settings');
+        const path = require('path');
+
+        const fileName = String(payload.fileName || '');
+        // Имя берём ТОЛЬКО из собственного списка: путь с клиента не принимается, иначе
+        // страница превращается в чтение произвольного файла с диска сервера.
+        const known = runner.listRestorableFiles().some(f => f.fileName === fileName);
+        if (!known) {
+            maintenance.audit(`RESTORE_RETRY_REFUSED file=${fileName} reason=unknown_file`);
+            return { ok: false, errorKey: 'maint_err_unknown_file' };
+        }
+
+        const filePath = path.join(settingsStore.storagePath(), fileName);
+        const opts = {
+            filePath,
+            privateKeyPem: String(payload.privateKeyPem || ''),
+            userId: 'recovery-admin'
+        };
+
+        // Быстрые проверки — ДО ответа. Про негодный ключ надо сказать прямо, а не отдать
+        // «запущено» и оставить администратора выяснять по фазе, почему ничего не вышло.
+        const pre = await runner.precheckRetry(opts);
+        if (!pre.ok) {
+            // Отказ тоже в аудит: неудачные попытки подобрать ключ — ровно то, что потом
+            // разбирают, а страница живёт за аварийным паролем и следов больше нигде нет.
+            maintenance.audit(`RESTORE_RETRY_REFUSED file=${fileName} reason=${pre.errorKey}`);
+            return pre;
+        }
+
+        _restoreRunning = true;
+
+        // Дальше не ждём: HTTP-ответ нужен сейчас, а сама операция идёт минутами.
+        Promise.resolve()
+            .then(() => runner.retry(opts))
+            .then((res) => {
+                _restoreRunning = false;
+                if (!res.ok) {
+                    log.error(`[maintenance] Повтор восстановления не удался: ${res.errorKey || res.message}`);
+                    return;
+                }
+                // Успех: блокировка уже снята внутри retry. Если мы автономный сервер —
+                // передаём управление обычному старту, иначе процесс так и останется
+                // отвечать 503, не имея загруженных приложений.
+                if (_standalone && typeof _standalone.onResume === 'function') {
+                    setTimeout(() => {
+                        Promise.resolve(_standalone.onResume(_standalone.server))
+                            .catch(e => log.error(`[maintenance] Передача управления: ${e.message}`));
+                    }, 500);
+                }
+            })
+            .catch((e) => {
+                _restoreRunning = false;
+                log.error(`[maintenance] Повтор восстановления: ${e.stack || e.message}`);
+                try { maintenance.update({ phase: 'failed', error: e.message }, true); } catch (e2) {}
+            });
+
+        return { ok: true, started: true };
+    },
+
     /**
      * Снять блокировку вручную.
      *
@@ -215,6 +306,10 @@ const ACTIONS = {
 // Ссылка на автономный режим: заполняется только при `startStandalone`.
 let _standalone = null;
 
+// Идёт ли повтор восстановления. Двух одновременных быть не должно: они полезут в одну
+// теневую схему и затрут работу друг друга.
+let _restoreRunning = false;
+
 // ── Обработчик запросов ─────────────────────────────────────────────────────────
 
 /**
@@ -225,6 +320,17 @@ async function handle(req, res) {
     // строкой, до разбора пути: иначе «маршрут есть, но отвечает 403» — а это уже
     // поверхность атаки, которой по ТЗ быть не должно.
     if (!maintenance.isActive()) return false;
+
+    // Ответчик, который переводит `errorKey` в текст. Один на все ответы: язык здесь
+    // выведен из заголовка браузера (сессии в аварии нет), а показывать администратору
+    // голый ключ вида `maint_err_bad_password` — значит не сказать ничего.
+    const lang = pageLang(req);
+    const reply = (status, obj) => {
+        if (obj && obj.ok === false && obj.errorKey && !obj.error) {
+            obj.error = i18n.tf(obj.errorKey, lang, obj.vars || {});
+        }
+        return sendJSON(res, status, obj);
+    };
 
     const url = String(req.url || '').split('?')[0];
     if (url !== '/' && url !== PREFIX && !url.startsWith(PREFIX + '/')) {
@@ -262,11 +368,11 @@ async function handle(req, res) {
         const body = await readBody(req);
         if (rateLimited(ip)) {
             maintenance.audit(`RECOVERY_LOGIN_BLOCKED ip=${ip}`);
-            return sendJSON(res, 429, { ok: false, errorKey: 'maint_err_rate_limited' }), true;
+            return reply(429, { ok: false, errorKey: 'maint_err_rate_limited' }), true;
         }
         if (!recovery.isSet()) {
             maintenance.audit(`RECOVERY_LOGIN_NO_PASSWORD ip=${ip}`);
-            return sendJSON(res, 403, { ok: false, errorKey: 'maint_err_no_password' }), true;
+            return reply(403, { ok: false, errorKey: 'maint_err_no_password' }), true;
         }
         const ok = await recovery.verify(body.password);
         maintenance.audit(`RECOVERY_LOGIN ${ok ? 'OK' : 'FAIL'} ip=${ip}`);
@@ -274,7 +380,7 @@ async function handle(req, res) {
             noteFailure(ip);
             // Единообразный отказ: не различаем «пароль не задан» и «пароль неверен»
             // по времени и тексту сильнее, чем уже сделано выше.
-            return sendJSON(res, 401, { ok: false, errorKey: 'maint_err_bad_password' }), true;
+            return reply(401, { ok: false, errorKey: 'maint_err_bad_password' }), true;
         }
         _attempts.delete(ip);
         return sendJSON(res, 200, { ok: true, token: issueToken(ip) }), true;
@@ -283,12 +389,12 @@ async function handle(req, res) {
     // Сервисные действия — только по аварийному токену
     const actionMatch = url.match(new RegExp('^' + PREFIX + '/api/action/([a-zA-Z]+)$'));
     if (req.method === 'POST' && actionMatch) {
-        if (!checkToken(req)) return sendJSON(res, 401, { ok: false, errorKey: 'maint_err_unauthorized' }), true;
+        if (!checkToken(req)) return reply(401, { ok: false, errorKey: 'maint_err_unauthorized' }), true;
         const fn = ACTIONS[actionMatch[1]];
-        if (!fn) return sendJSON(res, 404, { ok: false, errorKey: 'maint_err_unknown_action' }), true;
+        if (!fn) return reply(404, { ok: false, errorKey: 'maint_err_unknown_action' }), true;
         try {
             const body = await readBody(req);
-            return sendJSON(res, 200, await fn(body)), true;
+            return reply(200, await fn(body)), true;
         } catch (e) {
             log.error(`[maintenance] Действие ${actionMatch[1]}: ${e.stack || e.message}`);
             maintenance.audit(`ACTION_FAILED ${actionMatch[1]} error=${e.message}`);
@@ -346,6 +452,11 @@ function renderPage(lang) {
   .ok { color:#006000; font-weight:bold; }
   .bar { border:1px inset #fff; background:#fff; height:16px; padding:1px; }
   .bar > i { display:block; height:100%; background:#000080; width:0; }
+  #file-list { margin-top:6px; }
+  #file-list td { border-bottom:1px solid #d0d0d0; padding:2px 6px; }
+  #file-list tr { cursor:pointer; }
+  #file-list tr.sel { background:#000080; color:#fff; }
+  .tag { font-size:10px; border:1px solid #808080; padding:0 3px; margin-left:4px; }
 </style>
 </head>
 <body>
@@ -380,6 +491,16 @@ function renderPage(lang) {
     </div>
     <div id="actions-box" style="display:none">
       <p class="ok">${t('maint_login_ok')}</p>
+      <h2>${t('maint_retry_title')}</h2>
+      <div class="warn">${t('maint_retry_hint')}</div>
+      <table id="file-list"><tbody></tbody></table>
+      <div style="margin-top:8px">
+        <button id="btn-pick-key">${t('maint_retry_key_btn')}</button>
+        <span id="key-state"></span>
+      </div>
+      <button id="btn-restore" style="margin-top:8px">${t('maint_retry_run_btn')}</button>
+
+      <h2>${t('maint_other_actions')}</h2>
       <button id="btn-rollback">${t('maint_action_rollback')}</button>
       <button id="btn-drop-shadow">${t('maint_action_drop_shadow')}</button>
       <button id="btn-unlock">${t('maint_action_unlock')}</button>
@@ -427,7 +548,7 @@ function renderPage(lang) {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ password: E('pwd').value })
     }).then(function (r) { return r.json(); }).then(function (j) {
-      if (j.ok) { token = j.token; E('login-box').style.display = 'none'; E('actions-box').style.display = ''; refresh(); }
+      if (j.ok) { token = j.token; E('login-box').style.display = 'none'; E('actions-box').style.display = ''; refresh(); loadFiles(); }
       else { E('login-msg').textContent = ' ' + (j.errorKey || 'error'); E('login-msg').className = 'err'; }
       E('pwd').value = '';
     }).catch(function (e) { E('login-msg').textContent = String(e); });
@@ -449,6 +570,93 @@ function renderPage(lang) {
       refresh();
     }).catch(function (e) { E('action-msg').textContent = String(e); });
   }
+
+  // ── Повтор восстановления, НЕ снимая блокировку ────────────────────────────
+  //
+  // Тем же действием разворачивается safety-выгрузка: это тот же каталог, отличается
+  // только выбор строки в списке. Список читается С ДИСКА — журнал копий живёт в базе,
+  // а база в этот момент и есть предмет аварии.
+  var _files = [], _pick = null, _key = '', _sourceFile = '';
+
+  function renderFiles() {
+    var tb = E('file-list').querySelector('tbody');
+    tb.innerHTML = '';
+    if (!_files.length) {
+      tb.innerHTML = '<tr><td>' + ${JSON.stringify(String(T('maint_retry_no_files', lang)))} + '</td></tr>';
+      E('btn-restore').disabled = true;
+      return;
+    }
+    if (_pick === null) {
+      // По умолчанию — файл прерванной попытки, иначе самый свежий.
+      var i = -1;
+      for (var k = 0; k < _files.length; k++) if (_files[k].fileName === _sourceFile) { i = k; break; }
+      _pick = i >= 0 ? i : 0;
+    }
+    _files.forEach(function (f, i) {
+      var tr = document.createElement('tr');
+      if (i === _pick) tr.className = 'sel';
+      var tags = '';
+      if (!f.encrypted) tags += '<span class="tag">PLAIN</span>';
+      if (f.fileName === _sourceFile) tags += '<span class="tag">' + ${JSON.stringify(String(T('maint_retry_same_file', lang)))} + '</span>';
+      tr.innerHTML = '<td>' + String(f.createdAt).slice(0, 19).replace('T', ' ') + '</td>'
+        + '<td>' + f.fileName + tags + '</td>'
+        + '<td style="text-align:right">' + Math.round((f.size || 0) / 1024) + ' KB</td>';
+      tr.addEventListener('click', function () { _pick = i; renderFiles(); });
+      tb.appendChild(tr);
+    });
+    E('btn-restore').disabled = false;
+    // Ключ нужен только зашифрованной копии.
+    E('btn-pick-key').disabled = !_files[_pick].encrypted;
+  }
+
+  function loadFiles() {
+    if (!token) return;
+    fetch('${PREFIX}/api/action/listFiles', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+      body: JSON.stringify({})
+    }).then(function (r) { return r.json(); }).then(function (j) {
+      if (!j.ok) return;
+      _files = j.files || [];
+      _sourceFile = j.sourceFile || '';
+      renderFiles();
+    }).catch(function () {});
+  }
+
+  E('btn-pick-key').addEventListener('click', function () {
+    var input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.pem,.key';
+    input.addEventListener('change', function () {
+      var f = input.files && input.files[0];
+      if (!f) return;
+      var rd = new FileReader();
+      rd.onload = function () { _key = String(rd.result || ''); E('key-state').textContent = ' ' + f.name; };
+      rd.readAsText(f);
+    });
+    input.click();
+  });
+
+  E('btn-restore').addEventListener('click', function () {
+    var f = _files[_pick];
+    if (!f) return;
+    if (f.encrypted && !_key) {
+      E('action-msg').textContent = ${JSON.stringify(String(T('maint_retry_need_key', lang)))};
+      E('action-msg').className = 'err';
+      return;
+    }
+    if (!confirm(${JSON.stringify(String(T('maint_confirm_retry', lang)))} + '\\n\\n' + f.fileName)) return;
+    E('action-msg').textContent = '…';
+    fetch('${PREFIX}/api/action/restoreFromFile', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+      body: JSON.stringify({ fileName: f.fileName, privateKeyPem: _key })
+    }).then(function (r) { return r.json(); }).then(function (j) {
+      E('action-msg').textContent = j.ok ? '' : ('ERROR: ' + (j.error || j.errorKey));
+      E('action-msg').className = j.ok ? 'ok' : 'err';
+      // Ключ в странице не держим: он был нужен на одну операцию.
+      _key = ''; E('key-state').textContent = '';
+      refresh();
+    }).catch(function (e) { E('action-msg').textContent = String(e); });
+  });
 
   E('btn-rollback').addEventListener('click', function () { action('rollback', ${JSON.stringify(String(T('maint_confirm_rollback', lang)))}); });
   E('btn-drop-shadow').addEventListener('click', function () { action('dropShadow', ${JSON.stringify(String(T('maint_confirm_drop_shadow', lang)))}); });

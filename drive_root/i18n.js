@@ -108,19 +108,75 @@ function loadI18n(projectRoot) {
 function t(key, langCode = 'en') {
     const entry = _registry[key];
     if (!entry) return key;
-    return entry[langCode] || entry['en'] || key;
+    const val = entry[langCode] || entry['en'] || key;
+    // Значение с формами числа (объект) без счётчика показать нельзя — вернуть
+    // «[object Object]» хуже, чем ключ: ключ хотя бы виден как незакрытый перевод.
+    if (val && typeof val === 'object') return pickPluralForm(val, 1, langCode) || key;
+    return val;
+}
+
+// ── Формы числа ──────────────────────────────────────────────────────
+// Значение перевода может быть не строкой, а объектом форм:
+//   "guests_count": {
+//     "de": { "one": "{{count}} Gast",  "other": "{{count}} Gäste" },
+//     "ru": { "one": "{{count}} гость", "few": "{{count}} гостя", "many": "{{count}} гостей" }
+//   }
+// Категорию выбирает `Intl.PluralRules` — она встроена в Node и знает правила
+// каждого языка: у de/en две формы (one/other), у ru/pl четыре (one/few/many/other),
+// причём «21 гость» относится к `one`, а «22 гостя» — к `few`. Написать это
+// условиями на `count % 10` в прикладном коде — значит завести свою копию правил
+// для каждого нового языка.
+//
+// Зачем вообще: без форм числа приходится либо печатать безграмотное «1 Gäste»,
+// либо подменять существительное сокращением («2 Pers.», «3 ÜN»), которое
+// склонения не требует. Второе и есть причина, по которой в счёте стояло «Pers.»
+// вместо человеческого слова. Документ — лицо организации, в нём это заметно.
+//
+// Обратная совместимость: строковые значения (подавляющее большинство ключей)
+// проходят прежним путём, `count` для них не нужен.
+const _pluralRules = {};
+function pluralCategory(count, langCode) {
+    try {
+        const pr = _pluralRules[langCode] || (_pluralRules[langCode] = new Intl.PluralRules(langCode));
+        return pr.select(Number(count));
+    } catch (_) {
+        // Неизвестный язык — не повод падать: две формы покрывают большинство.
+        return Number(count) === 1 ? 'one' : 'other';
+    }
+}
+
+// Выбор формы с деградацией: точная категория → other → one → любая заданная.
+// Автор перевода не обязан заполнять все категории своего языка (в русском
+// `other` возникает только у дробных), и отсутствие одной не должно давать пустоту.
+function pickPluralForm(forms, count, langCode) {
+    const cat = pluralCategory(count, langCode);
+    if (forms[cat] != null) return forms[cat];
+    if (forms.other != null) return forms.other;
+    if (forms.one != null) return forms.one;
+    const first = Object.keys(forms)[0];
+    return first != null ? forms[first] : null;
 }
 
 /**
  * Translate a key and substitute named placeholders {{varName}}.
  * Example: tf('row_field_required', 'ru', { row: 3, section: 'booking_rooms', field: 'roomId' })
+ *
+ * Формы числа: если значение ключа — объект форм, категорию выбирает переменная
+ * `count` (`{ count: 1 }` → «1 Gast», `{ count: 2 }` → «2 Gäste»). Имя переменной
+ * фиксированное: иначе каждый ключ пришлось бы сопровождать указанием, что в нём
+ * считается, и рано или поздно они разошлись бы.
+ *
  * @param {string} key
  * @param {string} [langCode='en']
- * @param {Object} [vars={}]
+ * @param {Object} [vars={}] — `count` дополнительно управляет выбором формы числа
  * @returns {string}
  */
 function tf(key, langCode = 'en', vars = {}) {
-    let str = t(key, langCode);
+    const entry = _registry[key];
+    const raw = entry ? (entry[langCode] || entry['en']) : null;
+    let str = (raw && typeof raw === 'object')
+        ? (pickPluralForm(raw, vars.count != null ? vars.count : 1, langCode) || key)
+        : t(key, langCode);
     // 5.7: split/join вместо `new RegExp` на каждую подстановку — без компиляции
     // регулярки и без экранирования спецсимволов в имени переменной.
     for (const [k, v] of Object.entries(vars)) {
@@ -129,4 +185,4 @@ function tf(key, langCode = 'en', vars = {}) {
     return str;
 }
 
-module.exports = { loadI18n, t, tf };
+module.exports = { loadI18n, t, tf, pluralCategory };

@@ -691,10 +691,82 @@
         "pl": "Zdejmij blokadę ręcznie"
     },
     "maint_action_hint": {
-        "en": "A restore is never resumed from the middle — only from the beginning, with the private key entered again. Removing the lock does not repair the data.",
-        "ru": "Восстановление не возобновляется с середины — только с начала и с повторным вводом приватного ключа. Снятие блокировки данные не чинит.",
-        "de": "Eine Wiederherstellung wird nie in der Mitte fortgesetzt — nur von vorn, mit erneuter Eingabe des privaten Schlüssels.",
-        "pl": "Przywracanie nigdy nie jest wznawiane od środka — tylko od początku, z ponownym wprowadzeniem klucza prywatnego."
+        "en": "A restore is never resumed from the middle — only from the beginning, with the private key entered again. Removing the lock does not repair the data: it merely lets users back in.",
+        "ru": "Восстановление не возобновляется с середины — только с начала и с повторным вводом приватного ключа. Снятие блокировки данные не чинит: оно лишь открывает систему пользователям.",
+        "de": "Eine Wiederherstellung wird nie in der Mitte fortgesetzt — nur von vorn, mit erneuter Eingabe des privaten Schlüssels. Das Aufheben der Sperre repariert die Daten nicht, es lässt nur die Benutzer wieder herein.",
+        "pl": "Przywracanie nigdy nie jest wznawiane od środka — tylko od początku, z ponownym wprowadzeniem klucza prywatnego. Zdjęcie blokady nie naprawia danych — jedynie wpuszcza użytkowników z powrotem."
+    },
+    "maint_retry_title": {
+        "en": "Restore again",
+        "ru": "Повторить восстановление",
+        "de": "Wiederherstellung wiederholen",
+        "pl": "Powtórz przywracanie"
+    },
+    "maint_retry_hint": {
+        "en": "Pick a copy and start over — the lock stays on until it succeeds, so nobody gets into a half-restored database. The safety dump taken before the failed attempt is in this same list.",
+        "ru": "Выберите копию и начните заново — блокировка останется до успеха, поэтому в наполовину восстановленную базу никто не попадёт. Страховочная выгрузка, снятая перед неудачной попыткой, — в этом же списке.",
+        "de": "Wählen Sie eine Kopie und beginnen Sie von vorn — die Sperre bleibt bis zum Erfolg bestehen, sodass niemand in eine halb wiederhergestellte Datenbank gelangt. Die Sicherungskopie vor dem gescheiterten Versuch steht in derselben Liste.",
+        "pl": "Wybierz kopię i zacznij od nowa — blokada pozostaje do momentu powodzenia, więc nikt nie trafi do w połowie przywróconej bazy. Kopia zabezpieczająca sprzed nieudanej próby jest na tej samej liście."
+    },
+    "maint_retry_key_btn": {
+        "en": "Private key file…",
+        "ru": "Файл приватного ключа…",
+        "de": "Datei mit privatem Schlüssel…",
+        "pl": "Plik klucza prywatnego…"
+    },
+    "maint_retry_run_btn": {
+        "en": "Restore from the selected copy",
+        "ru": "Восстановить из выбранной копии",
+        "de": "Aus der gewählten Kopie wiederherstellen",
+        "pl": "Przywróć z wybranej kopii"
+    },
+    "maint_retry_same_file": {
+        "en": "failed attempt",
+        "ru": "неудавшаяся попытка",
+        "de": "gescheiterter Versuch",
+        "pl": "nieudana próba"
+    },
+    "maint_retry_need_key": {
+        "en": "This copy is encrypted — select the private key file first.",
+        "ru": "Копия зашифрована — сначала выберите файл приватного ключа.",
+        "de": "Diese Kopie ist verschlüsselt — wählen Sie zuerst die Schlüsseldatei.",
+        "pl": "Ta kopia jest zaszyfrowana — najpierw wybierz plik klucza prywatnego."
+    },
+    "maint_retry_no_files": {
+        "en": "No backup copies found in the storage folder.",
+        "ru": "В каталоге хранения копий не найдено.",
+        "de": "Im Ablageordner wurden keine Sicherungskopien gefunden.",
+        "pl": "W folderze przechowywania nie znaleziono kopii zapasowych."
+    },
+    "maint_confirm_retry": {
+        "en": "Restore the database from this copy? Everything in it now will be replaced.",
+        "ru": "Восстановить базу из этой копии? Всё, что в ней сейчас, будет заменено.",
+        "de": "Datenbank aus dieser Kopie wiederherstellen? Der aktuelle Inhalt wird ersetzt.",
+        "pl": "Przywrócić bazę z tej kopii? Całą jej obecną zawartość zastąpi kopia."
+    },
+    "maint_other_actions": {
+        "en": "Other actions",
+        "ru": "Прочие действия",
+        "de": "Weitere Aktionen",
+        "pl": "Pozostałe akcje"
+    },
+    "maint_err_restore_running": {
+        "en": "A restore is already running — wait for it to finish.",
+        "ru": "Восстановление уже идёт — дождитесь его окончания.",
+        "de": "Eine Wiederherstellung läuft bereits — warten Sie deren Ende ab.",
+        "pl": "Przywracanie już trwa — poczekaj na jego zakończenie."
+    },
+    "maint_err_unknown_file": {
+        "en": "That file is not in the storage folder.",
+        "ru": "Такого файла в каталоге хранения нет.",
+        "de": "Diese Datei liegt nicht im Ablageordner.",
+        "pl": "Tego pliku nie ma w folderze przechowywania."
+    },
+    "maint_err_not_in_maintenance": {
+        "en": "The system is no longer in maintenance mode — restore from the usual form.",
+        "ru": "Система уже не в режиме обслуживания — восстанавливайте из обычной формы.",
+        "de": "Das System ist nicht mehr im Wartungsmodus — stellen Sie über das normale Formular wieder her.",
+        "pl": "System nie jest już w trybie konserwacji — przywracaj przez zwykły formularz."
     },
     "maint_confirm_rollback": {
         "en": "Roll back to the previous schema? The current one will be kept aside for investigation.",

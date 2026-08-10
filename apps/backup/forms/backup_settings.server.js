@@ -19,6 +19,7 @@ const crypto = require('crypto');
 const log = require('../../../drive_root/log');
 const dbGateway = require('../../../drive_root/dbGateway');
 const backup = require('../../../drive_root/backup');
+const { audit } = require('../../../drive_root/backup/audit');
 const scheduler = require('../../../drive_root/scheduler');
 const formsCtx = require('../../../drive_forms/globalServerContext');
 const { tForSession, tfForSession } = formsCtx;
@@ -122,6 +123,29 @@ module.exports = function (modelsDB, Utilities) {
         return lines.join('\n');
     }
 
+    /**
+     * Строки таблицы внешних хранилищ.
+     *
+     * Отпечаток показывается ЦЕЛИКОМ: по нему администратор сверяет, тот ли ключ он
+     * зарегистрировал, — и сверять придётся с тем, что показало у себя хранилище.
+     * Обрезанный отпечаток для сверки не годится.
+     */
+    async function apiClientRows(sessionID) {
+        const rows = [];
+        for (const c of backup.apiAuth.listClients()) {
+            rows.push({
+                id: c.id,
+                name: c.name || '',
+                fingerprint: c.fingerprint || '',
+                stateText: await tForSession(c.disabled ? 'backup_api_state_off' : 'backup_api_state_on', sessionID),
+                lastSeenText: c.lastSeenAt
+                    ? String(c.lastSeenAt).slice(0, 19).replace('T', ' ') + (c.lastSeenIp ? ` (${c.lastSeenIp})` : '')
+                    : await tForSession('backup_api_never_seen', sessionID)
+            });
+        }
+        return rows;
+    }
+
     return {
 
         /** Загрузка формы: настройки из файла + состояние. */
@@ -134,6 +158,11 @@ module.exports = function (modelsDB, Utilities) {
                     keepManual: s.keepManual,
                     publicKeyPem: s.publicKeyPem,
                     keyFingerprint: s.keyFingerprint,
+                    apiClients: await apiClientRows(ctx.sessionID),
+                    apiClientName: '',
+                    apiClientKeyPem: '',
+                    pruneOnlyAcked: !!s.pruneOnlyAcked,
+                    keepUnackedMaxDays: s.keepUnackedMaxDays,
                     recoveryPassword: '',
                     recoveryState: await tForSession(
                         require('../../../drive_root/recoveryPassword').isSet()
@@ -182,6 +211,12 @@ module.exports = function (modelsDB, Utilities) {
             if (d.storageDir !== undefined) patch.storageDir = String(d.storageDir || '').trim() || 'backups';
             if (d.keepScheduled !== undefined) patch.keepScheduled = Math.max(1, Number(d.keepScheduled) || 1);
             if (d.keepManual !== undefined) patch.keepManual = Math.max(1, Number(d.keepManual) || 1);
+            if (d.pruneOnlyAcked !== undefined) patch.pruneOnlyAcked = !!d.pruneOnlyAcked;
+            if (d.keepUnackedMaxDays !== undefined) {
+                // Ноль означал бы «защищать вечно» — то есть молчащее хранилище забивает
+                // диск и останавливает копирование. Нижняя граница в сутки этого не даёт.
+                patch.keepUnackedMaxDays = Math.max(1, Number(d.keepUnackedMaxDays) || 1);
+            }
 
             if (d.publicKeyPem !== undefined) {
                 const pem = String(d.publicKeyPem || '').trim();
@@ -295,6 +330,54 @@ module.exports = function (modelsDB, Utilities) {
             await dbGateway.execute({ operation: 'delete', table: 'backup_files', where: { UID: uid }, context });
             try { require('../../uniForm/server.js').notifyTableChange('backup_files', 'delete', uid); } catch (e) {}
             return { ok: true };
+        },
+
+        /**
+         * Зарегистрировать внешнее хранилище (ТЗ §5).
+         *
+         * Принимается ТОЛЬКО публичный ключ: приватного здесь быть не должно — в этом
+         * весь смысл входа по подписи. Ключ проверяется до записи, и самая частая
+         * ошибка настройки (вставили приватный) называется прямо.
+         */
+        async addApiClient(params, ctx) {
+            const res = backup.apiAuth.addClient(
+                (params && params.name) || '',
+                (params && params.publicKeyPem) || ''
+            );
+            if (!res.ok) return { error: await tfForSession(res.errorKey, ctx.sessionID, res.vars || {}) };
+
+            audit(`API_CLIENT_ADD fp=${res.fingerprint} user=${ctx.user && ctx.user.UID}`);
+            return {
+                ok: true,
+                clients: await apiClientRows(ctx.sessionID),
+                message: await tfForSession(
+                    res.added ? 'backup_api_added_msg' : 'backup_api_reenabled_msg',
+                    ctx.sessionID, { fingerprint: res.fingerprint })
+            };
+        },
+
+        /** Включить/отключить хранилище. Действует сразу: реестр читается на каждом запросе. */
+        async toggleApiClient(params, ctx) {
+            const id = String((params && params.id) || '');
+            const client = backup.apiAuth.listClients().find(c => c.id === id);
+            if (!client) return { error: await tForSession('backup_api_err_client_unknown', ctx.sessionID) };
+
+            const res = backup.apiAuth.setClientDisabled(id, !client.disabled);
+            if (!res.ok) return { error: await tForSession(res.errorKey, ctx.sessionID) };
+
+            audit(`API_CLIENT_${client.disabled ? 'ENABLE' : 'DISABLE'} fp=${client.fingerprint} user=${ctx.user && ctx.user.UID}`);
+            return { ok: true, clients: await apiClientRows(ctx.sessionID) };
+        },
+
+        /** Удалить хранилище из реестра. */
+        async removeApiClient(params, ctx) {
+            const id = String((params && params.id) || '');
+            const client = backup.apiAuth.listClients().find(c => c.id === id);
+            const res = backup.apiAuth.removeClient(id);
+            if (!res.ok) return { error: await tForSession(res.errorKey, ctx.sessionID) };
+
+            audit(`API_CLIENT_REMOVE fp=${client && client.fingerprint} user=${ctx.user && ctx.user.UID}`);
+            return { ok: true, clients: await apiClientRows(ctx.sessionID) };
         },
 
         /** UID задания — чтобы открыть его форму и настроить расписание. */

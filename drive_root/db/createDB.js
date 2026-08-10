@@ -71,7 +71,8 @@ const { DEFAULT_VALUES_TABLE } = dbConfig;
 const { hashPassword } = require('./utilites');
 const globalServerContext = require('../globalServerContext');
 const { processDefaultValues } = globalServerContext;
-const { normalizeType, compareSchemas, syncUniqueConstraints } = require('./migrationUtils');
+const { normalizeType, compareSchemas, syncUniqueConstraints,
+        collectInboundForeignKeys, restoreInboundForeignKeys } = require('./migrationUtils');
 
 /**
  * Хук для вызова пользовательских обработчиков событий
@@ -721,6 +722,18 @@ async function createAll(options = {}) {
     if (tablesToMigrate.length > 0) {
       console.log(`[MIGRATION] Batch migration needed for ${tablesToMigrate.length} tables.`);
 
+      // A0. Снять входящие внешние ключи ДО дропа.
+      // `DROP TABLE ... CASCADE` ниже уносит FK соседних таблиц, ссылавшихся
+      // на перестраиваемые, а фаза C их не вернёт: `Model.sync()` для уже
+      // существующей таблицы ничего не делает. Подробности и цена ошибки —
+      // в `migrationUtils.collectInboundForeignKeys`.
+      const migratingTableNames = tablesToMigrate.map(item => item.def.tableName);
+      const savedInboundFks = await collectInboundForeignKeys(sequelize, transaction, migratingTableNames);
+      if (savedInboundFks.length) {
+        console.log(`[MIGRATION] Снято входящих внешних ключей для восстановления: ${savedInboundFks.length}`
+          + ` (${savedInboundFks.map(f => f.src_table + '.' + f.name).join(', ')})`);
+      }
+
       // A. Backup Data
       for (const item of tablesToMigrate) {
         const { def } = item;
@@ -941,6 +954,11 @@ async function createAll(options = {}) {
           }
         }
       }
+
+      // G. Вернуть входящие внешние ключи — ПОСЛЕ восстановления данных:
+      // пока строки родительской таблицы не вернулись, ограничение не пройдёт
+      // проверку и было бы отвергнуто на пустой таблице.
+      await restoreInboundForeignKeys(sequelize, transaction, savedInboundFks);
 
       console.log(`[MIGRATION] Batch migration execution finished.`);
 

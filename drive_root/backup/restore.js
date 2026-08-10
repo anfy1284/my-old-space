@@ -38,7 +38,6 @@ const container = require('./container');
 const dialect = require('./dialect');
 const scope = require('./scope');
 const serialize = require('./serialize');
-const settingsStore = require('./settings');
 const { typeKeyOf } = require('../db/emptyValues');
 
 const INSERT_BATCH = 200;
@@ -54,16 +53,10 @@ const INSERT_BATCH = 200;
 const MAX_BUFFERED_ROWS = 500000;
 
 // ── Аудит-лог: в ФАЙЛ, он должен пережить подмену базы (ТЗ §6.5) ─────────────────
-
-function audit(line) {
-    try {
-        const dir = settingsStore.storagePath();
-        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-        fs.appendFileSync(path.join(dir, 'backup-audit.log'), `${new Date().toISOString()} ${line}\n`, 'utf8');
-    } catch (e) {
-        log.error(`[restore] Не удалось записать аудит: ${e.message}`);
-    }
-}
+//
+// Реэкспорт общего модуля: своя копия здесь была, пока копий не стало три и они не
+// начали расходиться. Имя `audit` сохранено — его зовут из этого файла десятками мест.
+const { audit } = require('./audit');
 
 // ── Чтение дампа ────────────────────────────────────────────────────────────────
 
