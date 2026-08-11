@@ -1312,5 +1312,161 @@
         "ru": "выбрать организацию",
         "de": "Organisation wählen",
         "pl": "wybrać organizację"
+    },
+    "backup_api_group": {
+        "en": "External backup storage (access by cryptographic key)",
+        "ru": "Внешнее хранилище копий (доступ по криптоключу)",
+        "de": "Externer Sicherungsspeicher (Zugang per kryptografischem Schlüssel)",
+        "pl": "Zewnętrzny magazyn kopii (dostęp kluczem kryptograficznym)"
+    },
+    "backup_api_hint": {
+        "en": "The storage app signs every request with its private key; only its PUBLIC key is registered here. Paste the Ed25519 public key it shows during setup and compare the fingerprint on both sides.",
+        "ru": "Приложение-хранилище подписывает каждый запрос своим приватным ключом; здесь регистрируется только ПУБЛИЧНЫЙ. Вставьте публичный ключ Ed25519, который оно показало при настройке, и сверьте отпечаток с обеих сторон.",
+        "de": "Die Speicher-Anwendung signiert jede Anfrage mit ihrem privaten Schlüssel; hier wird nur der ÖFFENTLICHE hinterlegt. Fügen Sie den Ed25519-Schlüssel ein, den sie bei der Einrichtung anzeigt, und vergleichen Sie den Fingerabdruck auf beiden Seiten.",
+        "pl": "Aplikacja magazynu podpisuje każde żądanie swoim kluczem prywatnym; tutaj rejestrowany jest tylko PUBLICZNY. Wklej klucz publiczny Ed25519 pokazany podczas konfiguracji i porównaj odcisk po obu stronach."
+    },
+    "backup_api_client_name_col": {
+        "en": "Storage",
+        "ru": "Хранилище",
+        "de": "Speicher",
+        "pl": "Magazyn"
+    },
+    "backup_api_client_state_col": {
+        "en": "Access",
+        "ru": "Доступ",
+        "de": "Zugang",
+        "pl": "Dostęp"
+    },
+    "backup_api_client_seen_col": {
+        "en": "Last seen",
+        "ru": "Последний визит",
+        "de": "Zuletzt gesehen",
+        "pl": "Ostatnia wizyta"
+    },
+    "backup_api_client_fp_col": {
+        "en": "Key fingerprint",
+        "ru": "Отпечаток ключа",
+        "de": "Schlüssel-Fingerabdruck",
+        "pl": "Odcisk klucza"
+    },
+    "backup_api_new_key_field": {
+        "en": "Public key (Ed25519, PEM)",
+        "ru": "Публичный ключ (Ed25519, PEM)",
+        "de": "Öffentlicher Schlüssel (Ed25519, PEM)",
+        "pl": "Klucz publiczny (Ed25519, PEM)"
+    },
+    "backup_api_new_name_field": {
+        "en": "Name",
+        "ru": "Наименование",
+        "de": "Bezeichnung",
+        "pl": "Nazwa"
+    },
+    "backup_api_add_btn": {
+        "en": "Register",
+        "ru": "Зарегистрировать",
+        "de": "Registrieren",
+        "pl": "Zarejestruj"
+    },
+    "backup_api_toggle_btn": {
+        "en": "Enable / disable",
+        "ru": "Включить / отключить",
+        "de": "Aktivieren / deaktivieren",
+        "pl": "Włącz / wyłącz"
+    },
+    "backup_api_remove_btn": {
+        "en": "Remove",
+        "ru": "Удалить",
+        "de": "Entfernen",
+        "pl": "Usuń"
+    },
+    "backup_api_remove_confirm": {
+        "en": "Remove this storage? It will lose access immediately; the copies it has already downloaded stay with it.",
+        "ru": "Удалить это хранилище? Доступ пропадёт немедленно; уже скачанные им копии останутся у него.",
+        "de": "Diesen Speicher entfernen? Der Zugang endet sofort; bereits heruntergeladene Kopien bleiben dort.",
+        "pl": "Usunąć ten magazyn? Dostęp zniknie natychmiast; już pobrane kopie u niego pozostaną."
+    },
+    "backup_api_prune_acked_field": {
+        "en": "Do not delete copies the storage has not confirmed",
+        "ru": "Не удалять копии, не подтверждённые хранилищем",
+        "de": "Kopien nicht löschen, die der Speicher nicht bestätigt hat",
+        "pl": "Nie usuwaj kopii niepotwierdzonych przez magazyn"
+    },
+    "backup_api_unacked_days_field": {
+        "en": "…but no longer than, days",
+        "ru": "…но не дольше, дней",
+        "de": "…aber höchstens, Tage",
+        "pl": "…ale nie dłużej niż, dni"
+    },
+    "backup_api_state_on": {
+        "en": "allowed",
+        "ru": "разрешён",
+        "de": "erlaubt",
+        "pl": "dozwolony"
+    },
+    "backup_api_state_off": {
+        "en": "revoked",
+        "ru": "отозван",
+        "de": "entzogen",
+        "pl": "cofnięty"
+    },
+    "backup_api_never_seen": {
+        "en": "never",
+        "ru": "не приходило",
+        "de": "nie",
+        "pl": "nigdy"
+    },
+    "backup_api_added_msg": {
+        "en": "Storage registered. Fingerprint: {{fingerprint}} — check it matches the one shown by the storage app.",
+        "ru": "Хранилище зарегистрировано. Отпечаток: {{fingerprint}} — сверьте его с тем, что показывает само хранилище.",
+        "de": "Speicher registriert. Fingerabdruck: {{fingerprint}} — vergleichen Sie ihn mit dem der Speicher-Anwendung.",
+        "pl": "Magazyn zarejestrowany. Odcisk: {{fingerprint}} — porównaj go z pokazywanym przez aplikację magazynu."
+    },
+    "backup_api_reenabled_msg": {
+        "en": "This key was already registered — access restored. Fingerprint: {{fingerprint}}",
+        "ru": "Этот ключ уже был зарегистрирован — доступ восстановлен. Отпечаток: {{fingerprint}}",
+        "de": "Dieser Schlüssel war bereits registriert — Zugang wiederhergestellt. Fingerabdruck: {{fingerprint}}",
+        "pl": "Ten klucz był już zarejestrowany — dostęp przywrócony. Odcisk: {{fingerprint}}"
+    },
+    "backup_api_err_key_empty": {
+        "en": "Paste the public key of the storage app.",
+        "ru": "Вставьте публичный ключ приложения-хранилища.",
+        "de": "Fügen Sie den öffentlichen Schlüssel der Speicher-Anwendung ein.",
+        "pl": "Wklej klucz publiczny aplikacji magazynu."
+    },
+    "backup_api_err_key_is_private": {
+        "en": "That is a PRIVATE key. It must never leave the storage machine — register the PUBLIC one.",
+        "ru": "Это ПРИВАТНЫЙ ключ. Он не должен покидать машину хранилища — регистрируется ПУБЛИЧНЫЙ.",
+        "de": "Das ist ein PRIVATER Schlüssel. Er darf die Speicher-Maschine nie verlassen — registriert wird der ÖFFENTLICHE.",
+        "pl": "To klucz PRYWATNY. Nie może opuszczać maszyny magazynu — rejestruje się PUBLICZNY."
+    },
+    "backup_api_err_key_unparsable": {
+        "en": "The key could not be read: {{message}}. Expected an Ed25519 public key in PEM, with its BEGIN and END lines.",
+        "ru": "Ключ не прочитан: {{message}}. Ожидается публичный ключ Ed25519 в формате PEM, вместе со строками BEGIN и END.",
+        "de": "Der Schlüssel konnte nicht gelesen werden: {{message}}. Erwartet wird ein öffentlicher Ed25519-Schlüssel im PEM-Format, samt BEGIN- und END-Zeilen.",
+        "pl": "Nie odczytano klucza: {{message}}. Oczekiwany jest publiczny klucz Ed25519 w formacie PEM, razem z liniami BEGIN i END."
+    },
+    "backup_api_err_key_not_ed25519": {
+        "en": "Key type {{type}} is not accepted for sign-in — Ed25519 is required. The RSA key of the backup encryption is a different key and is not used here.",
+        "ru": "Тип ключа {{type}} для входа не принимается — нужен Ed25519. Ключ RSA, которым шифруются копии, — другой ключ, и здесь он не используется.",
+        "de": "Schlüsseltyp {{type}} wird für die Anmeldung nicht akzeptiert — erforderlich ist Ed25519. Der RSA-Schlüssel der Sicherungsverschlüsselung ist ein anderer Schlüssel und wird hier nicht verwendet.",
+        "pl": "Typ klucza {{type}} nie jest akceptowany przy logowaniu — wymagany jest Ed25519. Klucz RSA szyfrujący kopie to inny klucz i nie jest tu używany."
+    },
+    "backup_api_err_client_unknown": {
+        "en": "This storage is no longer in the registry — reload the form.",
+        "ru": "Этого хранилища в реестре уже нет — перечитайте форму.",
+        "de": "Dieser Speicher steht nicht mehr im Verzeichnis — laden Sie das Formular neu.",
+        "pl": "Tego magazynu nie ma już w rejestrze — odśwież formularz."
+    },
+    "backup_api_err_no_selection": {
+        "en": "Select a storage in the list.",
+        "ru": "Выберите хранилище в списке.",
+        "de": "Wählen Sie einen Speicher in der Liste.",
+        "pl": "Wybierz magazyn na liście."
+    },
+    "backup_acked_at_field": {
+        "en": "Confirmed at",
+        "ru": "Подтверждено",
+        "de": "Bestätigt am",
+        "pl": "Potwierdzono"
     }
 }

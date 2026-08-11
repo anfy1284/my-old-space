@@ -311,6 +311,20 @@ async function createPlainStream(opts) {
  * @param {Object} limits — `{ keepScheduled, keepManual, pruneOnlyAcked, keepUnackedMaxDays }`
  * @returns {Array<Object>} что удалять
  */
+/**
+ * КОГДА СНЯТА КОПИЯ — реквизит `date` документа, а не `createdAt` строки журнала.
+ *
+ * Для копии, снятой этим сервером, они совпадают. Расходятся у найденных на диске
+ * (`reconcileJournal`): строка появляется в момент сверки, а копии может быть неделя.
+ * Ретеншн обязан хранить свежие КОПИИ, а не свежие записи о них, иначе пачка
+ * усыновлённых файлов вытеснит настоящие свежие.
+ */
+function copyDate(f) {
+    const d = new Date(f && (f.date || f.createdAt) || 0).getTime();
+    // Пустая дата (`0001-01-01`) значит «реквизит не заполнен» — откатываемся к строке.
+    return (!d || d < 0) ? new Date((f && f.createdAt) || 0).getTime() : d;
+}
+
 function selectForPruning(files, limits) {
     const keep = {
         manual: Math.max(0, Number(limits.keepManual) || 0),
@@ -323,7 +337,7 @@ function selectForPruning(files, limits) {
     }
     const doomed = [];
     for (const g of Object.keys(groups)) {
-        const sorted = groups[g].slice().sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+        const sorted = groups[g].slice().sort((a, b) => copyDate(b) - copyDate(a));
         doomed.push(...sorted.slice(keep[g]));
     }
     if (!limits || !limits.pruneOnlyAcked) return doomed;
@@ -331,7 +345,7 @@ function selectForPruning(files, limits) {
     const graceMs = Math.max(0, Number(limits.keepUnackedMaxDays) || 0) * 24 * 60 * 60 * 1000;
     return doomed.filter((f) => {
         if (f.acked) return true;
-        const age = Date.now() - new Date(f.createdAt || 0).getTime();
+        const age = Date.now() - copyDate(f);
         if (age > graceMs) {
             log.warn(`[backup] Копия ${f.fileName} не подтверждена хранилищем, но старше `
                 + `${limits.keepUnackedMaxDays} дн. — прореживается`);
@@ -459,8 +473,17 @@ async function reconcileJournal() {
                 organizationId: '',
                 fileName,
                 sizeBytes: st.size,
-                // Контрольную сумму не пересчитываем: файл может весить гигабайты, а
-                // сверка идёт при старте сервера. Пустое значение честнее выдуманного.
+                // ДАТА КОПИИ — из её заголовка, а не момент усыновления. Иначе все
+                // найденные файлы получают одну и ту же дату (секунду сверки), и любая
+                // политика поколений — и здешний ретеншн, и «дед-отец-сын» во внешнем
+                // хранилище — видит пачку копий одного мгновения вместо истории за
+                // неделю. Поймано живым прогоном: пять копий за 07–10 августа приехали
+                // с одинаковой датой.
+                date: header.createdAt ? new Date(header.createdAt) : new Date(st.mtimeMs),
+                // Контрольная сумма считается ОТДЕЛЬНО и после (`backfillChecksums`):
+                // файл может весить гигабайты, а сверка идёт на старте сервера. Пустое
+                // значение здесь — временное состояние, а не окончательное: внешнему
+                // хранилищу сумма нужна, чтобы проверить целостность скачанного.
                 sha256: '',
                 keyFingerprint: header.keyFingerprint || '',
                 configHash: header.configHash || '',
@@ -488,12 +511,74 @@ async function reconcileJournal() {
         try { require('../../apps/uniForm/server.js').notifyTableChange('backup_files', 'update', null); }
         catch (e) { /* оповещение не важнее сверки */ }
     }
+
+    // Досчёт сумм — БЕЗ ожидания: сверка журнала идёт на старте сервера, и держать
+    // старт на хэшировании гигабайтов нельзя. Ошибку глотаем в лог: не посчитанная
+    // сумма хуже посчитанной, но не настолько, чтобы ронять запуск.
+    backfillChecksums().catch(e => log.error(`[backup] Досчёт контрольных сумм: ${e.message}`));
+
     return { marked, unmarked, adopted };
+}
+
+/**
+ * Досчитать SHA-256 у копий, попавших в журнал без неё (усыновлённые файлы).
+ *
+ * Зачем вообще. Сумма считается по ШИФРОТЕКСТУ и нужна внешнему хранилищу, чтобы
+ * проверить скачанное, не имея приватного ключа. Пустая сумма в ответе `list` (§5)
+ * оставляет хранилище перед выбором «поверить молча» или «отказаться забирать» — оба
+ * плохи, поэтому сумма обязана появиться, пусть и не мгновенно.
+ *
+ * Строго по одному файлу за раз: это фоновая работа рядом с работающим сервером, и
+ * параллельное хэширование нескольких гигабайтных файлов отняло бы диск у пользователей.
+ */
+async function backfillChecksums() {
+    const dbGateway = require('../dbGateway');
+    const dir = settingsStore.storagePath();
+
+    const rows = await dbGateway.execute({
+        operation: 'read', table: 'backup_files', where: {}, options: { raw: true },
+        context: { sessionID: SYSTEM_SESSION_ID }
+    }) || [];
+
+    let done = 0;
+    for (const rec of rows) {
+        if (rec.sha256 || rec.missing) continue;
+        const full = path.join(dir, rec.fileName);
+        if (!fs.existsSync(full)) continue;
+
+        let sha;
+        try {
+            sha = await new Promise((resolve, reject) => {
+                const h = crypto.createHash('sha256');
+                const s = fs.createReadStream(full);
+                s.on('data', c => h.update(c));
+                s.on('end', () => resolve(h.digest('hex')));
+                s.on('error', reject);
+            });
+        } catch (e) {
+            log.warn(`[backup] Сумма для ${rec.fileName} не посчитана: ${e.message}`);
+            continue;
+        }
+
+        await dbGateway.execute({
+            operation: 'update', table: 'backup_files',
+            where: { UID: rec.UID }, data: { sha256: sha },
+            context: { sessionID: SYSTEM_SESSION_ID }
+        });
+        done++;
+    }
+
+    if (done) {
+        log.info(`[backup] Досчитаны контрольные суммы: ${done}`);
+        try { require('../../apps/uniForm/server.js').notifyTableChange('backup_files', 'update', null); }
+        catch (e) { /* оповещение не важнее результата */ }
+    }
+    return { done };
 }
 
 module.exports = {
     createBackup, createPlainStream, checkPreconditions, selectForPruning, deleteFile, buildFileName,
-    markInUse, isInUse, reconcileJournal,
+    markInUse, isInUse, reconcileJournal, backfillChecksums,
     settings: settingsStore, keys, container, dialect, dump, FILE_EXT,
     // Вход внешнего хранилища по подписи (ТЗ §5). Отдельный модуль, а не часть `keys`:
     // это другая пара ключей с другим сроком жизни и другим местом хранения.

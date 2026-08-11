@@ -9704,6 +9704,46 @@ class Table extends UIObject {
         return (typeof idx === 'number' && idx >= 0) ? idx : -1;
     }
 
+    /**
+     * Заменить строки таблицы и перерисовать её.
+     *
+     * Для таблицы, чьи строки лежат в наборе данных формы (`data: "ключ"`), а не в базе.
+     * У `DynamicTable` для этого есть `refresh()` — она сама сходит на сервер; у обычной
+     * ходить некуда, источник строк даёт форма, и до сих пор обновить их было НЕЧЕМ:
+     * прикладной код правил `_dataMap` руками и звал `Draw` заново, теряя и выбор, и
+     * прокрутку. Понадобилось на реестре внешних хранилищ (список живёт в файле настроек,
+     * а не в таблице БД), но случай общий — любой форме, ведущей не-табличный список.
+     *
+     * Массив МУТИРУЕТСЯ НА МЕСТЕ: замыкание отрисовщика строк держит ссылку именно на
+     * него, и подмена ссылки оставила бы таблицу рисовать прежнее содержимое.
+     *
+     * @param {Array<Object>} rows
+     */
+    setRowsData(rows) {
+        const next = Array.isArray(rows) ? rows : [];
+        const entry = this.appForm && this.appForm._dataMap && this.appForm._dataMap[this.dataKey];
+
+        if (entry && Array.isArray(entry.value) && typeof this._invokeRenderBodyRows === 'function') {
+            entry.value.length = 0;
+            for (const r of next) entry.value.push(r);
+            this._activeRowIndex = -1;
+            try { this._invokeRenderBodyRows(); } catch (e) { console.error('[Table] setRowsData render:', e); }
+            try { this.updateAllRowsReadOnly(); } catch (e) {}
+            return;
+        }
+
+        // Набора данных ещё нет (таблицу не рисовали) — заводим его и строим заново:
+        // отрисовщик, если он и есть, замкнут на другой массив, и звать его бесполезно.
+        this.data_ensureCellEntry(this.dataKey, next);
+        this._activeRowIndex = -1;
+        const parent = this.element && this.element.parentElement;
+        if (parent) {
+            try { this.element.remove(); } catch (e) {}
+            this.element = null;
+            try { this.Draw(parent); } catch (e) { console.error('[Table] setRowsData redraw:', e); }
+        }
+    }
+
     /** Данные текущей (активной) строки, либо `null`, если строка не выбрана/не загружена. */
     get currentRow() {
         try {

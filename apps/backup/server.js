@@ -336,13 +336,22 @@ async function handleApiList(req, res) {
         return sendJSON(res, 500, { ok: false, error: 'internal' });
     }
 
+    // `deletedAt` проверяется через `isEmptyDate`, а НЕ на истинность: пустая дата в
+    // этом проекте — не NULL, а `0001-01-01`, и объект `Date` истинен всегда. Обычная
+    // проверка `!r.deletedAt` объявила бы удалёнными вообще все копии, и список ушёл
+    // бы пустым (поймано живым прогоном).
+    const { isEmptyDate } = require('../../drive_root/db/emptyValues');
+    // Момент снятия копии — реквизит `date`, а не `createdAt` строки журнала: у
+    // найденной на диске копии строка появляется в момент сверки, и по `createdAt`
+    // хранилище увидело бы неделю копий одной секундой (см. `copyDate` в ядре).
+    const when = r => new Date(r.date || r.createdAt || 0);
     const files = rows
-        .filter(r => !r.missing && !r.deletedAt)
-        .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+        .filter(r => !r.missing && isEmptyDate(r.deletedAt))
+        .sort((a, b) => when(b) - when(a))
         .map(r => ({
             uid: r.UID,
             fileName: r.fileName,
-            createdAt: r.createdAt instanceof Date ? r.createdAt.toISOString() : String(r.createdAt || ''),
+            createdAt: when(r).toISOString(),
             size: Number(r.sizeBytes) || 0,
             sha256: r.sha256 || '',
             dbVersion: Number(r.dbVersion) || 0,

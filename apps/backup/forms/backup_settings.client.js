@@ -158,8 +158,9 @@ function selectedClient(form) {
 
 /** Перерисовать таблицу после изменения реестра: список приходит с сервера целиком. */
 function applyClients(form, clients) {
-    if (!form || !clients) return;
-    form.setControlValue('apiClientsTable', clients);
+    var tbl = form && form.getControl('apiClientsTable');
+    if (!tbl || !clients) return;
+    tbl.setRowsData(clients);
 }
 
 /**
