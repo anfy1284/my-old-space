@@ -25,13 +25,54 @@ var _needsKey = true;
 
 function collect(form) {
     return {
-        fileUID: form.getControlValue('fileUID'),
+        fileName: form.getControlValue('fileName'),
         uploadName: form.getControlValue('uploadName'),
         privateKeyPem: _privateKeyPem,
         passwordReady: _passwordReady,
         restoreScope: form.getControlValue('restoreScope') || 'full',
-        organizationId: form.getControlValue('organizationId') || ''
+        organizationId: form.getControlValue('organizationId') || '',
+        // Отметки «взять из копии» по типам системных данных. Отдаются строками
+        // таблицы целиком: сервер сам решает, какие коды считать применимыми, — с
+        // клиента приходит выбор, а не список того, что существует.
+        systemData: systemDataRows(form)
     };
+}
+
+/**
+ * Выбрана копия, лежащая на сервере.
+ *
+ * Источники взаимоисключающие: загруженный файл и копия с сервера — это два разных
+ * файла, и держать выбранными оба значит не понимать, что именно развернётся. Поэтому
+ * выбор строки гасит загруженный файл, а загрузка гасит выбор строки (см. pickFile).
+ */
+function serverFilePicked(rowIndex, ctx) {
+    var form = (ctx && ctx.form) || this;
+    var tbl = form && form.getControl('serverFilesTable');
+    var row = tbl && tbl.currentRow;
+    if (!row || !row.fileName) return;
+
+    form.setControlValue('fileName', row.fileName, row.fileName);
+    form.setControlValue('uploadName', '', '');
+    _inspected = false;
+    refreshRunButton(form);
+}
+
+/** Снять выбор источника: анализ и готовность к запуску теряют силу вместе с ним. */
+function clearSource(ev, ctx) {
+    var form = ctx && ctx.form;
+    form.setControlValue('fileName', '', '');
+    form.setControlValue('uploadName', '', '');
+    _inspected = false;
+    refreshRunButton(form);
+}
+
+/** Строки таблицы системных данных. Пустой список = ничего не отмечено. */
+function systemDataRows(form) {
+    var tbl = form && form.getControl('systemDataTable');
+    if (!tbl || typeof tbl.getRows !== 'function') return [];
+    return (tbl.getRows() || []).map(function (r) {
+        return { code: r.code, fromCopy: r.fromCopy === true || r.fromCopy === 'true' };
+    });
 }
 
 /**
@@ -46,6 +87,9 @@ function refreshRunButton(form) {
     var isOrg = (form.getControlValue('restoreScope') || 'full') === 'organization';
     var missing = [];
 
+    if (!form.getControlValue('fileName') && !form.getControlValue('uploadName')) {
+        missing.push(__t('restore_full_need_source'));
+    }
     if (isOrg && !form.getControlValue('organizationId')) missing.push(__t('restore_full_need_org'));
     if (_needsKey && !_privateKeyPem) missing.push(__t('restore_full_need_key'));
     if (!_inspected) missing.push(__t('restore_full_need_inspect'));
@@ -144,9 +188,9 @@ async function pickFile(ev, ctx) {
                 return;
             }
             form.setControlValue('uploadName', j.uploadName);
-            // Выбор из журнала и загруженный файл — взаимоисключающие источники;
+            // Загруженный файл и копия с сервера — взаимоисключающие источники;
             // оставить оба значит не понимать, что именно развернётся.
-            form.setControlValue('fileUID', '', '');
+            form.setControlValue('fileName', '', '');
             _inspected = false;
             refreshRunButton(form);
             await inspectFile(null, ctx);
@@ -229,6 +273,24 @@ async function generateRecoveryPassword(ev, ctx) {
  */
 async function runFullRestore(ev, ctx) {
     var form = ctx && ctx.form;
+
+    // Отдельное предупреждение о пользователях, ДО общего подтверждения.
+    //
+    // «Взять из копии» для пользователей — единственная отметка на этой форме, которая
+    // способна отнять доступ у того, кто её ставит: в базе окажется список учётных
+    // записей на дату копии, и если администратор заведён позже, его там нет. Прятать
+    // это в общий текст «операция необратима» нельзя — он про данные, а тут про вход,
+    // и заметить разницу постфактум будет уже неоткуда.
+    var picked = systemDataRows(form).filter(function (r) { return r.fromCopy; });
+    if (picked.length) {
+        var usersPicked = picked.some(function (r) { return r.code === 'users_and_roles'; });
+        var warn = usersPicked
+            ? __t('restore_full_sysdata_users_confirm')
+            : __t('restore_full_sysdata_confirm');
+        var agreed = await showConfirm(warn);
+        if (!agreed) return;
+    }
+
     var ok = await showConfirm(__t('restore_full_final_confirm'));
     if (!ok) return;
 
@@ -276,4 +338,8 @@ function onReady(ctx) {
     applyScope(form);
 }
 
-return { onReady, scopeChanged, pickFile, pickKeyFile, inspectFile, verifyRecoveryPassword, generateRecoveryPassword, runFullRestore };
+return {
+    onReady, scopeChanged, pickFile, pickKeyFile, inspectFile,
+    serverFilePicked, clearSource,
+    verifyRecoveryPassword, generateRecoveryPassword, runFullRestore
+};

@@ -99,9 +99,25 @@ module.exports = function (modelsDB, Utilities) {
             db: dbSize ? String(Math.round(dbSize / 1048576)) : '?'
         }));
 
-        lines.push(s.publicKeyPem
-            ? await tfForSession('backup_status_key_set', sessionID, { fingerprint: String(s.keyFingerprint || '').slice(0, 23) })
-            : await tForSession('backup_status_key_missing', sessionID));
+        if (s.publicKeyPem) {
+            lines.push(await tfForSession('backup_status_key_set', sessionID,
+                { fingerprint: String(s.keyFingerprint || '').slice(0, 23) }));
+        } else {
+            // Ключа нет, а в каталоге лежат копии — это не «ещё не настроено», это
+            // ПОТЕРЯ. Разница для администратора решающая: в первом случае надо
+            // сгенерировать пару, во втором — сначала понять, куда делся ключ, иначе
+            // новая пара исчезнет тем же путём, а лежащие копии останутся зашифрованными
+            // ключом, о котором система уже не помнит.
+            let known = 0;
+            try { known = backup.catalog.list().length; } catch (e) { known = 0; }
+
+            lines.push(known
+                ? await tfForSession('backup_status_key_lost', sessionID, {
+                    count: String(known),
+                    file: backup.settings.storagePath()
+                })
+                : await tForSession('backup_status_key_missing', sessionID));
+        }
 
         // Что умеет восстановление на сегодня — сказать ЗДЕСЬ, а не оставлять
         // пользователя гадать, почему в панели есть «восстановить организацию» и нет
@@ -146,13 +162,41 @@ module.exports = function (modelsDB, Utilities) {
         return rows;
     }
 
+    /**
+     * Строки списка копий — из КАТАЛОГА.
+     *
+     * Синхронно и без базы: каталог и есть источник истины, а чтение заголовков — это
+     * несколько небольших чтений с диска на файл. Пересчитывать sha256 здесь нельзя и
+     * не нужно — он лежит в спутнике (см. catalog.js).
+     */
+    function backupFileRows() {
+        return backup.catalog.list().map(f => ({
+            fileName: f.fileName,
+            date: f.createdAt,
+            title: f.title,
+            scopeType: f.scopeType,
+            scopeOrganizationName: f.scopeOrganizationName,
+            triggeredBy: f.triggeredBy,
+            rowsTotal: f.rowsTotal,
+            sizeBytes: f.size,
+            sha256: f.sha256,
+            inUse: f.inUse
+        }));
+    }
+
     return {
 
-        /** Загрузка формы: настройки из файла + состояние. */
+        /** Загрузка формы: настройки из базы + состояние этой машины. */
         async onLoadData(params, ctx) {
-            const s = backup.settings.read();
+            // Не полагаемся на то, что прогрев при старте успел отработать: форму
+            // открывают в том числе через секунду после перезапуска.
+            const s = await backup.settings.ensureLoaded();
             return {
                 data: {
+                    // Каталог показывается, но не редактируется: он нужен, когда база
+                    // недоступна, поэтому задаётся переменной окружения, а не здесь.
+                    // Показывать его всё равно надо — иначе «куда легли копии» будет
+                    // выясняться по файловой системе сервера.
                     storageDir: s.storageDir,
                     keepScheduled: s.keepScheduled,
                     keepManual: s.keepManual,
@@ -161,8 +205,12 @@ module.exports = function (modelsDB, Utilities) {
                     apiClients: await apiClientRows(ctx.sessionID),
                     apiClientName: '',
                     apiClientKeyPem: '',
-                    pruneOnlyAcked: !!s.pruneOnlyAcked,
-                    keepUnackedMaxDays: s.keepUnackedMaxDays,
+                    // Организация для выгрузки по одной организации. Пустое значение
+                    // задаётся ЯВНО: контрол, ни разу не проинициализированный, отдаёт
+                    // undefined, и проверки «выбрана ли организация» начинают зависеть
+                    // от того, трогал ли пользователь поле.
+                    scopeOrganizationId: '',
+                    backupFiles: backupFileRows(),
                     recoveryPassword: '',
                     recoveryState: await tForSession(
                         require('../../../drive_root/recoveryPassword').isSet()
@@ -202,21 +250,17 @@ module.exports = function (modelsDB, Utilities) {
             };
         },
 
-        /** Сохранение: пишем в файл, а не в БД. Ключ проверяем ДО записи. */
+        /** Сохранение: пишем в БД. Ключ проверяем ДО записи. */
         async onSave(params, ctx) {
             const d = Object.assign({}, (params && params.changes) || (params && params.data) || {});
             delete d.__tabularSections;
             const patch = {};
 
-            if (d.storageDir !== undefined) patch.storageDir = String(d.storageDir || '').trim() || 'backups';
+            // storageDir здесь НЕ принимается: каталог задаётся переменной окружения,
+            // потому что нужен, когда база недоступна. Поле формы доступно только для
+            // чтения, и принимать его отсюда значило бы обещать правку, которой нет.
             if (d.keepScheduled !== undefined) patch.keepScheduled = Math.max(1, Number(d.keepScheduled) || 1);
             if (d.keepManual !== undefined) patch.keepManual = Math.max(1, Number(d.keepManual) || 1);
-            if (d.pruneOnlyAcked !== undefined) patch.pruneOnlyAcked = !!d.pruneOnlyAcked;
-            if (d.keepUnackedMaxDays !== undefined) {
-                // Ноль означал бы «защищать вечно» — то есть молчащее хранилище забивает
-                // диск и останавливает копирование. Нижняя граница в сутки этого не даёт.
-                patch.keepUnackedMaxDays = Math.max(1, Number(d.keepUnackedMaxDays) || 1);
-            }
 
             if (d.publicKeyPem !== undefined) {
                 const pem = String(d.publicKeyPem || '').trim();
@@ -225,13 +269,28 @@ module.exports = function (modelsDB, Utilities) {
                     if (!v.ok) return { error: await tfForSession(v.errorKey, ctx.sessionID, v.vars || {}) };
                     patch.publicKeyPem = pem;
                     patch.keyFingerprint = v.fingerprint;
+                } else if (backup.settings.read().publicKeyPem) {
+                    // Пустое поле НЕ стирает установленный ключ.
+                    //
+                    // Стирание было бы самым дорогим действием формы: без публичного ключа
+                    // копирование останавливается, а расшифровать уже сделанные копии
+                    // становится нечем, если приватный ключ не сохранён отдельно. Такое
+                    // действие не может происходить «заодно» с сохранением каталога или
+                    // лимитов — а происходило оно именно так: достаточно, чтобы поле
+                    // оказалось пустым (форма не догрузила данные, поле очистили по
+                    // ошибке), и первое же «Сохранить» уносило ключ вместе с отпечатком.
+                    //
+                    // Ключ ЗАМЕНЯЕТСЯ вставкой другого PEM или кнопкой «Сгенерировать
+                    // пару» — оба пути осознанные. Пути «очистить» нет намеренно:
+                    // инсталляции без ключа не бывает, бывает инсталляция с другим ключом.
+                    log.warn('[backup] Сохранение с пустым полем публичного ключа: установленный ключ сохранён без изменений');
                 } else {
                     patch.publicKeyPem = '';
                     patch.keyFingerprint = '';
                 }
             }
 
-            backup.settings.write(patch);
+            await backup.settings.write(patch);
             try { backup.settings.ensureStorage(); } catch (e) { /* каталог создастся при запуске */ }
             return { ok: true };
         },
@@ -246,7 +305,7 @@ module.exports = function (modelsDB, Utilities) {
          */
         async generateKeys(params, ctx) {
             const pair = backup.keys.generatePair();
-            backup.settings.write({ publicKeyPem: pair.publicKeyPem, keyFingerprint: pair.fingerprint });
+            await backup.settings.write({ publicKeyPem: pair.publicKeyPem, keyFingerprint: pair.fingerprint });
 
             const token = crypto.randomBytes(24).toString('hex');
             require('../server.js').stashPrivateKey(token, pair.privateKeyPem, ctx.user.UID);
@@ -272,16 +331,13 @@ module.exports = function (modelsDB, Utilities) {
         async previewRetention(params, ctx) {
             const s = backup.settings.read();
             const triggeredBy = 'manual';                       // из формы запуск всегда ручной
-            const rows = await dbGateway.execute({
-                operation: 'read', table: 'backup_files',
-                where: {}, options: { raw: true }, context: { sessionID: ctx.sessionID }
-            }) || [];
 
-            // Моделируем БУДУЩЕЕ состояние: список + ещё одна копия, которая вот-вот появится.
-            const future = rows.filter(r => !r.missing).concat([{
-                UID: '__new__', triggeredBy, createdAt: new Date()
+            // Моделируем БУДУЩЕЕ состояние: каталог + ещё одна копия, которая вот-вот
+            // появится. Отсева «пропавших» больше нет — в каталоге их не бывает.
+            const future = backup.catalog.list().concat([{
+                fileName: '__new__', triggeredBy, date: new Date()
             }]);
-            const doomed = backup.selectForPruning(future, s).filter(f => f.UID !== '__new__');
+            const doomed = backup.selectForPruning(future, s).filter(f => f.fileName !== '__new__');
 
             return {
                 willDelete: doomed.map(f => ({ fileName: f.fileName, triggeredBy: f.triggeredBy, date: f.createdAt })),
@@ -312,24 +368,25 @@ module.exports = function (modelsDB, Utilities) {
             return { ok: true, runId: res.runId, message: await tForSession('backup_run_started_msg', ctx.sessionID) };
         },
 
-        /** Удалить копию: сначала файл, потом запись — осиротевшая запись честнее осиротевшего файла. */
+        /**
+         * Удалить копию — файл и его спутник. Записи в базе больше нет, поэтому и
+         * согласовывать нечего: удаление файла и есть удаление копии.
+         */
         async deleteBackup(params, ctx) {
-            const uid = params && params.uid;
-            if (!uid) return { error: await tForSession('backup_err_no_selection', ctx.sessionID) };
-            const context = { sessionID: ctx.sessionID };
-
-            const rows = await dbGateway.execute({
-                operation: 'read', table: 'backup_files', where: { UID: uid }, options: { raw: true }, context
-            });
-            const rec = rows && rows[0];
+            const rec = backup.catalog.find(params && params.fileName);
             if (!rec) return { error: await tForSession('backup_err_no_selection', ctx.sessionID) };
 
-            try { backup.deleteFile(backup.settings.storagePath(), rec.fileName); }
-            catch (e) { log.error(`[backup] Удаление файла ${rec.fileName}: ${e.message}`); }
+            // Файл, из которого прямо сейчас идёт восстановление, не удаляем ни по чьей
+            // команде: операция читает его в этот момент.
+            if (rec.inUse) return { error: await tForSession('backup_err_file_in_use', ctx.sessionID) };
 
-            await dbGateway.execute({ operation: 'delete', table: 'backup_files', where: { UID: uid }, context });
-            try { require('../../uniForm/server.js').notifyTableChange('backup_files', 'delete', uid); } catch (e) {}
-            return { ok: true };
+            try {
+                backup.catalog.remove(rec.fileName);
+            } catch (e) {
+                log.error(`[backup] Удаление файла ${rec.fileName}: ${e.message}`);
+                return { error: await tfForSession('backup_err_delete_failed', ctx.sessionID, { message: e.message }) };
+            }
+            return { ok: true, files: backupFileRows() };
         },
 
         /**
@@ -340,7 +397,7 @@ module.exports = function (modelsDB, Utilities) {
          * ошибка настройки (вставили приватный) называется прямо.
          */
         async addApiClient(params, ctx) {
-            const res = backup.apiAuth.addClient(
+            const res = await backup.apiAuth.addClient(
                 (params && params.name) || '',
                 (params && params.publicKeyPem) || ''
             );
@@ -362,7 +419,7 @@ module.exports = function (modelsDB, Utilities) {
             const client = backup.apiAuth.listClients().find(c => c.id === id);
             if (!client) return { error: await tForSession('backup_api_err_client_unknown', ctx.sessionID) };
 
-            const res = backup.apiAuth.setClientDisabled(id, !client.disabled);
+            const res = await backup.apiAuth.setClientDisabled(id, !client.disabled);
             if (!res.ok) return { error: await tForSession(res.errorKey, ctx.sessionID) };
 
             audit(`API_CLIENT_${client.disabled ? 'ENABLE' : 'DISABLE'} fp=${client.fingerprint} user=${ctx.user && ctx.user.UID}`);
@@ -373,7 +430,7 @@ module.exports = function (modelsDB, Utilities) {
         async removeApiClient(params, ctx) {
             const id = String((params && params.id) || '');
             const client = backup.apiAuth.listClients().find(c => c.id === id);
-            const res = backup.apiAuth.removeClient(id);
+            const res = await backup.apiAuth.removeClient(id);
             if (!res.ok) return { error: await tForSession(res.errorKey, ctx.sessionID) };
 
             audit(`API_CLIENT_REMOVE fp=${client && client.fingerprint} user=${ctx.user && ctx.user.UID}`);
@@ -386,9 +443,21 @@ module.exports = function (modelsDB, Utilities) {
             return { taskUID: task.UID };
         },
 
-        /** Обновить панель состояния без перезагрузки формы. */
+        /** Обновить панель состояния и список копий без перезагрузки формы. */
         async getStatus(params, ctx) {
-            return { statusText: await buildStatusText(ctx.sessionID) };
+            return { statusText: await buildStatusText(ctx.sessionID), files: backupFileRows() };
+        },
+
+        /**
+         * Перечитать каталог по требованию.
+         *
+         * Нужна потому, что каталог меняется мимо формы: копию удаляет внешнее
+         * хранилище своей командой, прореживание идёт в воркере, а файлы исчезают при
+         * развёртывании. Кнопка «Обновить» честнее, чем список, о котором неизвестно,
+         * насколько он свеж.
+         */
+        async refreshFiles(params, ctx) {
+            return { ok: true, files: backupFileRows() };
         }
     };
 };

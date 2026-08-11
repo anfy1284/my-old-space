@@ -47,6 +47,7 @@ const builtins = {
     'default.autoNumber': require('./default/autoNumber'),
     'default.uniqueNumber': require('./default/uniqueNumber'),
     'default.documentDate': require('./default/documentDate'),
+    'default.userDisabled': require('./default/userDisabled'),
 };
 
 for (const [name, fn] of Object.entries(builtins)) {

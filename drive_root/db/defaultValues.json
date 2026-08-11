@@ -39,14 +39,20 @@
             "name": "Language",
             "displayName": "Language",
             "typeId": "000000000-roles-0001",
-            "options": { "referenceTable": "languages", "displayField": "name" },
+            "options": {
+                "referenceTable": "languages",
+                "displayField": "name"
+            },
             "UID": "000000000-users-0007"
         },
         {
             "name": "BookingCalendarOrientation",
             "displayName": "calendar_orientation_setting",
             "typeId": "000000000-roles-0005",
-            "options": ["horizontal", "vertical"],
+            "options": [
+                "horizontal",
+                "vertical"
+            ],
             "UID": "000000000-users-0008"
         }
     ],
@@ -70,6 +76,100 @@
             "name": "Polski",
             "code": "pl",
             "UID": "000000000-lang-0004"
+        }
+    ],
+    "system_data_types": [
+        {
+            "UID": "000000000-sysdata-0001",
+            "code": "backup_settings",
+            "name": "Backup settings",
+            "displayOrder": 10
+        },
+        {
+            "UID": "000000000-sysdata-0002",
+            "code": "users_and_roles",
+            "name": "Users, roles and their settings",
+            "displayOrder": 20
+        },
+        {
+            "UID": "000000000-sysdata-0003",
+            "code": "scheduler",
+            "name": "Scheduled tasks",
+            "displayOrder": 30
+        }
+    ],
+    "translations": [
+        {
+            "UID": "tr-sysdata-ru-0001",
+            "recordId": "000000000-sysdata-0001",
+            "tableName": "system_data_types",
+            "fieldName": "name",
+            "language": "ru",
+            "value": "Настройки резервного копирования"
+        },
+        {
+            "UID": "tr-sysdata-de-0001",
+            "recordId": "000000000-sysdata-0001",
+            "tableName": "system_data_types",
+            "fieldName": "name",
+            "language": "de",
+            "value": "Sicherungseinstellungen"
+        },
+        {
+            "UID": "tr-sysdata-pl-0001",
+            "recordId": "000000000-sysdata-0001",
+            "tableName": "system_data_types",
+            "fieldName": "name",
+            "language": "pl",
+            "value": "Ustawienia kopii zapasowych"
+        },
+        {
+            "UID": "tr-sysdata-ru-0002",
+            "recordId": "000000000-sysdata-0002",
+            "tableName": "system_data_types",
+            "fieldName": "name",
+            "language": "ru",
+            "value": "Пользователи, роли и их настройки"
+        },
+        {
+            "UID": "tr-sysdata-de-0002",
+            "recordId": "000000000-sysdata-0002",
+            "tableName": "system_data_types",
+            "fieldName": "name",
+            "language": "de",
+            "value": "Benutzer, Rollen und ihre Einstellungen"
+        },
+        {
+            "UID": "tr-sysdata-pl-0002",
+            "recordId": "000000000-sysdata-0002",
+            "tableName": "system_data_types",
+            "fieldName": "name",
+            "language": "pl",
+            "value": "Użytkownicy, role i ich ustawienia"
+        },
+        {
+            "UID": "tr-sysdata-ru-0003",
+            "recordId": "000000000-sysdata-0003",
+            "tableName": "system_data_types",
+            "fieldName": "name",
+            "language": "ru",
+            "value": "Регламентные задания"
+        },
+        {
+            "UID": "tr-sysdata-de-0003",
+            "recordId": "000000000-sysdata-0003",
+            "tableName": "system_data_types",
+            "fieldName": "name",
+            "language": "de",
+            "value": "Geplante Aufgaben"
+        },
+        {
+            "UID": "tr-sysdata-pl-0003",
+            "recordId": "000000000-sysdata-0003",
+            "tableName": "system_data_types",
+            "fieldName": "name",
+            "language": "pl",
+            "value": "Zadania zaplanowane"
         }
     ]
 }

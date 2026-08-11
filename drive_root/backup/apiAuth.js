@@ -26,7 +26,7 @@
  *
  * Подписываемая строка (UTF-8, разделитель LF, завершающего перевода строки нет):
  *
- *     MOSBAK1
+ *     MOSBAK2
  *     <МЕТОД заглавными>
  *     <путь вместе со строкой запроса, ровно как отправлен>
  *     <ts — секунды Unix>
@@ -35,7 +35,7 @@
  *
  * Подпись передаётся заголовком:
  *
- *     Authorization: MOSBAK1-Ed25519 keyId=<отпечаток>,ts=<…>,nonce=<…>,sig=<base64>
+ *     Authorization: MOSBAK2-Ed25519 keyId=<отпечаток>,ts=<…>,nonce=<…>,sig=<base64>
  *
  * Метод и путь входят в подпись НЕ для красоты: без них перехваченную подпись можно
  * предъявить другому роуту (подпись от `ping` сгодилась бы для `download`), а тело в
@@ -47,7 +47,15 @@ const crypto = require('crypto');
 const log = require('../log');
 const settingsStore = require('./settings');
 
-const SCHEME = 'MOSBAK1-Ed25519';
+/** Служебные обращения к собственным таблицам механизма: живой сессии здесь нет. */
+const SYSTEM_SESSION_ID = '__SYS_INTERNAL__';
+
+// Версия протокола поднята до MOSBAK2 (решение владельца 11.08.2026). Криптография не
+// изменилась ни в чём — изменились МАРШРУТЫ: копия адресуется именем файла вместо UID
+// записи журнала, а подтверждение заменено командой удаления. Версия в схеме и в
+// подписываемом тексте нужна затем, чтобы старый клиент получал внятный отказ
+// авторизации, а не загадочный 404 по несуществующему идентификатору.
+const SCHEME = 'MOSBAK2-Ed25519';
 
 /** Допуск расхождения часов. Меньше — и клиент с плывущими часами не войдёт вовсе. */
 const MAX_SKEW_SEC = 300;
@@ -115,7 +123,13 @@ function validateClientKey(pem) {
     return { ok: true, fingerprint: fingerprint(key) };
 }
 
-/** Список зарегистрированных клиентов (как лежит в файле настроек). */
+/**
+ * Список зарегистрированных клиентов.
+ *
+ * СИНХРОННО и из кэша настроек — потому что зовётся из `verify()` на КАЖДЫЙ запрос
+ * хранилища. Авторитет — таблица `backup_api_clients`; кэш наполняет
+ * `settings.load()` при старте и после каждой правки реестра.
+ */
 function listClients() {
     const s = settingsStore.read();
     return Array.isArray(s.apiClients) ? s.apiClients : [];
@@ -126,65 +140,90 @@ function listClients() {
  *
  * Повторная регистрация того же ключа — не ошибка, а ВКЛЮЧЕНИЕ обратно: администратор,
  * который отключил доступ и передумал, вставит тот же ключ, и ожидает, что он заработает,
- * а не что появится второй такой же.
+ * а не что появится второй такой же. Отпечаток уникален в таблице, поэтому второй
+ * такой же не появится и по ошибке.
  */
-function addClient(name, publicKeyPem) {
+async function addClient(name, publicKeyPem) {
     const v = validateClientKey(publicKeyPem);
     if (!v.ok) return v;
 
-    const clients = listClients().slice();
     const pem = String(publicKeyPem).trim();
-    const existing = clients.find(c => c.fingerprint === v.fingerprint);
-    if (existing) {
-        existing.name = String(name || existing.name || '').trim() || existing.name;
-        existing.disabled = false;
-        existing.publicKeyPem = pem;
+    const db = require('../dbGateway');
+    const context = { sessionID: SYSTEM_SESSION_ID };
+
+    const found = await db.execute({
+        operation: 'read', table: settingsStore.CLIENTS_TABLE,
+        where: { fingerprint: v.fingerprint }, options: { raw: true }, context
+    }) || [];
+
+    if (found.length) {
+        await db.execute({
+            operation: 'update', table: settingsStore.CLIENTS_TABLE,
+            where: { UID: found[0].UID }, context,
+            data: {
+                name: String(name || found[0].name || '').trim() || found[0].name,
+                disabled: false,
+                publicKeyPem: pem
+            }
+        });
     } else {
-        clients.push({
-            id: crypto.randomBytes(8).toString('hex'),
-            name: String(name || '').trim() || v.fingerprint.slice(7, 19),
-            publicKeyPem: pem,
-            fingerprint: v.fingerprint,
-            algorithm: 'ed25519',
-            createdAt: new Date().toISOString(),
-            disabled: false,
-            lastSeenAt: '',
-            lastSeenIp: ''
+        await db.execute({
+            operation: 'create', table: settingsStore.CLIENTS_TABLE, context,
+            data: {
+                organizationId: null,
+                name: String(name || '').trim() || v.fingerprint.slice(7, 19),
+                publicKeyPem: pem,
+                fingerprint: v.fingerprint,
+                algorithm: 'ed25519',
+                disabled: false
+            }
         });
     }
-    settingsStore.write({ apiClients: clients });
+
+    await settingsStore.load();
     log.info(`[backup/api] Зарегистрирован клиент ${v.fingerprint}`);
-    return { ok: true, fingerprint: v.fingerprint, added: !existing };
+    return { ok: true, fingerprint: v.fingerprint, added: !found.length };
 }
 
-/** Включить/выключить клиента. Отключение мгновенно: реестр читается на каждом запросе. */
-function setClientDisabled(id, disabled) {
-    const clients = listClients().slice();
-    const c = clients.find(x => x.id === id || x.fingerprint === id);
+/** Включить/выключить клиента. Действует сразу: реестр читается на каждом запросе. */
+async function setClientDisabled(id, disabled) {
+    const c = listClients().find(x => x.id === id || x.fingerprint === id);
     if (!c) return { ok: false, errorKey: 'backup_api_err_client_unknown' };
-    c.disabled = !!disabled;
-    settingsStore.write({ apiClients: clients });
+
+    await require('../dbGateway').execute({
+        operation: 'update', table: settingsStore.CLIENTS_TABLE,
+        where: { UID: c.id }, data: { disabled: !!disabled },
+        context: { sessionID: SYSTEM_SESSION_ID }
+    });
+    await settingsStore.load();
     log.info(`[backup/api] Клиент ${c.fingerprint} ${disabled ? 'отключён' : 'включён'}`);
     return { ok: true };
 }
 
 /** Удалить клиента насовсем. */
-function removeClient(id) {
-    const clients = listClients();
-    const next = clients.filter(x => x.id !== id && x.fingerprint !== id);
-    if (next.length === clients.length) return { ok: false, errorKey: 'backup_api_err_client_unknown' };
-    settingsStore.write({ apiClients: next });
-    log.info(`[backup/api] Клиент ${id} удалён`);
+async function removeClient(id) {
+    const c = listClients().find(x => x.id === id || x.fingerprint === id);
+    if (!c) return { ok: false, errorKey: 'backup_api_err_client_unknown' };
+
+    await require('../dbGateway').execute({
+        operation: 'delete', table: settingsStore.CLIENTS_TABLE,
+        where: { UID: c.id }, context: { sessionID: SYSTEM_SESSION_ID }
+    });
+    await settingsStore.load();
+    log.info(`[backup/api] Клиент ${c.fingerprint} удалён`);
     return { ok: true };
 }
 
 /**
  * Отметить, что клиент выходил на связь.
  *
- * Пишется в файл настроек, но НЕ чаще раза в минуту: это диагностика («архив молчит
- * третий день»), а не учёт, и превращать её в запись файла на каждый запрос незачем.
- * В памяти держать нельзя — после перезапуска сервера отметка нужна как раз больше
- * всего: именно тогда и выясняют, кто перестал приходить.
+ * Не чаще раза в минуту: это диагностика («архив молчит третий день»), а не учёт, и
+ * превращать её в запись на каждый запрос незачем. В памяти держать нельзя — после
+ * перезапуска отметка нужна как раз больше всего: именно тогда и выясняют, кто перестал
+ * приходить.
+ *
+ * Вызывается БЕЗ ожидания из синхронного `verify()`: отметка о визите не важнее самого
+ * визита, и запрос обязан пройти, даже если её не удалось записать.
  */
 const LAST_SEEN_FLUSH_MS = 60 * 1000;
 
@@ -192,17 +231,18 @@ function noteSeen(client, ip) {
     const prev = _lastSeenFlush.get(client.fingerprint) || 0;
     if (Date.now() - prev < LAST_SEEN_FLUSH_MS) return;
     _lastSeenFlush.set(client.fingerprint, Date.now());
-    try {
-        const clients = listClients().slice();
-        const c = clients.find(x => x.fingerprint === client.fingerprint);
-        if (!c) return;
-        c.lastSeenAt = new Date().toISOString();
-        c.lastSeenIp = String(ip || '');
-        settingsStore.write({ apiClients: clients });
-    } catch (e) {
-        // Отметка о визите не важнее самого визита: запрос обязан пройти и без неё.
-        log.warn(`[backup/api] Отметка о визите не записана: ${e.message}`);
-    }
+
+    Promise.resolve()
+        .then(async () => {
+            await require('../dbGateway').execute({
+                operation: 'update', table: settingsStore.CLIENTS_TABLE,
+                where: { UID: client.id },
+                data: { lastSeenAt: new Date(), lastSeenIp: String(ip || '') },
+                context: { sessionID: SYSTEM_SESSION_ID }
+            });
+            await settingsStore.load();
+        })
+        .catch((e) => log.warn(`[backup/api] Отметка о визите не записана: ${e.message}`));
 }
 
 // ── Проверка запроса ────────────────────────────────────────────────────────────
@@ -309,7 +349,7 @@ function verify(req, body) {
         : EMPTY_BODY_SHA;
 
     const signed = [
-        'MOSBAK1',
+        'MOSBAK2',
         String(req.method || '').toUpperCase(),
         String(req.url || ''),
         String(params.ts),

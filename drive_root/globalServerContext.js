@@ -483,10 +483,10 @@ async function getUserBySessionID(sessionID) {
     }
     // L1: same-process Map (synchronous)
     const cachedL1 = _memoryStore.getSync(_SESSION_USER_NS, sessionID);
-    if (cachedL1 !== null && cachedL1 !== undefined) return cachedL1;
+    if (cachedL1 !== null && cachedL1 !== undefined) return _unlessDisabled(cachedL1, sessionID);
     // L2: shared memory_store service (cross-process)
     const cachedL2 = await _memoryStore.get(_SESSION_USER_NS, sessionID);
-    if (cachedL2 !== null && cachedL2 !== undefined) return cachedL2;
+    if (cachedL2 !== null && cachedL2 !== undefined) return _unlessDisabled(cachedL2, sessionID);
 
     // L3: DB
     const session = await Session.findOne({ where: { sessionId: sessionID } });
@@ -506,7 +506,30 @@ async function getUserBySessionID(sessionID) {
     console.log(`[getUserBySessionID] Found user: ${user.name} (${user.UID})`);
     const plain = user.get({ plain: true });
     await _memoryStore.set(_SESSION_USER_NS, sessionID, plain);
-    return plain;
+    return _unlessDisabled(plain, sessionID);
+}
+
+/**
+ * Отключённый пользователь не резолвится из сессии — то есть теряет доступ ВЕЗДЕ.
+ *
+ * Проверка стоит именно здесь, а не только на входе, потому что это единственная
+ * точка, через которую пользователь опознаётся при каждой операции с БД (`dbGateway`
+ * резолвит его только по `sessionID`). Проверка на форме входа закрывала бы лишь новые
+ * входы, а уже открытая сессия уволенного сотрудника продолжала бы работать до
+ * истечения срока — то есть отключение действовало бы с непредсказуемой задержкой.
+ *
+ * Кэш проверяется наравне с базой: сама запись пользователя в нём и лежит, поэтому
+ * признак доступен без обращения к БД. Немедленность даёт не эта проверка, а удаление
+ * сессий в момент отключения (`default.userDisabled`); здесь — надёжный низ, который
+ * отработает и если сессии почему-то уцелели.
+ */
+function _unlessDisabled(plainUser, sessionID) {
+    if (plainUser && plainUser.disabled) {
+        console.warn(`[security] Сессия отключённого пользователя отклонена: `
+            + `user=${plainUser.UID} session=${String(sessionID).slice(0, 8)}…`);
+        return null;
+    }
+    return plainUser;
 }
 
 // Сбрасывает кэш пользователя для сессии (L1 + L2). Звать после изменения полей

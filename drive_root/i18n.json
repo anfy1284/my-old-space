@@ -581,7 +581,6 @@
         "de": "Aufgabenlauf",
         "pl": "Uruchomienie zadania"
     },
-
     "maint_page_title": {
         "en": "Server maintenance",
         "ru": "Обслуживание сервера",
@@ -821,5 +820,35 @@
         "ru": "Нет схемы отката, на которую можно переключиться",
         "de": "Es gibt kein Rollback-Schema zum Umschalten",
         "pl": "Brak schematu wycofania do przełączenia"
+    },
+    "user_disabled_field": {
+        "en": "Disabled",
+        "ru": "Отключён",
+        "de": "Deaktiviert",
+        "pl": "Wyłączony"
+    },
+    "sysdata_code_field": {
+        "en": "Code",
+        "ru": "Код",
+        "de": "Code",
+        "pl": "Kod"
+    },
+    "sysdata_name_field": {
+        "en": "System data type",
+        "ru": "Тип системных данных",
+        "de": "Systemdatentyp",
+        "pl": "Typ danych systemowych"
+    },
+    "sysdata_description_field": {
+        "en": "Description",
+        "ru": "Описание",
+        "de": "Beschreibung",
+        "pl": "Opis"
+    },
+    "sysdata_order_field": {
+        "en": "Order",
+        "ru": "Порядок",
+        "de": "Reihenfolge",
+        "pl": "Kolejność"
     }
 }

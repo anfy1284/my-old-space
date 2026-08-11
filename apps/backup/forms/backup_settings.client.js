@@ -10,10 +10,25 @@
 // строка таблицы, доступность кнопок по выбору, скачивание файла) — в ядре:
 // form.getControl / table.currentRow / "enabledWhen" в лейауте / MySpace.downloadFile.
 
-/** Копия, выбранная в журнале. Текущую строку ведёт сама таблица. */
+/** Копия, выбранная в списке. Текущую строку ведёт сама таблица. */
 function selectedFile(form) {
     var tbl = form && form.getControl('backupFilesTable');
     return tbl ? tbl.currentRow : null;
+}
+
+/** Перерисовать список копий: он приходит с сервера целиком, из каталога. */
+function applyFiles(form, files) {
+    var tbl = form && form.getControl('backupFilesTable');
+    if (!tbl || !files) return;
+    tbl.setRowsData(files);
+}
+
+/** Перечитать каталог по требованию — он меняется мимо формы. */
+async function refreshFiles(ev, ctx) {
+    var form = ctx && ctx.form;
+    var res = await callServer('__SERVER_SCRIPT__', 'refreshFiles', {});
+    if (!res || res.error) { showAlert(__t('Error: ') + ((res && res.error) || '')); return; }
+    applyFiles(form, res.files);
 }
 
 /** Общая часть запуска: несохранённые настройки сначала сохраняем. */
@@ -67,17 +82,19 @@ async function createForOrganization(ev, ctx) {
 
 function downloadSelected(ev, ctx) {
     var rec = selectedFile(ctx && ctx.form);
-    if (!rec || !rec.UID) { showAlert(__t('backup_err_no_selection')); return; }
-    MySpace.downloadFile('/api/apps/backup/download/' + encodeURIComponent(rec.UID));
+    if (!rec || !rec.fileName) { showAlert(__t('backup_err_no_selection')); return; }
+    MySpace.downloadFile('/api/apps/backup/download/' + encodeURIComponent(rec.fileName));
 }
 
 async function deleteSelected(ev, ctx) {
-    var rec = selectedFile(ctx && ctx.form);
-    if (!rec || !rec.UID) { showAlert(__t('backup_err_no_selection')); return; }
+    var form = ctx && ctx.form;
+    var rec = selectedFile(form);
+    if (!rec || !rec.fileName) { showAlert(__t('backup_err_no_selection')); return; }
     var ok = await showConfirm(__t('backup_delete_confirm'));
     if (!ok) return;
-    var res = await callServer('__SERVER_SCRIPT__', 'deleteBackup', { uid: rec.UID });
+    var res = await callServer('__SERVER_SCRIPT__', 'deleteBackup', { fileName: rec.fileName });
     if (!res || res.error) { showAlert(__t('Error: ') + ((res && res.error) || '')); return; }
+    applyFiles(form, res.files);
 }
 
 /**
@@ -88,8 +105,8 @@ async function deleteSelected(ev, ctx) {
  */
 async function restoreOrganization(ev, ctx) {
     var rec = selectedFile(ctx && ctx.form);
-    if (!rec || !rec.UID) { showAlert(__t('backup_err_no_selection')); return; }
-    await MySpace.open('uniForm', { mode: 'record', dbTable: 'backup_restore_full', fileUID: rec.UID });
+    if (!rec || !rec.fileName) { showAlert(__t('backup_err_no_selection')); return; }
+    await MySpace.open('uniForm', { mode: 'record', dbTable: 'backup_restore_full', fileName: rec.fileName });
 }
 
 /**
@@ -212,5 +229,5 @@ async function removeApiClient(ev, ctx) {
 return {
     createFull, createPlain, createForOrganization, downloadSelected, deleteSelected,
     restoreOrganization, generateKeys, openSchedule, setRecoveryPassword,
-    addApiClient, toggleApiClient, removeApiClient
+    addApiClient, toggleApiClient, removeApiClient, refreshFiles
 };

@@ -13,17 +13,8 @@
  * эффектов. См. drive_root/scheduler/registry.js.
  */
 
-const fs = require('fs');
-const path = require('path');
 const dbGateway = require('../../drive_root/dbGateway');
 const log = require('../../drive_root/log');
-
-const TABLE = 'backup_files';
-
-/** Файл копии всё ещё лежит на диске? (прореживание могло отложить удаление) */
-function fsExists(storageDir, fileName) {
-    try { return fs.existsSync(path.join(storageDir, fileName)); } catch (e) { return false; }
-}
 
 module.exports = function (modelsDB, Utilities) {
     return {
@@ -56,17 +47,19 @@ module.exports = function (modelsDB, Utilities) {
                     throw new Error(`Владелец задания резервного копирования должен иметь роль admin (сейчас: ${ownerRole || 'не определена'})`);
                 }
 
+                // Настройки читаются из базы В КЭШ, и кэш этот — свой у каждого
+                // процесса. Задача выполняется в ВОРКЕРЕ, куда правки, сделанные
+                // администратором в главном процессе, не доезжают: у него свой кэш,
+                // наполненный при старте. Поэтому каждый прогон начинается с
+                // перечитывания — иначе выгрузка шла бы по ключу и лимитам, которые
+                // могли смениться неделю назад.
+                await backup.settings.load();
+
                 const scopeType = String(ctx.params.scope || 'full');
                 const scopeOrgId = String(ctx.params.scopeOrganizationId || '').trim();
                 if (scopeType === 'organization' && !scopeOrgId) {
                     throw new Error('Для выгрузки по организации не указана организация');
                 }
-
-                // Данные читаем через сессию задачи — RLS применяется тем же кодом,
-                // что и к живому пользователю. Владелец задачи admin, поэтому
-                // организация видна; подменять контекст не нужно.
-                const call = (operation, params) => dbGateway.execute(
-                    Object.assign({ operation, table: TABLE, context: { sessionID: ctx.sessionID } }, params));
 
                 let scopeOrgName = '';
                 if (scopeType === 'organization') {
@@ -79,10 +72,11 @@ module.exports = function (modelsDB, Utilities) {
                     scopeOrgName = orgs[0].name || '';
                 }
 
-                // Оценка места опирается на размер предыдущей копии (§3.0).
-                const existing = (await call('read', { where: {}, options: { raw: true } })) || [];
-                const alive = existing.filter(f => !f.missing);
-                const previousSize = alive.reduce((mx, f) => Math.max(mx, Number(f.sizeBytes) || 0), 0);
+                // Оценка места опирается на размер предыдущей копии (§3.0) — из
+                // каталога: файлов, которых нет, там не бывает по построению, поэтому
+                // прежний отсев `missing` не нужен.
+                const previousSize = backup.catalog.list()
+                    .reduce((mx, f) => Math.max(mx, Number(f.size) || 0), 0);
 
                 const { models } = globalCtx.collectMergedModelDefs();
 
@@ -95,8 +89,14 @@ module.exports = function (modelsDB, Utilities) {
                 let version = null;
                 try { version = await dbVersions.latest(sequelize); } catch (e) { version = null; }
 
+                const triggeredBy = String(ctx.triggeredBy || 'schedule') === 'manual' ? 'manual' : 'schedule';
+
                 const result = await backup.createBackup({
                     sequelize, models,
+                    // Повод и наименование едут в ЗАГОЛОВОК копии: строки журнала, где
+                    // они лежали раньше, больше нет, а заголовок читается без ключа.
+                    triggeredBy,
+                    title: String(ctx.params.title || ''),
                     scope: scopeType === 'organization'
                         ? { type: 'organization', organizationId: scopeOrgId, organizationName: scopeOrgName }
                         : { type: 'full' },
@@ -113,52 +113,27 @@ module.exports = function (modelsDB, Utilities) {
                 });
                 ctx.heartbeat();
 
-                const triggeredBy = String(ctx.triggeredBy || 'schedule') === 'manual' ? 'manual' : 'schedule';
-                await call('create', {
-                    data: {
-                        organizationId: null,          // системная таблица: строка не принадлежит организации
-                        fileName: result.fileName,
-                        sizeBytes: result.size,
-                        sha256: result.sha256,
-                        keyFingerprint: result.keyFingerprint,
-                        configHash: result.configHash,
-                        dbVersion: version ? Number(version.number) || 0 : 0,
-                        triggeredBy,
-                        scopeType,
-                        scopeOrganizationId: scopeType === 'organization' ? scopeOrgId : null,
-                        scopeOrganizationName: scopeType === 'organization' ? scopeOrgName : null,
-                        rowsTotal: result.totalRows,
-                        verifyStatus: 'none',
-                        acked: false,
-                        missing: false,
-                        tablesText: JSON.stringify(result.tables)
-                    }
-                });
+                // Записи в журнал больше НЕ делается: журнала нет, источник истины —
+                // каталог, и копия попадает в списки самим фактом своего существования.
+                // Историю запусков (в том числе неудачных, которых в журнале копий не
+                // бывало вовсе) ведёт `scheduler_runs`.
 
                 // Прореживание — ТОЛЬКО после того, как новая копия создана: удалить
                 // старое раньше значит на время операции остаться без копий вовсе.
                 const settings = backup.settings.read();
-                const storageDir = backup.settings.storagePath(settings);
-                const fresh = (await call('read', { where: {}, options: { raw: true } })) || [];
-                const doomed = backup.selectForPruning(fresh.filter(f => !f.missing), settings);
+                const doomed = backup.selectForPruning(backup.catalog.list(), settings);
                 let pruned = 0;
                 for (const f of doomed) {
                     try {
-                        // Файл может быть сейчас занят (идёт восстановление из него) —
-                        // тогда и запись журнала оставляем: иначе копия останется на диске
-                        // без записи, то есть станет невидимой и вечной.
-                        const removed = backup.deleteFile(storageDir, f.fileName);
-                        if (!removed && fsExists(storageDir, f.fileName)) continue;
-                        await call('delete', { where: { UID: f.UID } });
-                        pruned++;
+                        // Файл, из которого прямо сейчас идёт восстановление, пропускаем:
+                        // метка `.inuse` ставится другим процессом, поэтому проверять её
+                        // надо через каталог, а не через переменную.
+                        if (f.inUse) continue;
+                        if (backup.catalog.remove(f.fileName)) pruned++;
                     } catch (e) {
                         log.error(`[backup] Не удалось удалить копию ${f.fileName}: ${e.message}`);
                     }
                 }
-
-                try {
-                    require('../uniForm/server.js').notifyTableChange(TABLE, 'create', null);
-                } catch (e) { /* оповещение необязательно */ }
 
                 const warn = [];
                 if (result.unknownObjects.length) warn.push(`объекты вне моделей: ${result.unknownObjects.join(', ')}`);

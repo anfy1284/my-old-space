@@ -5,18 +5,6 @@
         "de": "Datensicherung",
         "pl": "Kopia zapasowa bazy"
     },
-    "backup_files_app_caption": {
-        "en": "Backup files",
-        "ru": "Резервные копии",
-        "de": "Sicherungsdateien",
-        "pl": "Kopie zapasowe"
-    },
-    "backup_files_record_caption": {
-        "en": "Backup file",
-        "ru": "Резервная копия",
-        "de": "Sicherungsdatei",
-        "pl": "Kopia zapasowa"
-    },
     "backup_handler_create": {
         "en": "Create database backup",
         "ru": "Создание резервной копии БД",
@@ -286,6 +274,12 @@
         "ru": "Публичный ключ задан ({{fingerprint}}…).",
         "de": "Öffentlicher Schlüssel ist gesetzt ({{fingerprint}}…).",
         "pl": "Klucz publiczny ustawiony ({{fingerprint}}…)."
+    },
+    "backup_status_key_lost": {
+        "en": "SETTINGS LOST: the journal knows {{count}} backup(s), but there is no encryption key. Expected file: {{file}}. Backups are stopped. Find out why the file disappeared before generating a new pair — otherwise the new key will be lost the same way, and the existing copies stay encrypted with a key the system no longer knows.",
+        "ru": "НАСТРОЙКИ ПОТЕРЯНЫ: журнал знает о {{count}} копиях, а ключа шифрования нет. Ожидался файл: {{file}}. Копирование остановлено. Прежде чем генерировать новую пару, выясните, куда делся файл, — иначе новый ключ исчезнет тем же путём, а уже сделанные копии останутся зашифрованными ключом, о котором система больше не помнит.",
+        "de": "EINSTELLUNGEN VERLOREN: Das Journal kennt {{count}} Sicherung(en), es gibt aber keinen Verschlüsselungsschlüssel. Erwartete Datei: {{file}}. Die Sicherung ist gestoppt. Klären Sie zuerst, warum die Datei verschwunden ist, bevor Sie ein neues Paar erzeugen — sonst geht der neue Schlüssel auf demselben Weg verloren, und die vorhandenen Kopien bleiben mit einem Schlüssel verschlüsselt, den das System nicht mehr kennt.",
+        "pl": "USTAWIENIA UTRACONE: dziennik zna {{count}} kopii, ale nie ma klucza szyfrującego. Oczekiwany plik: {{file}}. Tworzenie kopii zatrzymane. Zanim wygenerujesz nową parę, ustal, dlaczego plik zniknął — inaczej nowy klucz zniknie tak samo, a istniejące kopie pozostaną zaszyfrowane kluczem, którego system już nie zna."
     },
     "backup_status_key_missing": {
         "en": "Public key is NOT set — backups will not run. Paste a key or generate a pair.",
@@ -1349,6 +1343,12 @@
         "de": "Schlüssel-Fingerabdruck",
         "pl": "Odcisk klucza"
     },
+    "backup_api_register_group": {
+        "en": "Register a new storage",
+        "ru": "Зарегистрировать новое хранилище",
+        "de": "Neuen Speicher registrieren",
+        "pl": "Zarejestruj nowy magazyn"
+    },
     "backup_api_new_key_field": {
         "en": "Public key (Ed25519, PEM)",
         "ru": "Публичный ключ (Ed25519, PEM)",
@@ -1468,5 +1468,161 @@
         "ru": "Подтверждено",
         "de": "Bestätigt am",
         "pl": "Potwierdzono"
+    },
+    "restore_full_sysdata_group": {
+        "en": "System data",
+        "ru": "Системные данные",
+        "de": "Systemdaten",
+        "pl": "Dane systemowe"
+    },
+    "restore_full_sysdata_hint": {
+        "en": "By default system data is NOT taken from the copy: users, access rights and installation settings stay as they are now, and users missing from the current base come back disabled. Tick a type only if you need to reproduce the state of that date — including who had access.",
+        "ru": "По умолчанию системные данные из копии НЕ берутся: пользователи, права и настройки инсталляции остаются нынешними, а пользователи, которых нет в текущей базе, возвращаются отключёнными. Отмечайте тип, только если нужно воспроизвести состояние на ту дату — включая то, у кого был доступ.",
+        "de": "Standardmäßig werden Systemdaten NICHT aus der Kopie übernommen: Benutzer, Rechte und Installationseinstellungen bleiben wie jetzt, und in der aktuellen Datenbank fehlende Benutzer kehren deaktiviert zurück. Markieren Sie einen Typ nur, wenn Sie den Stand jenes Datums wiederherstellen wollen — einschließlich der Zugriffsrechte.",
+        "pl": "Domyślnie dane systemowe NIE są pobierane z kopii: użytkownicy, uprawnienia i ustawienia instalacji pozostają obecne, a użytkownicy nieobecni w bieżącej bazie wracają wyłączeni. Zaznacz typ tylko wtedy, gdy chcesz odtworzyć stan z tamtej daty — łącznie z tym, kto miał dostęp."
+    },
+    "restore_full_sysdata_type_col": {
+        "en": "System data",
+        "ru": "Системные данные",
+        "de": "Systemdaten",
+        "pl": "Dane systemowe"
+    },
+    "restore_full_sysdata_fromcopy_col": {
+        "en": "Take from copy",
+        "ru": "Взять из копии",
+        "de": "Aus Kopie übernehmen",
+        "pl": "Weź z kopii"
+    },
+    "restore_full_sysdata_tables_col": {
+        "en": "Tables",
+        "ru": "Таблицы",
+        "de": "Tabellen",
+        "pl": "Tabele"
+    },
+    "restore_full_sysdata_confirm": {
+        "en": "Some system data will be taken FROM THE COPY: the installation settings of that date will replace the current ones. Continue?",
+        "ru": "Часть системных данных будет взята ИЗ КОПИИ: настройки инсталляции на ту дату заменят нынешние. Продолжить?",
+        "de": "Ein Teil der Systemdaten wird AUS DER KOPIE übernommen: Die Installationseinstellungen jenes Datums ersetzen die aktuellen. Fortfahren?",
+        "pl": "Część danych systemowych zostanie pobrana Z KOPII: ustawienia instalacji z tamtej daty zastąpią obecne. Kontynuować?"
+    },
+    "restore_full_sysdata_users_confirm": {
+        "en": "CAUTION: users and access rights will be taken FROM THE COPY. The base will contain the accounts as of the copy date — if your own account was created later, it will NOT be there and you will lose access. Accounts created since then will be lost too. Continue?",
+        "ru": "ВНИМАНИЕ: пользователи и права будут взяты ИЗ КОПИИ. В базе окажутся учётные записи на дату копии — если ваша заведена позже, её там НЕ БУДЕТ, и вы потеряете доступ. Заведённые после копии учётные записи тоже пропадут. Продолжить?",
+        "de": "ACHTUNG: Benutzer und Zugriffsrechte werden AUS DER KOPIE übernommen. Die Datenbank enthält dann die Konten zum Kopierdatum — wurde Ihr eigenes Konto später angelegt, ist es NICHT vorhanden und Sie verlieren den Zugang. Danach angelegte Konten gehen ebenfalls verloren. Fortfahren?",
+        "pl": "UWAGA: użytkownicy i uprawnienia zostaną pobrane Z KOPII. W bazie znajdą się konta z daty kopii — jeśli Twoje konto utworzono później, NIE BĘDZIE go tam i stracisz dostęp. Konta utworzone później również przepadną. Kontynuować?"
+    },
+    "backup_storage_dir_field_ro": {
+        "en": "Backup folder (set by BACKUP_STORAGE_DIR)",
+        "ru": "Каталог копий (задаётся BACKUP_STORAGE_DIR)",
+        "de": "Sicherungsordner (über BACKUP_STORAGE_DIR gesetzt)",
+        "pl": "Katalog kopii (ustawiany przez BACKUP_STORAGE_DIR)"
+    },
+    "backup_col_date": {
+        "en": "Date",
+        "ru": "Дата",
+        "de": "Datum",
+        "pl": "Data"
+    },
+    "backup_col_file": {
+        "en": "File",
+        "ru": "Файл",
+        "de": "Datei",
+        "pl": "Plik"
+    },
+    "backup_col_scope": {
+        "en": "Scope",
+        "ru": "Область",
+        "de": "Umfang",
+        "pl": "Zakres"
+    },
+    "backup_col_org": {
+        "en": "Organization",
+        "ru": "Организация",
+        "de": "Organisation",
+        "pl": "Organizacja"
+    },
+    "backup_col_trigger": {
+        "en": "Trigger",
+        "ru": "Повод",
+        "de": "Auslöser",
+        "pl": "Powód"
+    },
+    "backup_col_rows": {
+        "en": "Rows",
+        "ru": "Строк",
+        "de": "Zeilen",
+        "pl": "Wierszy"
+    },
+    "backup_col_size": {
+        "en": "Size, bytes",
+        "ru": "Размер, байт",
+        "de": "Größe, Bytes",
+        "pl": "Rozmiar, bajty"
+    },
+    "backup_col_sha": {
+        "en": "SHA-256 (ciphertext)",
+        "ru": "SHA-256 (шифротекст)",
+        "de": "SHA-256 (Chiffretext)",
+        "pl": "SHA-256 (szyfrogram)"
+    },
+    "backup_refresh_btn": {
+        "en": "Refresh list",
+        "ru": "Обновить список",
+        "de": "Liste aktualisieren",
+        "pl": "Odśwież listę"
+    },
+    "backup_err_file_in_use": {
+        "en": "This copy is being used by a restore running right now — it cannot be deleted.",
+        "ru": "Эта копия сейчас используется выполняющимся восстановлением — удалить её нельзя.",
+        "de": "Diese Kopie wird gerade von einer laufenden Wiederherstellung verwendet und kann nicht gelöscht werden.",
+        "pl": "Ta kopia jest właśnie używana przez trwające odtwarzanie — nie można jej usunąć."
+    },
+    "backup_err_delete_failed": {
+        "en": "Could not delete the copy: {{message}}",
+        "ru": "Не удалось удалить копию: {{message}}",
+        "de": "Die Kopie konnte nicht gelöscht werden: {{message}}",
+        "pl": "Nie udało się usunąć kopii: {{message}}"
+    },
+    "backup_tab_work": {
+        "en": "Operation",
+        "ru": "Работа",
+        "de": "Betrieb",
+        "pl": "Praca"
+    },
+    "backup_tab_settings": {
+        "en": "Settings",
+        "ru": "Настройки",
+        "de": "Einstellungen",
+        "pl": "Ustawienia"
+    },
+    "backup_tab_keys": {
+        "en": "Keys and access",
+        "ru": "Ключи и доступ",
+        "de": "Schlüssel und Zugriff",
+        "pl": "Klucze i dostęp"
+    },
+    "restore_full_source_hint": {
+        "en": "The main path is to upload a copy from disk: the server only keeps copies until the storage picks them up, so its folder is usually empty.",
+        "ru": "Основной путь — загрузить копию с диска: сервер хранит копии только до того, как их заберёт хранилище, поэтому его каталог обычно пуст.",
+        "de": "Der Hauptweg ist das Hochladen einer Kopie von der Festplatte: Der Server hält Kopien nur, bis der Speicher sie abholt, sein Ordner ist daher meist leer.",
+        "pl": "Główna ścieżka to wgranie kopii z dysku: serwer przechowuje kopie tylko do czasu odebrania ich przez magazyn, więc jego katalog zwykle jest pusty."
+    },
+    "restore_full_server_files_hint": {
+        "en": "…or pick a copy still present on the server:",
+        "ru": "…либо выбрать копию, ещё лежащую на сервере:",
+        "de": "…oder eine Kopie wählen, die noch auf dem Server liegt:",
+        "pl": "…albo wybierz kopię wciąż obecną na serwerze:"
+    },
+    "restore_full_clear_source_btn": {
+        "en": "Clear selection",
+        "ru": "Снять выбор",
+        "de": "Auswahl aufheben",
+        "pl": "Wyczyść wybór"
+    },
+    "restore_full_need_source": {
+        "en": "a copy is not chosen",
+        "ru": "не выбрана копия",
+        "de": "keine Kopie ausgewählt",
+        "pl": "nie wybrano kopii"
     }
 }

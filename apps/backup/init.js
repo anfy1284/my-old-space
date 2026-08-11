@@ -10,8 +10,10 @@
 //   scheduler.handlers.js             — тип задачи backup.create (единственный запуск выгрузки)
 //   server.js                         — роуты /api/apps/backup/…
 //
-// Настройки формы хранятся в ФАЙЛЕ (backupSettings.json), а не в БД, поэтому таблица
-// `backup_settings` виртуальная: данные отдаёт onLoadData, принимает onSave.
+// Настройки копирования хранятся в БД (`backup_config`, `backup_api_clients`), но
+// таблица лейаута `backup_settings` остаётся ВИРТУАЛЬНОЙ: форма собирает данные из
+// нескольких источников (настройки, состояние машины, каталог копий), поэтому их
+// отдаёт onLoadData и принимает onSave, а не запись одной таблицы.
 
 const path = require('path');
 const fs = require('fs');
@@ -20,11 +22,6 @@ module.exports = async function (modelsDB) {
     try {
         const { loadScript, loadServerScript, Utilities } = require('../../');
         const layoutMemory = require('../../drive_root/layoutMemory');
-
-        // Представление записи журнала копий объявлено ДЕКЛАРАТИВНО в модели
-        // (`entityConfig.presentation: "fileName"`), а не регистрируется здесь:
-        // записи создаёт регламентная задача в процессе-воркере, который init.js
-        // не выполняет, и зарегистрированный тут билдер до него бы не доехал.
 
         const serverScriptName = loadServerScript(
             'backup.actions',
@@ -52,11 +49,11 @@ module.exports = async function (modelsDB) {
             appCaption: { i18n: 'backup_app_caption' },
             recordCaption: { i18n: 'backup_app_caption' },
             formIcon: '/apps/general_icons/resources/public/16x16/backup.png',
-            // Разворачиваем на весь экран: на форме журнал копий с десятком колонок и
-            // панель хода операции — в окне по содержимому они читаются тесно.
+            // Разворачиваем на весь экран: на форме список копий, панель хода операции
+            // и несколько блоков настроек — в окне по содержимому они читаются тесно.
             windowState: 'maximized',
             // `onReady` не объявлен намеренно: стартовую настройку клиенту делать нечем —
-            // доступность кнопок ведёт ядро по `enabledWhen`, текущую строку журнала —
+            // доступность кнопок ведёт ядро по `enabledWhen`, текущую строку списка —
             // сама таблица. Привязка к несуществующей функции была бы мёртвой конфигурацией.
             events: {
                 onLoadData: { serverScript: serverScriptName, fn: 'onLoadData' },
@@ -105,19 +102,10 @@ module.exports = async function (modelsDB) {
             }
         });
 
-        // Журнал копий отдельным списком — нужен, когда файлов много и форма тесна.
-        await layoutMemory.saveLayout({
-            appName: 'uniForm',
-            mode: 'list',
-            tableName: 'backup_files',
-            roles: 'admin',
-            layout: require('./forms/backup_files_list.layout.json'),
-            appCaption: { i18n: 'backup_files_app_caption' },
-            recordCaption: { i18n: 'backup_files_record_caption' },
-            formIcon: '/apps/general_icons/resources/public/16x16/document.png',
-            listIcon: '/apps/general_icons/resources/public/16x16/journal.png'
-        });
-        layoutMemory.registerListSort('backup_files', [{ field: 'date', order: 'desc' }]);
+        // Отдельного списка журнала копий БОЛЬШЕ НЕТ: таблица `backup_files` удалена,
+        // источник истины — каталог (`drive_root/backup/catalog.js`). Список копий
+        // живёт только на форме резервного копирования и строится чтением каталога.
+
 
         const mainMenu = require('../main_menu/server.js');
         mainMenu.addMenuItems([{
@@ -143,13 +131,26 @@ module.exports = async function (modelsDB) {
             }]
         }]);
 
-        // Сверка журнала копий с каталогом при старте (ТЗ §2.1). Файл могли удалить
-        // мимо системы, а после полного восстановления журнал вообще приезжает изнутри
-        // дампа и описывает каталог чужого момента. Откладываем: при старте база ещё
-        // синхронизируется, а сверка не должна задерживать подъём сервера.
-        setTimeout(() => {
-            require('../../drive_root/backup').reconcileJournal()
-                .catch(e => console.warn('[backup/init] Журнал копий не сверен:', e && e.message || e));
+        // Отложенная инициализация механизма. Откладываем потому, что при старте база
+        // ещё синхронизируется, а подъём сервера задерживать нечем.
+        setTimeout(async () => {
+            // Настройки читаются из базы в кэш ПЕРВЫМ делом: всё остальное — сверка,
+            // проверка ключа, вход внешнего хранилища — спрашивает их синхронно и без
+            // наполненного кэша работало бы на умолчаниях, то есть без ключа шифрования.
+            // Здесь же выполняется однократный перенос из прежнего backupSettings.json.
+            try {
+                await require('../../drive_root/backup').settings.load();
+            } catch (e) {
+                console.error('[backup/init] Настройки копирования не загружены:', e && e.message || e);
+            }
+
+            // Досчёт контрольных сумм у копий без спутника: хранилищу они нужны, чтобы
+            // проверить скачанное, не имея приватного ключа. Фоном и без ожидания —
+            // хэширование гигабайтов не должно задерживать ничего.
+            require('../../drive_root/backup').catalog.backfillSidecars()
+                .then(r => { if (r.done) console.log('[backup/init] Досчитано контрольных сумм:', r.done); })
+                .catch(e => console.warn('[backup/init] Досчёт сумм:', e && e.message || e));
+
             // Заброшенные загрузки: администратор мог загрузить копию и передумать.
             // Файл содержит персональные данные всех клиентов — лежать без причины
             // он не должен.

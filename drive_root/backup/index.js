@@ -24,6 +24,7 @@ const settingsStore = require('./settings');
 const keys = require('./keys');
 const container = require('./container');
 const dialect = require('./dialect');
+const catalog = require('./catalog');
 const dump = require('./dump');
 
 const FILE_EXT = '.mosbak';
@@ -172,7 +173,15 @@ async function createBackup(opts) {
                 actualHash: meta.actualHash || '',
                 sourceDialect: dialect.nameOf(sequelize),
                 keyFingerprint: pre.keyFingerprint,
-                scope: dumpScope
+                scope: dumpScope,
+                // Ниже — то, что прежде лежало в строке журнала `backup_files`.
+                // Журнала больше нет (источник истины — каталог), а заголовок лежит
+                // открытым текстом и читается без приватного ключа, поэтому место ему
+                // здесь. Единственное, что в заголовок положить нельзя, — sha256: он
+                // считается по готовому файлу ВМЕСТЕ с заголовком (см. спутник).
+                triggeredBy: String(opts.triggeredBy || 'manual'),
+                title: String(opts.title || ''),
+                rowsTotal: payload.stats.totalRows
             }
         });
         tap = new TapStream();
@@ -203,6 +212,9 @@ async function createBackup(opts) {
     }
 
     fs.renameSync(tmpPath, filePath);
+    // Спутник пишется ПОСЛЕ переименования: файл-спутник без копии бессмысленен, а
+    // копия без спутника — работоспособна (см. catalog.js, спутник необязателен).
+    catalog.writeSidecar(filePath, { sha256: result.sha256, size: result.size });
     log.info(`[backup] Создан ${fileName} (${result.totalRows} строк, ${Math.round(result.size / 1024)} КБ)`);
     return result;
 }
@@ -221,7 +233,7 @@ async function createBackup(opts) {
  *
  * Отсюда же ограничения, которые НЕ обсуждаются:
  *   · только ручной запуск (расписание такого не делает никогда);
- *   · в журнал `backup_files` не попадает — записи без файла там не нужны;
+ *   · в каталоге не появляется — файла на сервере нет вовсе;
  *   · внешнему хранилищу не отдаётся.
  *
  * Цена: выгрузка идёт в главном процессе, а не в воркере (решение 0.0.2 про изоляцию
@@ -299,16 +311,15 @@ async function createPlainStream(opts) {
  * Раздельный подсчёт принципиален: ручную копию делают ровно перед рискованной
  * операцией, и она не должна вылететь из-за трёх ночных запусков.
  *
- * ПОДТВЕРЖДЁННОСТЬ (`acked`) — необязательное УСЛОВИЕ УДАЛЕНИЯ, а не третья группа.
- * При `pruneOnlyAcked` копия, которую внешнее хранилище ещё не забрало, из списка на
- * удаление исключается: сервер хранит последние копии, а долгий архив ведёт хранилище,
- * и удалять то, что до него не доехало, — значит терять поколение молча. Защита не
- * бессрочна: молчащее хранилище иначе забьёт диск, поэтому через `keepUnackedMaxDays`
- * копия прореживается на общих основаниях. Лимиты при этом НЕ пересчитываются —
- * защищённые копии просто не удаляются, и их накопление видно в панели состояния.
+ * ПОДТВЕРЖДЁННОСТИ ЗДЕСЬ БОЛЬШЕ НЕТ. Прежде копия, которую хранилище ещё не забрало,
+ * могла исключаться из удаления (`pruneOnlyAcked`). Решение владельца 11.08.2026 сняло
+ * это вместе с самим понятием подтверждения: сервер — перевалочный буфер, он намеренно
+ * не следит за тем, что уехало, а каталог всё равно уничтожается развёртыванием.
+ * Обещание беречь неподтверждённое было невыполнимым, и держать его в коде значило бы
+ * успокаивать администратора несуществующей гарантией.
  *
- * @param {Array<Object>} files — записи `backup_files` (нужны `triggeredBy`, `createdAt`, `UID`)
- * @param {Object} limits — `{ keepScheduled, keepManual, pruneOnlyAcked, keepUnackedMaxDays }`
+ * @param {Array<Object>} files — копии (нужны `triggeredBy` и дата)
+ * @param {Object} limits — `{ keepScheduled, keepManual }`
  * @returns {Array<Object>} что удалять
  */
 /**
@@ -340,19 +351,17 @@ function selectForPruning(files, limits) {
         const sorted = groups[g].slice().sort((a, b) => copyDate(b) - copyDate(a));
         doomed.push(...sorted.slice(keep[g]));
     }
-    if (!limits || !limits.pruneOnlyAcked) return doomed;
 
-    const graceMs = Math.max(0, Number(limits.keepUnackedMaxDays) || 0) * 24 * 60 * 60 * 1000;
-    return doomed.filter((f) => {
-        if (f.acked) return true;
-        const age = Date.now() - copyDate(f);
-        if (age > graceMs) {
-            log.warn(`[backup] Копия ${f.fileName} не подтверждена хранилищем, но старше `
-                + `${limits.keepUnackedMaxDays} дн. — прореживается`);
-            return true;
-        }
-        return false;
-    });
+    // Защиты «не прореживать неподтверждённые» здесь больше НЕТ, и это следствие решения
+    // владельца 11.08.2026: сервер — перевалочный буфер, а не хранилище, и он намеренно
+    // не отслеживает, какой файл уехал. Настройка, обещавшая беречь неподтверждённые
+    // копии, обещала невыполнимое: каталог всё равно уничтожается развёртыванием. Раз
+    // защищать нечего, честнее не делать вид, что защищаем.
+    //
+    // Цена решения названа прямо: прореживание может удалить копию, которую хранилище не
+    // успело забрать. Отсюда требование к лимитам — брать их с запасом на простой
+    // хранилища, и к самому хранилищу — опрашивать сервер минутами, а не часами.
+    return doomed;
 }
 
 // ── Защита файла, с которым сейчас работают ─────────────────────────────────────
@@ -410,175 +419,32 @@ function deleteFile(storageDir, fileName) {
     return true;
 }
 
-// ── Сверка журнала копий с каталогом хранения ────────────────────────────────────
+// ── Сверки журнала с каталогом БОЛЬШЕ НЕТ ───────────────────────────────────────
 //
-// Таблица `backup_files` едет ВНУТРИ дампа как обычные данные. Значит после полного
-// восстановления она описывает каталог ЧУЖОГО момента: часть перечисленных файлов на
-// этом диске уже удалена ретеншном, а реально лежащие копии — в том числе safety-копия,
-// снятая прямо перед восстановлением, — в журнале отсутствуют.
+// `reconcileJournal()` и `backfillChecksums()` удалены вместе с таблицей `backup_files`
+// (решение владельца 11.08.2026). Обе существовали ровно ради одного: сводить два
+// источника истины, которые неизбежно расходились, — каталог на диске и записи в базе.
+// Источник теперь один, каталог (`catalog.js`), поэтому сводить нечего: файла нет —
+// его нет и в списке; файл появился — он в списке. Контрольная сумма считается при
+// создании копии и кладётся в спутник, поэтому досчитывать её задним числом тоже не
+// требуется.
 //
-// Последствия обе стороны имеют скверные: пользователь видит ссылки в никуда, а
-// невидимая копия НИКОГДА не будет прорежена и останется на диске навсегда. Причём
-// невидимой оказывается самая ценная копия на сервере — та, что страхует только что
-// выполненную операцию.
-//
-// Поэтому сверка делает две вещи: помечает пропавшее и УСЫНОВЛЯЕТ найденное.
-//
-// `SYSTEM_SESSION_ID` здесь законен: это собственная служебная таблица механизма, а
-// сверка идёт при старте и после восстановления, когда пользовательской сессии нет.
+// Вопрос «отработала ли ночная выгрузка и с каким результатом» отвечает
+// `scheduler_runs`: он в базе, деплой переживает и от каталога не зависит.
 
-const SYSTEM_SESSION_ID = '__SYS_INTERNAL__';
 
-async function reconcileJournal() {
-    const dbGateway = require('../dbGateway');
-    const settings = settingsStore.read();
-    const dir = settingsStore.ensureStorage(settings);
-
-    const onDisk = new Set(
-        fs.readdirSync(dir).filter(f => f.toLowerCase().endsWith(FILE_EXT))
-    );
-
-    const rows = await dbGateway.execute({
-        operation: 'read', table: 'backup_files', where: {}, options: { raw: true },
-        context: { sessionID: SYSTEM_SESSION_ID }
-    }) || [];
-
-    const known = new Set();
-    let marked = 0, unmarked = 0, adopted = 0;
-
-    for (const rec of rows) {
-        known.add(rec.fileName);
-        const exists = onDisk.has(rec.fileName);
-        if (exists === !rec.missing) continue;                 // пометка и так верна
-        await dbGateway.execute({
-            operation: 'update', table: 'backup_files',
-            where: { UID: rec.UID }, data: { missing: !exists },
-            context: { sessionID: SYSTEM_SESSION_ID }
-        });
-        if (exists) unmarked++; else marked++;
-    }
-
-    for (const fileName of onDisk) {
-        if (known.has(fileName)) continue;
-        // Заголовок копии лежит открытым текстом — приватный ключ не нужен.
-        let header = null;
-        try { header = require('./restore').readHeader(path.join(dir, fileName)); }
-        catch (e) { log.warn(`[backup] ${fileName} не опознан как копия: ${e.message}`); continue; }
-
-        const st = fs.statSync(path.join(dir, fileName));
-        const scope = header.scope || { type: 'full' };
-        await dbGateway.execute({
-            operation: 'create', table: 'backup_files',
-            data: {
-                organizationId: '',
-                fileName,
-                sizeBytes: st.size,
-                // ДАТА КОПИИ — из её заголовка, а не момент усыновления. Иначе все
-                // найденные файлы получают одну и ту же дату (секунду сверки), и любая
-                // политика поколений — и здешний ретеншн, и «дед-отец-сын» во внешнем
-                // хранилище — видит пачку копий одного мгновения вместо истории за
-                // неделю. Поймано живым прогоном: пять копий за 07–10 августа приехали
-                // с одинаковой датой.
-                date: header.createdAt ? new Date(header.createdAt) : new Date(st.mtimeMs),
-                // Контрольная сумма считается ОТДЕЛЬНО и после (`backfillChecksums`):
-                // файл может весить гигабайты, а сверка идёт на старте сервера. Пустое
-                // значение здесь — временное состояние, а не окончательное: внешнему
-                // хранилищу сумма нужна, чтобы проверить целостность скачанного.
-                sha256: '',
-                keyFingerprint: header.keyFingerprint || '',
-                configHash: header.configHash || '',
-                dbVersion: Number(header.dbVersion) || 0,
-                // Повод в заголовке не хранится. Считаем копию РУЧНОЙ: у ручных лимит
-                // меньше, поэтому усыновлённые файлы не копятся, и ручная копия никогда
-                // не вытесняется плановыми — то есть ошибка в эту сторону безопасна.
-                triggeredBy: 'manual',
-                scopeType: scope.type || 'full',
-                scopeOrganizationId: scope.organizationId || '',
-                scopeOrganizationName: scope.organizationName || '',
-                rowsTotal: 0,
-                verifyStatus: 'none',
-                acked: false,
-                missing: false
-            },
-            context: { sessionID: SYSTEM_SESSION_ID }
-        });
-        adopted++;
-    }
-
-    if (marked || unmarked || adopted) {
-        log.info(`[backup] Журнал копий сверен с каталогом: помечено отсутствующими ${marked}, `
-            + `восстановлено в наличии ${unmarked}, добавлено найденных ${adopted}`);
-        try { require('../../apps/uniForm/server.js').notifyTableChange('backup_files', 'update', null); }
-        catch (e) { /* оповещение не важнее сверки */ }
-    }
-
-    // Досчёт сумм — БЕЗ ожидания: сверка журнала идёт на старте сервера, и держать
-    // старт на хэшировании гигабайтов нельзя. Ошибку глотаем в лог: не посчитанная
-    // сумма хуже посчитанной, но не настолько, чтобы ронять запуск.
-    backfillChecksums().catch(e => log.error(`[backup] Досчёт контрольных сумм: ${e.message}`));
-
-    return { marked, unmarked, adopted };
-}
-
-/**
- * Досчитать SHA-256 у копий, попавших в журнал без неё (усыновлённые файлы).
- *
- * Зачем вообще. Сумма считается по ШИФРОТЕКСТУ и нужна внешнему хранилищу, чтобы
- * проверить скачанное, не имея приватного ключа. Пустая сумма в ответе `list` (§5)
- * оставляет хранилище перед выбором «поверить молча» или «отказаться забирать» — оба
- * плохи, поэтому сумма обязана появиться, пусть и не мгновенно.
- *
- * Строго по одному файлу за раз: это фоновая работа рядом с работающим сервером, и
- * параллельное хэширование нескольких гигабайтных файлов отняло бы диск у пользователей.
- */
-async function backfillChecksums() {
-    const dbGateway = require('../dbGateway');
-    const dir = settingsStore.storagePath();
-
-    const rows = await dbGateway.execute({
-        operation: 'read', table: 'backup_files', where: {}, options: { raw: true },
-        context: { sessionID: SYSTEM_SESSION_ID }
-    }) || [];
-
-    let done = 0;
-    for (const rec of rows) {
-        if (rec.sha256 || rec.missing) continue;
-        const full = path.join(dir, rec.fileName);
-        if (!fs.existsSync(full)) continue;
-
-        let sha;
-        try {
-            sha = await new Promise((resolve, reject) => {
-                const h = crypto.createHash('sha256');
-                const s = fs.createReadStream(full);
-                s.on('data', c => h.update(c));
-                s.on('end', () => resolve(h.digest('hex')));
-                s.on('error', reject);
-            });
-        } catch (e) {
-            log.warn(`[backup] Сумма для ${rec.fileName} не посчитана: ${e.message}`);
-            continue;
-        }
-
-        await dbGateway.execute({
-            operation: 'update', table: 'backup_files',
-            where: { UID: rec.UID }, data: { sha256: sha },
-            context: { sessionID: SYSTEM_SESSION_ID }
-        });
-        done++;
-    }
-
-    if (done) {
-        log.info(`[backup] Досчитаны контрольные суммы: ${done}`);
-        try { require('../../apps/uniForm/server.js').notifyTableChange('backup_files', 'update', null); }
-        catch (e) { /* оповещение не важнее результата */ }
-    }
-    return { done };
-}
+// Стратегии системных данных регистрируются ЗДЕСЬ, при сборке модуля резервного
+// копирования, а не внутри `systemData`: тот обязан оставаться механизмом, не знающим,
+// какие типы бывают. Так добавление типа — это строка справочника, метка на моделях и
+// регистрация рядом с остальными, а не правка кода восстановления.
+const systemData = require('./systemData');
+systemData.registerStrategy('users_and_roles', require('./systemDataUsers').mergeUsers);
+// Остальным типам («настройки копирования», «регламентные задания») отдельная
+// стратегия не нужна: у них побеждает текущее целиком, а это и есть умолчание.
 
 module.exports = {
     createBackup, createPlainStream, checkPreconditions, selectForPruning, deleteFile, buildFileName,
-    markInUse, isInUse, reconcileJournal, backfillChecksums,
+    markInUse, isInUse, systemData, catalog,
     settings: settingsStore, keys, container, dialect, dump, FILE_EXT,
     // Вход внешнего хранилища по подписи (ТЗ §5). Отдельный модуль, а не часть `keys`:
     // это другая пара ключей с другим сроком жизни и другим местом хранения.

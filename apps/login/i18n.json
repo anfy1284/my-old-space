@@ -178,5 +178,11 @@
         "ru": "Пользователь уже существует",
         "de": "Benutzer existiert bereits",
         "pl": "Użytkownik już istnieje"
+    },
+    "Account is disabled": {
+        "en": "Account is disabled. Contact your administrator.",
+        "ru": "Учётная запись отключена. Обратитесь к администратору.",
+        "de": "Das Konto ist deaktiviert. Wenden Sie sich an Ihren Administrator.",
+        "pl": "Konto jest wyłączone. Skontaktuj się z administratorem."
     }
 }

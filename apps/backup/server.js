@@ -34,7 +34,7 @@ function deny(res) {
  * Сессия внешнего API для собственного журнала копий.
  *
  * За внешним хранилищем НЕ СТОИТ пользователь: это машина, забирающая файлы, и
- * служебную сессию (§33) ей выдать не от чьего имени. `backup_files` — служебная
+ * служебную сессию (§33) ей выдать не от чьего имени. Каталог копий — служебные
  * таблица самого механизма копирования, и это ровно тот случай, для которого
  * `__SYS_INTERNAL__` и предназначен. Права предъявителя проверены подписью выше;
  * доступ здесь не «расширяется», а обходится RLS, которому нечего фильтровать —
@@ -81,6 +81,13 @@ const API_BODY_MAX = 64 * 1024;
  */
 async function requireApiClient(req, res, body) {
     const apiAuth = backup.apiAuth;
+
+    // Реестр хранилищ живёт в кэше настроек, а кэш наполняется из базы. Проверка
+    // подписи синхронна и ждать не умеет, поэтому прогреваем ЗДЕСЬ — иначе запрос,
+    // пришедший раньше прогрева, получил бы «ключ неизвестен» при исправном ключе, и
+    // хранилище ушло бы разбираться с часами и отпечатками вместо ожидания.
+    await backup.settings.ensureLoaded();
+
     const v = apiAuth.verify(req, body);
     if (v.ok) return v.client;
 
@@ -178,7 +185,12 @@ function parseRange(header, size) {
 }
 
 /**
- * `GET /api/apps/backup/download/:uid`
+ * `GET /api/apps/backup/download/:fileName`
+ *
+ * Идентификатор — ИМЯ ФАЙЛА (MOSBAK2): таблицы журнала больше нет, каталог и есть
+ * источник истины. Имя приходит снаружи и превращается в путь, поэтому проходит
+ * проверку белым списком в `catalog.safeName` — без неё подписанный запрос читал бы
+ * произвольный файл с диска сервера.
  *
  * Два предъявителя: администратор из интерфейса (сессия + роль) и внешнее хранилище
  * (подпись). Проверка — ЗДЕСЬ, а не скрытием кнопки в форме: адрес угадывается, а файл
@@ -191,7 +203,7 @@ function parseRange(header, size) {
  * (это SHA-256 шифротекста, он же в списке) — клиент обязан сверить его перед
  * продолжением, иначе склеит куски разных копий.
  */
-async function handleDownload(req, res, uid) {
+async function handleDownload(req, res, fileNameArg) {
     const apiAuth = backup.apiAuth;
     const viaApi = apiAuth.hasSignature(req);
 
@@ -202,37 +214,16 @@ async function handleDownload(req, res, uid) {
     } else {
         who = await resolveAdmin(req);
         if (!who) {
-            audit(`DENY download uid=${uid} ip=${clientIp(req)}`);
+            audit(`DENY download file=${fileNameArg} ip=${clientIp(req)}`);
             return deny(res);
         }
     }
-    const context = { sessionID: viaApi ? SYSTEM_SESSION_ID : who.sessionID };
 
-    let rows;
-    try {
-        rows = await dbGateway.execute({
-            operation: 'read', table: 'backup_files',
-            where: { UID: uid }, options: { raw: true }, context
-        });
-    } catch (e) {
-        log.error(`[backup] download: ${e.message}`);
-        return deny(res);
-    }
-    const rec = rows && rows[0];
+    const rec = backup.catalog.find(fileNameArg);
+    // Одинаковый отказ на «имя не прошло проверку» и «такой копии нет»: различать их
+    // значит подтверждать существование файлов тому, кто их перебирает.
     if (!rec) return deny(res);
-
-    const filePath = path.join(backup.settings.storagePath(), rec.fileName);
-    if (!fs.existsSync(filePath)) {
-        // Запись есть, файла нет — обычное дело после восстановления чужого дампа
-        // (список копий едет внутри него). Помечаем, а не отдаём битую ссылку.
-        try {
-            await dbGateway.execute({
-                operation: 'update', table: 'backup_files',
-                where: { UID: uid }, data: { missing: true }, context
-            });
-        } catch (e) { /* пометка не важнее ответа */ }
-        return deny(res);
-    }
+    const filePath = rec.filePath;
 
     const stat = fs.statSync(filePath);
     // Внешнему хранилищу — техническое имя файла: по нему копия опознаётся без
@@ -248,7 +239,7 @@ async function handleDownload(req, res, uid) {
     }
 
     const who_ = viaApi ? `client=${client.fingerprint.slice(7, 19)}` : `user=${who.user.UID}`;
-    audit(`DOWNLOAD uid=${uid} file=${rec.fileName} as="${downloadName}" `
+    audit(`DOWNLOAD file=${rec.fileName} as="${downloadName}" `
         + `scope=${rec.scopeType}${rec.scopeOrganizationId ? ':' + rec.scopeOrganizationId : ''} `
         + `${who_} ip=${clientIp(req)} size=${stat.size}${range ? ` range=${range.start}-${range.end}` : ''}`);
     log.info(`[backup] Скачивание ${rec.fileName} (${viaApi ? 'внешнее хранилище' : who.user.UID})`);
@@ -308,124 +299,107 @@ async function handleApiPing(req, res) {
 /**
  * `GET /api/apps/backup/list`
  *
+ * Список строится ЧТЕНИЕМ КАТАЛОГА (MOSBAK2): таблицы журнала больше нет, и записей о
+ * файлах, которых не существует, теперь не бывает по построению — прежняя оговорка про
+ * `missing` исчезла вместе с причиной.
+ *
  * Что отдаётся и почему именно это:
+ *   · `fileName` — ИДЕНТИФИКАТОР копии: им же адресуются `download` и `delete`;
  *   · `sha256` — по ШИФРОТЕКСТУ: хранилище обязано проверить целостность, не имея
- *     приватного ключа, то есть не расшифровывая;
- *   · `scope` — потому что копия одной организации не является поколением архива, и
- *     прореживать по ней нельзя (ТЗ §3.7). Различать их обязано хранилище, а для этого
- *     ему нужно поле, а не догадки по имени файла;
+ *     приватного ключа, то есть не расшифровывая. Берётся из спутника; пустой означает
+ *     «сумма недоступна», и хранилищу решать, забирать ли такую копию;
+ *   · `scope` — копия одной организации не является поколением архива, и прореживать
+ *     по ней нельзя (ТЗ §3.7). Различать обязано хранилище, а для этого нужно поле, а
+ *     не догадки по имени файла;
  *   · `keyFingerprint` — каким из своих приватных ключей эту копию потом расшифровывать;
  *   · `dbVersion`/`configHash` — по ним видно, что структура базы менялась.
- *
- * Записи о ФАЙЛАХ, КОТОРЫХ НЕТ (`missing`), не отдаются: после восстановления чужого
- * дампа журнал приезжает внутри него и описывает чужой сервер. Отдать такую запись
- * значит послать хранилище за файлом, которого никогда не было.
  */
 async function handleApiList(req, res) {
     const client = await requireApiClient(req, res, null);
     if (!client) return;
 
-    let rows;
-    try {
-        rows = await dbGateway.execute({
-            operation: 'read', table: 'backup_files',
-            where: {}, options: { raw: true }, context: { sessionID: SYSTEM_SESSION_ID }
-        }) || [];
-    } catch (e) {
-        log.error(`[backup/api] list: ${e.message}`);
-        return sendJSON(res, 500, { ok: false, error: 'internal' });
-    }
-
-    // `deletedAt` проверяется через `isEmptyDate`, а НЕ на истинность: пустая дата в
-    // этом проекте — не NULL, а `0001-01-01`, и объект `Date` истинен всегда. Обычная
-    // проверка `!r.deletedAt` объявила бы удалёнными вообще все копии, и список ушёл
-    // бы пустым (поймано живым прогоном).
-    const { isEmptyDate } = require('../../drive_root/db/emptyValues');
-    // Момент снятия копии — реквизит `date`, а не `createdAt` строки журнала: у
-    // найденной на диске копии строка появляется в момент сверки, и по `createdAt`
-    // хранилище увидело бы неделю копий одной секундой (см. `copyDate` в ядре).
-    const when = r => new Date(r.date || r.createdAt || 0);
-    const files = rows
-        .filter(r => !r.missing && isEmptyDate(r.deletedAt))
-        .sort((a, b) => when(b) - when(a))
-        .map(r => ({
-            uid: r.UID,
-            fileName: r.fileName,
-            createdAt: when(r).toISOString(),
-            size: Number(r.sizeBytes) || 0,
-            sha256: r.sha256 || '',
-            dbVersion: Number(r.dbVersion) || 0,
-            configHash: r.configHash || '',
-            keyFingerprint: r.keyFingerprint || '',
-            scope: r.scopeType === 'organization'
-                ? { type: 'organization', organizationId: r.scopeOrganizationId || '', organizationName: r.scopeOrganizationName || '' }
-                : { type: 'full' },
-            triggeredBy: r.triggeredBy || '',
-            rows: Number(r.rowsTotal) || 0,
-            acked: !!r.acked
-        }));
+    const files = backup.catalog.list().map(r => ({
+        fileName: r.fileName,
+        createdAt: r.createdAt.toISOString(),
+        size: r.size,
+        sha256: r.sha256,
+        dbVersion: r.dbVersion,
+        configHash: r.configHash,
+        keyFingerprint: r.keyFingerprint,
+        scope: r.scopeType === 'organization'
+            ? { type: 'organization', organizationId: r.scopeOrganizationId, organizationName: r.scopeOrganizationName }
+            : { type: 'full' },
+        triggeredBy: r.triggeredBy,
+        title: r.title,
+        rows: r.rowsTotal
+    }));
 
     audit(`API_LIST client=${client.fingerprint.slice(7, 19)} ip=${backup.apiAuth.clientIp(req)} files=${files.length}`);
     sendJSON(res, 200, { ok: true, serverTime: new Date().toISOString(), files });
 }
 
 /**
- * `POST /api/apps/backup/ack/:uid`  — тело: `{}` либо `{"sha256":"<хэш шифротекста>"}`
+ * `POST /api/apps/backup/delete/:fileName` — тело: `{}` либо `{"sha256":"<хэш>"}`
  *
- * Подтверждение — это не «прочитал сообщение», а «копия у меня И она цела». Поэтому
- * хранилищу разрешено (и рекомендуется) прислать посчитанный им хэш: не совпал —
- * подтверждения нет, копия помечается `verifyStatus=failed`, и это видно в форме.
- * Молча принять `ack` на битый файл значит разрешить ретеншну удалить исправную копию,
- * поверив, что она сохранена.
+ * ЗАМЕНИЛ `ack`. Прежде хранилище подтверждало приём, а сервер это запоминал и берёг
+ * неподтверждённые копии от прореживания. Решение владельца 11.08.2026 сняло всю эту
+ * конструкцию: сервер — перевалочный буфер, он намеренно не следит, что уехало, и
+ * помнить подтверждения ему негде и незачем. Осталось одно осмысленное действие —
+ * «файл у меня и он цел, можешь удалять».
  *
- * Тело входит в подпись (её хэш — часть подписываемой строки), поэтому подменить хэш
+ * Проверка суммы СОХРАНЕНА и стала важнее, чем была: раньше ошибочный `ack` лишь
+ * разрешал ретеншну удалить копию когда-нибудь, теперь запрос удаляет её немедленно.
+ * Прислал сумму — она обязана совпасть; не прислал — удаляем по слову хранилища, и
+ * ответственность за это на нём.
+ *
+ * Тело входит в подпись (её хэш — часть подписываемой строки), поэтому подменить сумму
  * по дороге нельзя.
  */
-async function handleApiAck(req, res, uid) {
-    let body;
-    try {
-        body = await readBody(req, API_BODY_MAX);
-    } catch (e) {
-        return sendJSON(res, 413, { ok: false, error: 'body_too_large' });
-    }
-
+async function handleApiDelete(req, res, fileNameArg) {
+    const body = await readBody(req);
     const client = await requireApiClient(req, res, body);
     if (!client) return;
 
-    let payload = {};
-    if (body && body.length) {
-        try { payload = JSON.parse(body.toString('utf8')) || {}; }
-        catch (e) { return sendJSON(res, 400, { ok: false, error: 'bad_json' }); }
+    const rec = backup.catalog.find(fileNameArg);
+    if (!rec) return sendJSON(res, 404, { ok: false, error: 'not_found' });
+
+    let claimed = '';
+    try { claimed = String((JSON.parse(body.toString('utf8') || '{}') || {}).sha256 || '').toLowerCase(); }
+    catch (e) { return sendJSON(res, 400, { ok: false, error: 'bad_body' }); }
+
+    // Сумма могла быть не посчитана (копия снята до появления спутников). Это НЕ повод
+    // пропустить проверку: раньше пустая сумма означала «удаляем не проверяя», то есть
+    // ровно там, где проверка нужнее всего, её и не было. Считаем сейчас — операция
+    // редкая, файл один, а результат кладётся в спутник и больше не пересчитывается.
+    let actual = rec.sha256;
+    if (claimed && !actual) {
+        try { actual = await backup.catalog.computeSha256(rec.fileName); }
+        catch (e) { log.error(`[backup/api] Сумма ${rec.fileName} не посчитана: ${e.message}`); }
+        if (!actual) {
+            audit(`API_DELETE_REFUSED file=${rec.fileName} reason=checksum_unavailable `
+                + `client=${client.fingerprint.slice(7, 19)} ip=${backup.apiAuth.clientIp(req)}`);
+            return sendJSON(res, 409, { ok: false, error: 'checksum_unavailable' });
+        }
     }
 
-    const context = { sessionID: SYSTEM_SESSION_ID };
-    const rows = await dbGateway.execute({
-        operation: 'read', table: 'backup_files',
-        where: { UID: uid }, options: { raw: true }, context
-    });
-    const rec = rows && rows[0];
-    if (!rec || rec.missing) return sendJSON(res, 404, { ok: false, error: 'not_found' });
-
-    const claimed = String(payload.sha256 || '').trim().toLowerCase();
-    if (claimed && rec.sha256 && claimed !== String(rec.sha256).toLowerCase()) {
-        await dbGateway.execute({
-            operation: 'update', table: 'backup_files',
-            where: { UID: uid }, data: { verifyStatus: 'failed' }, context
-        });
-        audit(`API_ACK_MISMATCH uid=${uid} file=${rec.fileName} client=${client.fingerprint.slice(7, 19)} `
-            + `expected=${rec.sha256} got=${claimed}`);
-        log.error(`[backup/api] Хранилище получило ПОВРЕЖДЁННУЮ копию ${rec.fileName}`);
-        return sendJSON(res, 409, { ok: false, error: 'checksum_mismatch', expected: rec.sha256 });
+    if (claimed && actual && claimed !== actual) {
+        audit(`API_DELETE_REFUSED file=${rec.fileName} client=${client.fingerprint.slice(7, 19)} `
+            + `ip=${backup.apiAuth.clientIp(req)} claimed=${claimed.slice(0, 16)} actual=${actual.slice(0, 16)}`);
+        return sendJSON(res, 409, { ok: false, error: 'checksum_mismatch', expected: actual });
     }
 
-    const data = { acked: true, ackedAt: new Date() };
-    if (claimed) data.verifyStatus = 'ok';
-    await dbGateway.execute({ operation: 'update', table: 'backup_files', where: { UID: uid }, data, context });
-    try { require('../uniForm/server.js').notifyTableChange('backup_files', 'update', uid); } catch (e) {}
+    // Файл, из которого идёт восстановление, не удаляется ни по чьей команде: операция
+    // читает его прямо сейчас (см. markInUse). Это отказ, а не ошибка хранилища —
+    // пусть попробует позже.
+    if (rec.inUse) {
+        return sendJSON(res, 409, { ok: false, error: 'in_use' });
+    }
 
-    audit(`API_ACK uid=${uid} file=${rec.fileName} client=${client.fingerprint.slice(7, 19)} `
+    backup.catalog.remove(rec.fileName);
+    audit(`API_DELETE file=${rec.fileName} client=${client.fingerprint.slice(7, 19)} `
         + `ip=${backup.apiAuth.clientIp(req)} verified=${claimed ? 'yes' : 'no'}`);
-    sendJSON(res, 200, { ok: true, verified: !!claimed });
+    log.info(`[backup/api] Копия ${rec.fileName} удалена по команде хранилища`);
+    sendJSON(res, 200, { ok: true });
 }
 
 /**
@@ -570,7 +544,7 @@ async function handleUpload(req, res) {
  * класса риска — но на сервере такой файл лежать не должен, и он там не появляется:
  * байты идут из снимка сразу в ответ (см. `backup.createPlainStream`).
  *
- * В журнал `backup_files` запись НЕ добавляется: файла на сервере нет, а запись без
+ * В каталоге копия НЕ появляется: файла на сервере нет вовсе, а запись без
  * файла — это ссылка в никуда. Факт создания пишется в аудит-лог.
  */
 async function handleDownloadPlain(req, res) {
@@ -655,7 +629,10 @@ async function handleDirectRequest(req, res, pathParts) {
         // Внешнее хранилище (ТЗ §5) — вход по подписи, проверяется внутри обработчиков.
         if (req.method === 'GET' && action === 'ping') return await handleApiPing(req, res);
         if (req.method === 'GET' && action === 'list') return await handleApiList(req, res);
-        if (req.method === 'POST' && action === 'ack' && arg) return await handleApiAck(req, res, arg);
+        // `ack` заменён на `delete` (MOSBAK2): приложение намеренно не отслеживает,
+        // что уехало в хранилище, поэтому подтверждать ему нечего — хранилищу нужна
+        // одна команда «файл у меня, он цел, можешь удалять».
+        if (req.method === 'POST' && action === 'delete' && arg) return await handleApiDelete(req, res, arg);
     } catch (e) {
         log.error(`[backup] Ошибка роута ${action}: ${e && e.stack || e}`);
         if (!res.headersSent) { res.writeHead(500, { 'Content-Type': 'text/plain' }); res.end('Internal Server Error'); }

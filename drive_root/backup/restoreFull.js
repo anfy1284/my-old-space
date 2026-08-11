@@ -155,6 +155,40 @@ async function runPhases(opts) {
     try {
         await buildAndLoad({ sequelize, filePath, privateKeyPem, passphrase, schema: shadowSchema, info, result, report });
 
+        // ── 6а. СИСТЕМНЫЕ ДАННЫЕ ────────────────────────────────────────────────
+        //
+        // Ровно здесь, и это единственное возможное место: теневая схема уже
+        // заполнена копией, а живая ещё существует. Раньше — заглядывать некуда,
+        // позже — живой схемы уже нет.
+        //
+        // Без этого шага восстановление возвращало бы вместе с данными и настройки
+        // инсталляции: отозванный доступ, удалённые регламентные задания, прежний
+        // ключ шифрования, — причём молча, потому что операция считается успешной.
+        // Метки типов берутся из ТЕКУЩИХ определений моделей, а не из снимка внутри
+        // копии. Снимок описывает структуру на момент выгрузки и меток может не иметь
+        // вовсе — копия старше самого механизма. Вопрос «что считать системными
+        // данными» решает работающий код, а не архив.
+        report('systemData', 'Применение правил системных данных');
+        let currentModels = [];
+        try {
+            currentModels = require('../globalServerContext').collectMergedModelDefs().models || [];
+        } catch (e) {
+            log.warn(`[restoreFull] Текущие определения моделей недоступны (${e.message}), `
+                + 'системные данные размечаются по снимку из копии');
+            currentModels = result.models || [];
+        }
+        const sysRes = await require('./systemData').applyAll({
+            sequelize,
+            shadow: shadowSchema,
+            models: currentModels,
+            restoreFromCopy: opts.restoreSystemData || {},
+            report: (text) => report('systemData', text)
+        });
+        result.systemData = sysRes;
+        if (sysRes.fromCopy.length) {
+            report('systemData', `ИЗ КОПИИ восстановлены типы: ${sysRes.fromCopy.join(', ')}`);
+        }
+
         // ── 7. АТОМАРНОЕ ПЕРЕКЛЮЧЕНИЕ ───────────────────────────────────────────
         report('switch', 'Переключение на восстановленную базу');
         const sw = await dialect.switchToShadow(sequelize, { shadow: shadowSchema });
@@ -483,6 +517,17 @@ async function runDestructive(p) {
     const { models: dumpModels } = await readModelsSection(filePath, privateKeyPem, passphrase);
     const q = dialect.quoter(sequelize);
 
+    const systemData = require('./systemData');
+    let currentModels = [];
+    try { currentModels = require('../globalServerContext').collectMergedModelDefs().models || []; }
+    catch (e) { currentModels = dumpModels; }
+
+    // Снимок системных данных снимается ДО удаления таблиц: на этом пути живая схема
+    // не сохраняется рядом, а перезаписывается на месте, и после удаления читать
+    // «текущее» было бы неоткуда.
+    report('destructive', 'Снимок системных данных');
+    const snapshotSchema = await systemData.snapshotForDestructive(sequelize, currentModels);
+
     // Удаляем ТОЛЬКО известные таблицы, и в обратном порядке ссылок. Объекты вне
     // моделей (вьюхи, чужие таблицы) не наши — трогать их мы не вправе, о них
     // предупреждает выгрузка (§0).
@@ -494,6 +539,22 @@ async function runDestructive(p) {
     }
 
     await buildAndLoad({ sequelize, filePath, privateKeyPem, passphrase, schema: null, info, result, report });
+
+    if (snapshotSchema) {
+        report('systemData', 'Применение правил системных данных');
+        try {
+            result.systemData = await systemData.applyAll({
+                sequelize,
+                shadow: null,                       // мы уже в живой схеме
+                live: snapshotSchema,               // «текущее» лежит в снимке
+                models: currentModels,
+                restoreFromCopy: p.restoreSystemData || {},
+                report: (text) => report('systemData', text)
+            });
+        } finally {
+            await systemData.dropSnapshot(sequelize, snapshotSchema);
+        }
+    }
 
     // Переключаться некуда: мы уже в живой схеме. Отката нет — только safety-выгрузка.
     result.switched = true;

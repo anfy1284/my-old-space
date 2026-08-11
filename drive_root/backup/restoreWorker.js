@@ -46,6 +46,7 @@ process.on('message', async (msg) => {
     try {
         const result = await restoreFull.runPhases({
             sequelize, filePath, privateKeyPem, passphrase,
+            restoreSystemData: (msg && msg.restoreSystemData) || {},
             report: (phase, text, progress) => send({ type: 'progress', phase, text, progress })
         });
         send({ type: 'done', result });

@@ -79,6 +79,24 @@
                     "type": "BOOLEAN",
                     "allowNull": false,
                     "defaultValue": false
+                },
+                "disabled": {
+                    "type": "BOOLEAN",
+                    "allowNull": false,
+                    "defaultValue": false,
+                    "caption": {
+                        "i18n": "user_disabled_field"
+                    }
+                }
+            },
+            "entityConfig": {
+                "systemData": "users_and_roles",
+                "hooks": {
+                    "beforeUpdate": [
+                        {
+                            "handler": "default.userDisabled"
+                        }
+                    ]
                 }
             },
             "options": {
@@ -155,6 +173,9 @@
             },
             "options": {
                 "timestamps": true
+            },
+            "entityConfig": {
+                "systemData": "users_and_roles"
             }
         },
         {
@@ -257,6 +278,9 @@
                         ]
                     }
                 ]
+            },
+            "entityConfig": {
+                "systemData": "users_and_roles"
             }
         },
         {
@@ -300,6 +324,9 @@
                         ]
                     }
                 ]
+            },
+            "entityConfig": {
+                "systemData": "users_and_roles"
             }
         },
         {
@@ -343,6 +370,9 @@
                         ]
                     }
                 ]
+            },
+            "entityConfig": {
+                "systemData": "users_and_roles"
             }
         },
         {
@@ -386,6 +416,9 @@
                         ]
                     }
                 ]
+            },
+            "entityConfig": {
+                "systemData": "users_and_roles"
             }
         },
         {
@@ -497,7 +530,8 @@
             "name": "SchedulerTasks",
             "tableName": "scheduler_tasks",
             "entityConfig": {
-                "entityType": "directory"
+                "entityType": "directory",
+                "systemData": "scheduler"
             },
             "fields": {
                 "caption": {
@@ -761,13 +795,17 @@
             },
             "options": {
                 "timestamps": false
+            },
+            "entityConfig": {
+                "systemData": "scheduler"
             }
         },
         {
             "name": "SchedulerRuns",
             "tableName": "scheduler_runs",
             "entityConfig": {
-                "entityType": "document"
+                "entityType": "document",
+                "systemData": "scheduler"
             },
             "fields": {
                 "taskId": {
@@ -944,214 +982,6 @@
             }
         },
         {
-            "name": "BackupFiles",
-            "tableName": "backup_files",
-            "entityConfig": {
-                "entityType": "document",
-                "presentation": "fileName"
-            },
-            "fields": {
-                "organizationId": {
-                    "type": "STRING",
-                    "allowNull": true,
-                    "caption": {
-                        "i18n": "backup_organization_field"
-                    }
-                },
-                "title": {
-                    "type": "STRING",
-                    "allowNull": true,
-                    "caption": {
-                        "i18n": "backup_title_field"
-                    }
-                },
-                "fileName": {
-                    "type": "STRING",
-                    "allowNull": false,
-                    "caption": {
-                        "i18n": "backup_file_name_field"
-                    }
-                },
-                "sizeBytes": {
-                    "type": "BIGINT",
-                    "allowNull": false,
-                    "defaultValue": 0,
-                    "caption": {
-                        "i18n": "backup_size_field"
-                    }
-                },
-                "sha256": {
-                    "type": "STRING",
-                    "allowNull": false,
-                    "defaultValue": "",
-                    "caption": {
-                        "i18n": "backup_sha256_field"
-                    }
-                },
-                "keyFingerprint": {
-                    "type": "STRING",
-                    "allowNull": false,
-                    "defaultValue": "",
-                    "caption": {
-                        "i18n": "backup_key_fingerprint_field"
-                    }
-                },
-                "configHash": {
-                    "type": "STRING",
-                    "allowNull": false,
-                    "defaultValue": "",
-                    "caption": {
-                        "i18n": "backup_config_hash_field"
-                    }
-                },
-                "dbVersion": {
-                    "type": "INTEGER",
-                    "allowNull": false,
-                    "defaultValue": 0,
-                    "caption": {
-                        "i18n": "backup_db_version_field"
-                    }
-                },
-                "triggeredBy": {
-                    "type": "STRING",
-                    "allowNull": false,
-                    "defaultValue": "schedule",
-                    "caption": {
-                        "i18n": "backup_triggered_by_field"
-                    },
-                    "inputType": "emunList",
-                    "options": [
-                        {
-                            "value": "schedule",
-                            "caption": {
-                                "i18n": "sched_trigger_schedule"
-                            }
-                        },
-                        {
-                            "value": "manual",
-                            "caption": {
-                                "i18n": "sched_trigger_manual"
-                            }
-                        }
-                    ]
-                },
-                "scopeType": {
-                    "type": "STRING",
-                    "allowNull": false,
-                    "defaultValue": "full",
-                    "caption": {
-                        "i18n": "backup_scope_field"
-                    },
-                    "inputType": "emunList",
-                    "options": [
-                        {
-                            "value": "full",
-                            "caption": {
-                                "i18n": "backup_scope_full"
-                            }
-                        },
-                        {
-                            "value": "organization",
-                            "caption": {
-                                "i18n": "backup_scope_organization"
-                            }
-                        }
-                    ]
-                },
-                "scopeOrganizationId": {
-                    "type": "STRING",
-                    "allowNull": true,
-                    "caption": {
-                        "i18n": "backup_scope_org_field"
-                    }
-                },
-                "scopeOrganizationName": {
-                    "type": "STRING",
-                    "allowNull": true,
-                    "caption": {
-                        "i18n": "backup_scope_org_name_field"
-                    }
-                },
-                "rowsTotal": {
-                    "type": "INTEGER",
-                    "allowNull": false,
-                    "defaultValue": 0,
-                    "caption": {
-                        "i18n": "backup_rows_field"
-                    }
-                },
-                "verifyStatus": {
-                    "type": "STRING",
-                    "allowNull": false,
-                    "defaultValue": "none",
-                    "caption": {
-                        "i18n": "backup_verify_field"
-                    },
-                    "inputType": "emunList",
-                    "options": [
-                        {
-                            "value": "none",
-                            "caption": {
-                                "i18n": "backup_verify_none"
-                            }
-                        },
-                        {
-                            "value": "ok",
-                            "caption": {
-                                "i18n": "backup_verify_ok"
-                            }
-                        },
-                        {
-                            "value": "failed",
-                            "caption": {
-                                "i18n": "backup_verify_failed"
-                            }
-                        }
-                    ]
-                },
-                "acked": {
-                    "type": "BOOLEAN",
-                    "allowNull": false,
-                    "defaultValue": false,
-                    "caption": {
-                        "i18n": "backup_acked_field"
-                    }
-                },
-                "ackedAt": {
-                    "type": "DATE",
-                    "allowNull": true,
-                    "caption": {
-                        "i18n": "backup_acked_at_field"
-                    }
-                },
-                "missing": {
-                    "type": "BOOLEAN",
-                    "allowNull": false,
-                    "defaultValue": false,
-                    "caption": {
-                        "i18n": "backup_missing_field"
-                    }
-                },
-                "deletedAt": {
-                    "type": "DATE",
-                    "allowNull": true,
-                    "caption": {
-                        "i18n": "backup_deleted_at_field"
-                    }
-                },
-                "tablesText": {
-                    "type": "TEXT",
-                    "allowNull": true,
-                    "caption": {
-                        "i18n": "backup_tables_field"
-                    }
-                }
-            },
-            "options": {
-                "timestamps": true
-            }
-        },
-        {
             "name": "DbVersions",
             "tableName": "db_versions",
             "entityConfig": {
@@ -1235,6 +1065,162 @@
                     "caption": {
                         "i18n": "dbver_snapshot_field"
                     }
+                }
+            },
+            "options": {
+                "timestamps": true
+            }
+        },
+        {
+            "name": "SystemDataTypes",
+            "tableName": "system_data_types",
+            "entityConfig": {
+                "entityType": "directory"
+            },
+            "fields": {
+                "organizationId": {
+                    "type": "STRING",
+                    "allowNull": true
+                },
+                "code": {
+                    "type": "STRING",
+                    "allowNull": false,
+                    "unique": true,
+                    "caption": {
+                        "i18n": "sysdata_code_field"
+                    }
+                },
+                "name": {
+                    "type": "STRING",
+                    "allowNull": false,
+                    "translatable": true,
+                    "caption": {
+                        "i18n": "sysdata_name_field"
+                    }
+                },
+                "description": {
+                    "type": "TEXT",
+                    "allowNull": true,
+                    "translatable": true,
+                    "caption": {
+                        "i18n": "sysdata_description_field"
+                    }
+                },
+                "displayOrder": {
+                    "type": "INTEGER",
+                    "allowNull": false,
+                    "defaultValue": 100,
+                    "caption": {
+                        "i18n": "sysdata_order_field"
+                    }
+                }
+            },
+            "options": {
+                "timestamps": true
+            }
+        },
+        {
+            "name": "BackupConfig",
+            "tableName": "backup_config",
+            "entityConfig": {
+                "systemData": "backup_settings"
+            },
+            "fields": {
+                "organizationId": {
+                    "type": "STRING",
+                    "allowNull": true
+                },
+                "keepScheduled": {
+                    "type": "INTEGER",
+                    "allowNull": false,
+                    "defaultValue": 7,
+                    "caption": {
+                        "i18n": "backup_keep_scheduled_field"
+                    }
+                },
+                "keepManual": {
+                    "type": "INTEGER",
+                    "allowNull": false,
+                    "defaultValue": 3,
+                    "caption": {
+                        "i18n": "backup_keep_manual_field"
+                    }
+                },
+                "publicKeyPem": {
+                    "type": "TEXT",
+                    "allowNull": true,
+                    "caption": {
+                        "i18n": "backup_public_key_field"
+                    }
+                },
+                "keyFingerprint": {
+                    "type": "STRING",
+                    "allowNull": true,
+                    "caption": {
+                        "i18n": "backup_key_fingerprint_field"
+                    }
+                }
+            },
+            "options": {
+                "timestamps": true
+            }
+        },
+        {
+            "name": "BackupApiClients",
+            "tableName": "backup_api_clients",
+            "entityConfig": {
+                "systemData": "backup_settings"
+            },
+            "fields": {
+                "organizationId": {
+                    "type": "STRING",
+                    "allowNull": true
+                },
+                "name": {
+                    "type": "STRING",
+                    "allowNull": false,
+                    "caption": {
+                        "i18n": "backup_api_client_name_col"
+                    }
+                },
+                "publicKeyPem": {
+                    "type": "TEXT",
+                    "allowNull": false,
+                    "caption": {
+                        "i18n": "backup_api_new_key_field"
+                    }
+                },
+                "fingerprint": {
+                    "type": "STRING",
+                    "allowNull": false,
+                    "unique": true,
+                    "caption": {
+                        "i18n": "backup_api_client_fp_col"
+                    }
+                },
+                "algorithm": {
+                    "type": "STRING",
+                    "allowNull": false,
+                    "defaultValue": "ed25519"
+                },
+                "disabled": {
+                    "type": "BOOLEAN",
+                    "allowNull": false,
+                    "defaultValue": false,
+                    "caption": {
+                        "i18n": "backup_api_client_state_col"
+                    }
+                },
+                "lastSeenAt": {
+                    "type": "DATE",
+                    "allowNull": true,
+                    "caption": {
+                        "i18n": "backup_api_client_seen_col"
+                    }
+                },
+                "lastSeenIp": {
+                    "type": "STRING",
+                    "allowNull": true
                 }
             },
             "options": {

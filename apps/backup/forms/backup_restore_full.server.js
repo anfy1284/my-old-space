@@ -38,12 +38,79 @@ module.exports = function (modelsDB, Utilities) {
     const mergedModels = () => require('../../../drive_root/globalServerContext').collectMergedModelDefs().models;
 
     /**
+     * Строки таблицы «системные данные»: что администратор может взять из копии.
+     *
+     * Показываются ТОЛЬКО типы, под которыми в этой сборке есть хоть одна таблица.
+     * Тип без таблиц — это галочка, которая ничего не делает; такие в интерфейсе хуже,
+     * чем отсутствие строки, потому что обещают выбор и не дают его.
+     *
+     * Названия берутся из справочника через слой перевода данных, а не из `i18n.json`:
+     * это справочник, владелец может править его сам, и вторая копия названий в файле
+     * переводов однажды разойдётся с первой.
+     */
+    async function systemDataRows(sessionID) {
+        const byType = backup.systemData.tablesByType(mergedModels());
+        if (!byType.size) return [];
+
+        const rows = await dbGateway.execute({
+            operation: 'read', table: 'system_data_types',
+            where: {}, options: { raw: true }, context: { sessionID }
+        }) || [];
+        rows.sort((a, b) => (Number(a.displayOrder) || 0) - (Number(b.displayOrder) || 0));
+
+        const out = [];
+        for (const r of rows) {
+            const tables = byType.get(r.code);
+            if (!tables || !tables.length) continue;
+            out.push({
+                code: r.code,
+                typeName: r.name || r.code,
+                tablesText: tables.join(', '),
+                fromCopy: false                     // умолчание: оставить текущее
+            });
+        }
+        return out;
+    }
+
+    /**
+     * Разобрать отметки формы в `{ code: true }`.
+     *
+     * Читается ТОЛЬКО из строк таблицы формы, а не из произвольного объекта с клиента:
+     * иначе можно было бы прислать код типа, которого в этой сборке нет, и получить
+     * молчаливое несоответствие между тем, что показали, и тем, что применили.
+     */
+    function parseSystemDataChoice(params) {
+        const rows = (params && params.systemData) || [];
+        const choice = {};
+        for (const r of Array.isArray(rows) ? rows : []) {
+            if (r && r.code && r.fromCopy === true) choice[String(r.code)] = true;
+        }
+        return choice;
+    }
+
+    /**
+     * Копии, которые ещё лежат на сервере.
+     *
+     * Список показывается всегда, в том числе пустым: сервер — перевалочный буфер, и
+     * «здесь ничего нет» это ОТВЕТ, ради которого не надо никуда идти. Спрятанный при
+     * пустоте список оставил бы вопрос «а где посмотреть».
+     */
+    function serverFileRows() {
+        return backup.catalog.list().map(f => ({
+            fileName: f.fileName,
+            date: f.createdAt,
+            scopeType: f.scopeType,
+            sizeBytes: f.size
+        }));
+    }
+
+    /**
      * Разрешить источник в путь к файлу.
      *
-     * Путь с клиента не принимаем НИКОГДА: либо UID записи журнала копий, либо имя
-     * файла, только что загруженного через наш же роут (оно порождено сервером и лежит
-     * в известном каталоге). Иначе форма превращается в чтение произвольного файла с
-     * диска сервера.
+     * Путь с клиента не принимаем НИКОГДА: либо имя копии из каталога (проверяется
+     * белым списком в `catalog.safeName`), либо имя файла, только что загруженного
+     * через наш же роут (оно порождено сервером и лежит в отдельном каталоге). Иначе
+     * форма превращается в чтение произвольного файла с диска сервера.
      */
     async function resolveSource(params, ctx) {
         const uploadName = String((params && params.uploadName) || '').trim();
@@ -54,17 +121,13 @@ module.exports = function (modelsDB, Utilities) {
             return fs.existsSync(p) ? { filePath: p, fileName: uploadName, temporary: true } : null;
         }
 
-        const fileUID = String((params && params.fileUID) || '').trim();
-        if (!fileUID) return null;
-        const rows = await dbGateway.execute({
-            operation: 'read', table: 'backup_files',
-            where: { UID: fileUID }, options: { raw: true },
-            context: { sessionID: ctx.sessionID }
-        });
-        const rec = rows && rows[0];
+        // Копия из каталога адресуется ИМЕНЕМ ФАЙЛА: журнала с UID больше нет. Имя
+        // приходит с клиента, поэтому проходит ту же проверку белым списком, что и во
+        // внешнем API (`catalog.safeName`) — иначе форма превратилась бы в чтение
+        // произвольного файла с диска сервера.
+        const rec = backup.catalog.find((params && params.fileName) || '');
         if (!rec) return null;
-        const p = path.join(backup.settings.storagePath(), rec.fileName);
-        return fs.existsSync(p) ? { filePath: p, fileName: rec.fileName, temporary: false, rec } : null;
+        return { filePath: rec.filePath, fileName: rec.fileName, temporary: false, rec };
     }
 
 
@@ -244,13 +307,20 @@ module.exports = function (modelsDB, Utilities) {
 
         /** Открытие формы: состояние инсталляции до всякого выбора файла. */
         async onLoadData(params, ctx) {
+            // Каталог копий разрешается через настройки — прогреваем их до чтения.
+            await backup.settings.ensureLoaded();
             const p = (params && params.params) || {};
             let shadow = { ok: false, mode: 'unknown', reason: '' };
             try { shadow = await backup.dialect.canCreateShadowSpace(sequelize()); } catch (e) { shadow.reason = e.message; }
 
             return {
                 data: {
-                    fileUID: p.fileUID || '',
+                    fileName: p.fileName || '',
+                    serverFiles: serverFileRows(),
+                    // Имя файла ключа заполняет клиент после выбора файла; сам ключ на
+                    // сервер не уходит. Пустое начальное значение — чтобы контрол не
+                    // отдавал undefined до первого выбора.
+                    keyState: '',
                     uploadName: '',
                     fileInfo: await tForSession('restore_full_hint_pick_file', ctx.sessionID),
                     modeInfo: shadow.ok
@@ -263,6 +333,7 @@ module.exports = function (modelsDB, Utilities) {
                     privateKeyPem: '',
                     restoreScope: 'full',
                     organizationId: '',
+                    systemData: await systemDataRows(ctx.sessionID),
                     reportText: await tForSession('restore_full_hint_inspect_first', ctx.sessionID),
                     runState: await tForSession('restore_full_not_ready', ctx.sessionID)
                         + ' ' + await tForSession('restore_full_need_inspect', ctx.sessionID)
@@ -539,7 +610,12 @@ module.exports = function (modelsDB, Utilities) {
                     filePath: src.filePath,
                     privateKeyPem,
                     sessionID: ctx.sessionID,
-                    userId: ctx.user && ctx.user.UID
+                    userId: ctx.user && ctx.user.UID,
+                    // Отмеченные типы берутся ИЗ КОПИИ как есть; неотмеченные проходят
+                    // через свои стратегии и остаются текущими. Умолчание — ничего не
+                    // отмечено: восстановление данных не должно попутно менять то, кто
+                    // имеет доступ и как настроена эта машина.
+                    restoreSystemData: parseSystemDataChoice(params)
                 });
             } catch (e) {
                 log.error(`[restoreFull] ${e.stack || e.message}`);

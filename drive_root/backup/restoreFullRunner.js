@@ -110,7 +110,7 @@ async function makeSafetyDump(sessionID) {
  * Запустить дочерний процесс и дождаться его.
  * @returns {Promise<{ok: boolean, result?: Object, error?: Object}>}
  */
-function runWorker({ filePath, privateKeyPem, passphrase, onProgress }) {
+function runWorker({ filePath, privateKeyPem, passphrase, restoreSystemData, onProgress }) {
     return new Promise((resolve) => {
         const workerPath = path.join(__dirname, 'restoreWorker.js');
         const child = fork(workerPath, [], {
@@ -131,7 +131,7 @@ function runWorker({ filePath, privateKeyPem, passphrase, onProgress }) {
             if (!m) return;
             if (m.type === 'ready') {
                 // Ключ уходит ТОЛЬКО по IPC и только после готовности процесса.
-                child.send({ type: 'run', filePath, privateKeyPem, passphrase });
+                child.send({ type: 'run', filePath, privateKeyPem, passphrase, restoreSystemData });
                 return;
             }
             if (m.type === 'progress') { onProgress(m); return; }
@@ -246,6 +246,9 @@ async function execute(opts) {
         filePath: opts.filePath,
         privateKeyPem: opts.privateKeyPem,
         passphrase: opts.passphrase,
+        // Выбор администратора по типам системных данных. Пусто — применяются
+        // стратегии, то есть настройки инсталляции остаются текущими.
+        restoreSystemData: opts.restoreSystemData || {},
         // Обработчик прогресса ОБЯЗАН быть неломающимся. Он вызывается из обработчика
         // IPC-сообщения, где исключение становится необработанным и роняет СЕРВЕР
         // посреди восстановления. Поймано живым прогоном: отказ записи файла состояния
@@ -387,8 +390,9 @@ async function afterDatabaseReady({ reason, migrate, origin } = {}) {
         // перечисленных файлов уже удалена ретеншном, а реально лежащие — включая
         // safety-копию этой самой операции — в нём отсутствуют. Сверяем сразу:
         // показывать ссылки в никуда и терять из виду единственную свежую копию нельзя.
-        try { await require('./index').reconcileJournal(); }
-        catch (e) { log.warn(`[restoreFull] Журнал копий не сверен: ${e.message}`); }
+        // Сверки журнала с каталогом здесь больше нет: журнал удалён, источник
+        // истины — каталог, и после переключения схем он описывает ровно то, что
+        // лежит на диске. Сводить нечего.
 
         // Журнал ПЛАНИРОВЩИКА приезжает так же — и это хуже, чем кажется. В дампе
         // запечатлён момент, когда safety-выгрузка ещё выполнялась, поэтому после
@@ -522,6 +526,9 @@ async function retry(opts) {
         filePath: opts.filePath,
         privateKeyPem: opts.privateKeyPem,
         passphrase: opts.passphrase,
+        // Выбор администратора по типам системных данных. Пусто — применяются
+        // стратегии, то есть настройки инсталляции остаются текущими.
+        restoreSystemData: opts.restoreSystemData || {},
         onProgress: (m) => {
             try {
                 maintenance.update({ phase: m.phase });
@@ -578,7 +585,7 @@ async function retry(opts) {
 }
 
 /**
- * Копии, ПРИГОДНЫЕ для повтора, — читаются С ДИСКА, а не из журнала `backup_files`.
+ * Копии, ПРИГОДНЫЕ для повтора, — читаются С ДИСКА: источник истины один, это каталог.
  *
  * Журнал живёт в базе, а база в этот момент как раз и есть предмет аварии: она может
  * быть подменена наполовину, содержать список файлов чужого момента или не открываться

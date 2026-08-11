@@ -7,16 +7,6 @@
         ],
         "extraButtons": [
             {
-                "name": "btnPickFile",
-                "caption": {
-                    "i18n": "restore_full_upload_btn"
-                },
-                "icon": "/apps/general_icons/resources/public/16x16/open.png",
-                "events": {
-                    "onClick": "pickFile"
-                }
-            },
-            {
                 "name": "btnInspect",
                 "caption": {
                     "i18n": "restore_full_inspect_btn"
@@ -63,31 +53,139 @@
         "caption": {
             "i18n": "restore_full_source_group"
         },
-        "alignFields": true,
+        "alignFields": false,
         "layout": [
             {
-                "type": "recordSelector",
-                "name": "fileUID",
-                "data": "fileUID",
+                "type": "label",
+                "name": "sourceHint",
                 "caption": {
-                    "i18n": "restore_full_file_field"
-                },
-                "properties": {
-                    "selection": {
-                        "table": "backup_files",
-                        "idField": "UID",
-                        "displayField": "fileName"
-                    }
+                    "i18n": "restore_full_source_hint"
                 }
             },
             {
-                "type": "textbox",
-                "name": "uploadName",
-                "data": "uploadName",
-                "readOnly": true,
+                "type": "group",
+                "name": "grpUploadRow",
+                "noBorder": true,
+                "horizontal": true,
+                "layout": [
+                    {
+                        "type": "button",
+                        "name": "btnPickFileMain",
+                        "caption": {
+                            "i18n": "restore_full_upload_btn"
+                        },
+                        "icon": "/apps/general_icons/resources/public/16x16/open.png",
+                        "events": {
+                            "onClick": "pickFile"
+                        }
+                    },
+                    {
+                        "type": "textbox",
+                        "name": "uploadName",
+                        "data": "uploadName",
+                        "readOnly": true,
+                        "caption": {
+                            "i18n": "restore_full_uploaded_field"
+                        },
+                        "properties": {
+                            "width": 420
+                        }
+                    }
+                ]
+            },
+            {
+                "type": "label",
+                "name": "serverFilesHint",
                 "caption": {
-                    "i18n": "restore_full_uploaded_field"
+                    "i18n": "restore_full_server_files_hint"
                 }
+            },
+            {
+                "type": "table",
+                "name": "serverFilesTable",
+                "data": "serverFiles",
+                "columns": [
+                    {
+                        "caption": {
+                            "i18n": "backup_col_date"
+                        },
+                        "data": "date",
+                        "width": 150,
+                        "inputType": "datetime",
+                        "readOnly": true
+                    },
+                    {
+                        "caption": {
+                            "i18n": "backup_col_file"
+                        },
+                        "data": "fileName",
+                        "width": 330,
+                        "inputType": "textbox",
+                        "readOnly": true
+                    },
+                    {
+                        "caption": {
+                            "i18n": "backup_col_scope"
+                        },
+                        "data": "scopeType",
+                        "width": 110,
+                        "inputType": "textbox",
+                        "readOnly": true
+                    },
+                    {
+                        "caption": {
+                            "i18n": "backup_col_size"
+                        },
+                        "data": "sizeBytes",
+                        "autoWidth": true,
+                        "inputType": "number",
+                        "readOnly": true
+                    }
+                ],
+                "events": {
+                    "onRowActivate": "serverFilePicked"
+                },
+                "properties": {
+                    "readOnly": true,
+                    "visibleRows": 5,
+                    "hiddenButtons": [
+                        "recordAdd",
+                        "recordDelete",
+                        "recordOpen",
+                        "listSettings"
+                    ]
+                }
+            },
+            {
+                "type": "group",
+                "name": "grpChosenRow",
+                "noBorder": true,
+                "horizontal": true,
+                "layout": [
+                    {
+                        "type": "textbox",
+                        "name": "fileName",
+                        "data": "fileName",
+                        "readOnly": true,
+                        "caption": {
+                            "i18n": "restore_full_file_field"
+                        },
+                        "properties": {
+                            "width": 420
+                        }
+                    },
+                    {
+                        "type": "button",
+                        "name": "btnClearSource",
+                        "caption": {
+                            "i18n": "restore_full_clear_source_btn"
+                        },
+                        "icon": "/apps/general_icons/resources/public/16x16/cancel.png",
+                        "events": {
+                            "onClick": "clearSource"
+                        }
+                    }
+                ]
             },
             {
                 "type": "textbox",
@@ -147,6 +245,66 @@
                         "idField": "UID",
                         "displayField": "name"
                     }
+                }
+            }
+        ]
+    },
+    {
+        "type": "group",
+        "name": "grpSystemData",
+        "vertical": true,
+        "caption": {
+            "i18n": "restore_full_sysdata_group"
+        },
+        "layout": [
+            {
+                "type": "label",
+                "name": "sysDataHint",
+                "caption": {
+                    "i18n": "restore_full_sysdata_hint"
+                }
+            },
+            {
+                "type": "table",
+                "name": "systemDataTable",
+                "data": "systemData",
+                "columns": [
+                    {
+                        "caption": {
+                            "i18n": "restore_full_sysdata_type_col"
+                        },
+                        "data": "typeName",
+                        "width": 280,
+                        "inputType": "textbox",
+                        "readOnly": true
+                    },
+                    {
+                        "caption": {
+                            "i18n": "restore_full_sysdata_fromcopy_col"
+                        },
+                        "data": "fromCopy",
+                        "width": 170,
+                        "inputType": "checkbox"
+                    },
+                    {
+                        "caption": {
+                            "i18n": "restore_full_sysdata_tables_col"
+                        },
+                        "data": "tablesText",
+                        "autoWidth": true,
+                        "inputType": "textbox",
+                        "readOnly": true
+                    }
+                ],
+                "properties": {
+                    "visibleRows": 4,
+                    "saveOnEdit": false,
+                    "hiddenButtons": [
+                        "recordAdd",
+                        "recordDelete",
+                        "recordOpen",
+                        "listSettings"
+                    ]
                 }
             }
         ]

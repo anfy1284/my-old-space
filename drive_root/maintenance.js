@@ -42,17 +42,19 @@ const FLUSH_MS = 500;
 let _state = null;
 let _lastFlush = 0;
 
-function projectRoot() {
-    if (process.env.PROJECT_ROOT) return process.env.PROJECT_ROOT;
-    try {
-        const r = require('./globalServerContext').getProjectRoot();
-        if (r) return r;
-    } catch (e) { /* контекст может быть ещё не поднят */ }
-    return process.cwd();
-}
+// Флаг и журнал обслуживания лежат в каталоге состояния (`stateDir`), а не в корне
+// проекта. По умолчанию это одно и то же место; расходятся они там, где каталог
+// проекта пересоздаётся при развёртывании. Прерванное восстановление обязано
+// пережить деплой: снимать режим обслуживания должен администратор, разобравшись,
+// а не сборка образа — молча и мимо него.
+const stateDir = require('./stateDir');
 
 function filePath() {
-    return path.join(projectRoot(), FILE_NAME);
+    return path.join(stateDir.dir(), FILE_NAME);
+}
+
+function auditPath() {
+    return path.join(stateDir.dir(), 'maintenance.log');
 }
 
 /** Активен ли режим обслуживания. Синхронно и дёшево — зовётся на каждый запрос. */
@@ -99,6 +101,7 @@ function read() {
  * исключение из него роняло СЕРВЕР посреди операции. Поймано живым прогоном.
  */
 function _write(state) {
+    stateDir.ensure();
     const p = filePath();
     const tmp = `${p}.tmp-${process.pid}`;
     fs.writeFileSync(tmp, JSON.stringify(state, null, 2), 'utf8');
@@ -234,8 +237,8 @@ function clear(opts = {}) {
  */
 function audit(line) {
     try {
-        fs.appendFileSync(path.join(projectRoot(), 'maintenance.log'),
-            `${new Date().toISOString()} ${line}\n`, 'utf8');
+        stateDir.ensure();
+        fs.appendFileSync(auditPath(), `${new Date().toISOString()} ${line}\n`, 'utf8');
     } catch (e) {
         log.error(`[maintenance] Аудит не записан: ${e.message}`);
     }
@@ -244,7 +247,7 @@ function audit(line) {
 /** Последние строки аудит-лога — для страницы обслуживания. */
 function tailAudit(lines = 50) {
     try {
-        const p = path.join(projectRoot(), 'maintenance.log');
+        const p = auditPath();
         if (!fs.existsSync(p)) return [];
         const all = fs.readFileSync(p, 'utf8').split('\n').filter(Boolean);
         return all.slice(-lines);

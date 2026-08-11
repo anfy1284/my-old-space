@@ -51,10 +51,7 @@
                     "onClick": "downloadSelected"
                 },
                 "enabledWhen": {
-                    "currentRow": "backupFilesTable",
-                    "where": {
-                        "missing": false
-                    }
+                    "currentRow": "backupFilesTable"
                 }
             },
             {
@@ -67,10 +64,7 @@
                     "onClick": "restoreOrganization"
                 },
                 "enabledWhen": {
-                    "currentRow": "backupFilesTable",
-                    "where": {
-                        "missing": false
-                    }
+                    "currentRow": "backupFilesTable"
                 }
             },
             {
@@ -95,418 +89,504 @@
                 "events": {
                     "onClick": "openSchedule"
                 }
-            }
-        ]
-    },
-    {
-        "type": "group",
-        "name": "grpStatus",
-        "caption": {
-            "i18n": "backup_status_group"
-        },
-        "layout": [
+            },
             {
-                "type": "textarea",
-                "name": "statusText",
-                "caption": "",
-                "readOnly": true,
-                "properties": {
-                    "rows": 5
+                "name": "btnRefreshFiles",
+                "caption": {
+                    "i18n": "backup_refresh_btn"
                 },
-                "data": "statusText"
-            }
-        ]
-    },
-    {
-        "type": "group",
-        "name": "grpRun",
-        "caption": {
-            "i18n": "backup_run_group"
-        },
-        "layout": [
-            {
-                "type": "runLog",
-                "name": "runLog",
-                "caption": "",
-                "properties": {
-                    "handler": "backup.create",
-                    "rows": 7
+                "icon": "/apps/general_icons/resources/public/16x16/refresh.png",
+                "events": {
+                    "onClick": "refreshFiles"
                 }
             }
         ]
     },
     {
-        "type": "group",
-        "name": "grpStorage",
-        "caption": {
-            "i18n": "backup_storage_group"
-        },
-        "alignFields": true,
-        "layout": [
+        "type": "tabs",
+        "name": "backupTabs",
+        "fillHeight": true,
+        "tabs": [
             {
-                "type": "textbox",
-                "name": "storageDir",
                 "caption": {
-                    "i18n": "backup_storage_dir_field"
+                    "i18n": "backup_tab_work"
                 },
-                "data": "storageDir"
-            },
-            {
-                "type": "integer",
-                "name": "keepScheduled",
-                "caption": {
-                    "i18n": "backup_keep_scheduled_field"
-                },
-                "properties": {
-                    "width": 90
-                },
-                "data": "keepScheduled"
-            },
-            {
-                "type": "integer",
-                "name": "keepManual",
-                "caption": {
-                    "i18n": "backup_keep_manual_field"
-                },
-                "properties": {
-                    "width": 90
-                },
-                "data": "keepManual"
-            }
-        ]
-    },
-    {
-        "type": "group",
-        "name": "grpKey",
-        "caption": {
-            "i18n": "backup_key_group"
-        },
-        "layout": [
-            {
-                "type": "textarea",
-                "name": "publicKeyPem",
-                "caption": {
-                    "i18n": "backup_public_key_field"
-                },
-                "properties": {
-                    "rows": 6
-                },
-                "data": "publicKeyPem"
-            },
-            {
-                "type": "group",
-                "name": "grpKeyRow",
-                "noBorder": true,
-                "horizontal": true,
                 "layout": [
                     {
-                        "type": "textbox",
-                        "name": "keyFingerprint",
+                        "type": "group",
+                        "name": "grpStatus",
                         "caption": {
-                            "i18n": "backup_key_fingerprint_field"
+                            "i18n": "backup_status_group"
                         },
-                        "readOnly": true,
-                        "data": "keyFingerprint"
+                        "layout": [
+                            {
+                                "type": "textarea",
+                                "name": "statusText",
+                                "caption": "",
+                                "readOnly": true,
+                                "properties": {
+                                    "rows": 5
+                                },
+                                "data": "statusText"
+                            }
+                        ]
                     },
                     {
-                        "type": "button",
-                        "name": "btnGenerateKeys",
+                        "type": "group",
+                        "name": "grpRun",
                         "caption": {
-                            "i18n": "backup_generate_keys_btn"
+                            "i18n": "backup_run_group"
                         },
-                        "icon": "/apps/general_icons/resources/public/16x16/key.png",
-                        "events": {
-                            "onClick": "generateKeys"
-                        }
-                    }
-                ]
-            }
-        ]
-    },
-    {
-        "type": "group",
-        "name": "grpApi",
-        "caption": {
-            "i18n": "backup_api_group"
-        },
-        "layout": [
-            {
-                "type": "label",
-                "name": "apiHint",
-                "caption": {
-                    "i18n": "backup_api_hint"
-                }
-            },
-            {
-                "type": "table",
-                "name": "apiClientsTable",
-                "data": "apiClients",
-                "columns": [
-                    {
-                        "caption": {
-                            "i18n": "backup_api_client_name_col"
-                        },
-                        "data": "name",
-                        "width": 200,
-                        "inputType": "textbox"
+                        "layout": [
+                            {
+                                "type": "runLog",
+                                "name": "runLog",
+                                "caption": "",
+                                "properties": {
+                                    "handler": "backup.create",
+                                    "rows": 7
+                                }
+                            }
+                        ]
                     },
                     {
+                        "type": "group",
+                        "name": "grpFiles",
                         "caption": {
-                            "i18n": "backup_api_client_state_col"
+                            "i18n": "backup_files_group"
                         },
-                        "data": "stateText",
-                        "width": 110,
-                        "inputType": "textbox"
-                    },
-                    {
-                        "caption": {
-                            "i18n": "backup_api_client_seen_col"
-                        },
-                        "data": "lastSeenText",
-                        "width": 190,
-                        "inputType": "textbox"
-                    },
-                    {
-                        "caption": {
-                            "i18n": "backup_api_client_fp_col"
-                        },
-                        "data": "fingerprint",
-                        "autoWidth": true,
-                        "inputType": "textbox"
-                    }
-                ],
-                "properties": {
-                    "readOnly": true,
-                    "visibleRows": 4,
-                    "hiddenButtons": [
-                        "recordAdd",
-                        "recordDelete",
-                        "recordOpen",
-                        "listSettings"
-                    ]
-                }
-            },
-            {
-                "type": "textarea",
-                "name": "apiClientKeyPem",
-                "caption": {
-                    "i18n": "backup_api_new_key_field"
-                },
-                "properties": {
-                    "rows": 4
-                },
-                "data": "apiClientKeyPem"
-            },
-            {
-                "type": "group",
-                "name": "grpApiRow",
-                "noBorder": true,
-                "horizontal": true,
-                "layout": [
-                    {
-                        "type": "textbox",
-                        "name": "apiClientName",
-                        "caption": {
-                            "i18n": "backup_api_new_name_field"
-                        },
-                        "data": "apiClientName"
-                    },
-                    {
-                        "type": "button",
-                        "name": "btnApiAdd",
-                        "caption": {
-                            "i18n": "backup_api_add_btn"
-                        },
-                        "icon": "/apps/general_icons/resources/public/16x16/add.png",
-                        "events": {
-                            "onClick": "addApiClient"
-                        }
-                    },
-                    {
-                        "type": "button",
-                        "name": "btnApiToggle",
-                        "caption": {
-                            "i18n": "backup_api_toggle_btn"
-                        },
-                        "icon": "/apps/general_icons/resources/public/16x16/cancel.png",
-                        "events": {
-                            "onClick": "toggleApiClient"
-                        }
-                    },
-                    {
-                        "type": "button",
-                        "name": "btnApiRemove",
-                        "caption": {
-                            "i18n": "backup_api_remove_btn"
-                        },
-                        "icon": "/apps/general_icons/resources/public/16x16/delete.png",
-                        "events": {
-                            "onClick": "removeApiClient"
-                        }
+                        "layout": [
+                            {
+                                "type": "table",
+                                "name": "backupFilesTable",
+                                "data": "backupFiles",
+                                "columns": [
+                                    {
+                                        "caption": {
+                                            "i18n": "backup_col_date"
+                                        },
+                                        "data": "date",
+                                        "width": 150,
+                                        "inputType": "datetime",
+                                        "readOnly": true
+                                    },
+                                    {
+                                        "caption": {
+                                            "i18n": "backup_col_file"
+                                        },
+                                        "data": "fileName",
+                                        "width": 330,
+                                        "inputType": "textbox",
+                                        "readOnly": true
+                                    },
+                                    {
+                                        "caption": {
+                                            "i18n": "backup_col_scope"
+                                        },
+                                        "data": "scopeType",
+                                        "width": 110,
+                                        "inputType": "textbox",
+                                        "readOnly": true
+                                    },
+                                    {
+                                        "caption": {
+                                            "i18n": "backup_col_org"
+                                        },
+                                        "data": "scopeOrganizationName",
+                                        "width": 170,
+                                        "inputType": "textbox",
+                                        "readOnly": true
+                                    },
+                                    {
+                                        "caption": {
+                                            "i18n": "backup_col_trigger"
+                                        },
+                                        "data": "triggeredBy",
+                                        "width": 110,
+                                        "inputType": "textbox",
+                                        "readOnly": true
+                                    },
+                                    {
+                                        "caption": {
+                                            "i18n": "backup_col_rows"
+                                        },
+                                        "data": "rowsTotal",
+                                        "width": 100,
+                                        "inputType": "number",
+                                        "readOnly": true
+                                    },
+                                    {
+                                        "caption": {
+                                            "i18n": "backup_col_size"
+                                        },
+                                        "data": "sizeBytes",
+                                        "width": 120,
+                                        "inputType": "number",
+                                        "readOnly": true
+                                    },
+                                    {
+                                        "caption": {
+                                            "i18n": "backup_col_sha"
+                                        },
+                                        "data": "sha256",
+                                        "autoWidth": true,
+                                        "inputType": "textbox",
+                                        "readOnly": true
+                                    }
+                                ],
+                                "properties": {
+                                    "readOnly": true,
+                                    "visibleRows": 10,
+                                    "hiddenButtons": [
+                                        "recordAdd",
+                                        "recordDelete",
+                                        "recordOpen",
+                                        "listSettings"
+                                    ]
+                                }
+                            }
+                        ],
+                        "vertical": true
                     }
                 ]
             },
             {
-                "type": "checkbox",
-                "name": "pruneOnlyAcked",
                 "caption": {
-                    "i18n": "backup_api_prune_acked_field"
+                    "i18n": "backup_tab_settings"
                 },
-                "data": "pruneOnlyAcked"
-            },
-            {
-                "type": "integer",
-                "name": "keepUnackedMaxDays",
-                "caption": {
-                    "i18n": "backup_api_unacked_days_field"
-                },
-                "properties": {
-                    "width": 90
-                },
-                "data": "keepUnackedMaxDays"
-            }
-        ]
-    },
-    {
-        "type": "group",
-        "name": "grpRecovery",
-        "caption": {
-            "i18n": "backup_recovery_group"
-        },
-        "layout": [
-            {
-                "type": "label",
-                "name": "recoveryHint",
-                "caption": {
-                    "i18n": "backup_recovery_hint"
-                }
-            },
-            {
-                "type": "group",
-                "name": "grpRecoveryRow",
-                "noBorder": true,
-                "horizontal": true,
                 "layout": [
                     {
-                        "type": "textbox",
-                        "name": "recoveryState",
+                        "type": "group",
+                        "name": "grpStorage",
                         "caption": {
-                            "i18n": "backup_recovery_state_field"
+                            "i18n": "backup_storage_group"
                         },
-                        "readOnly": true,
-                        "data": "recoveryState"
+                        "alignFields": true,
+                        "layout": [
+                            {
+                                "type": "textbox",
+                                "name": "storageDir",
+                                "caption": {
+                                    "i18n": "backup_storage_dir_field_ro"
+                                },
+                                "data": "storageDir",
+                                "readOnly": true
+                            },
+                            {
+                                "type": "integer",
+                                "name": "keepScheduled",
+                                "caption": {
+                                    "i18n": "backup_keep_scheduled_field"
+                                },
+                                "properties": {
+                                    "width": 90
+                                },
+                                "data": "keepScheduled"
+                            },
+                            {
+                                "type": "integer",
+                                "name": "keepManual",
+                                "caption": {
+                                    "i18n": "backup_keep_manual_field"
+                                },
+                                "properties": {
+                                    "width": 90
+                                },
+                                "data": "keepManual"
+                            }
+                        ]
                     },
                     {
-                        "type": "textbox",
-                        "name": "recoveryPassword",
+                        "type": "group",
+                        "name": "grpScope",
                         "caption": {
-                            "i18n": "backup_recovery_password_field"
+                            "i18n": "backup_scope_group"
                         },
-                        "data": "recoveryPassword"
-                    },
-                    {
-                        "type": "button",
-                        "name": "btnSetRecovery",
-                        "caption": {
-                            "i18n": "backup_recovery_set_btn"
-                        },
-                        "icon": "/apps/general_icons/resources/public/16x16/key.png",
-                        "events": {
-                            "onClick": "setRecoveryPassword"
-                        }
+                        "alignFields": true,
+                        "layout": [
+                            {
+                                "type": "recordSelector",
+                                "name": "scopeOrganizationId",
+                                "data": "scopeOrganizationId",
+                                "caption": {
+                                    "i18n": "backup_scope_org_field"
+                                },
+                                "properties": {
+                                    "selection": {
+                                        "table": "organizations",
+                                        "idField": "UID",
+                                        "displayField": "name"
+                                    }
+                                }
+                            }
+                        ]
                     }
                 ]
-            }
-        ]
-    },
-    {
-        "type": "group",
-        "name": "grpScope",
-        "caption": {
-            "i18n": "backup_scope_group"
-        },
-        "alignFields": true,
-        "layout": [
+            },
             {
-                "type": "recordSelector",
-                "name": "scopeOrganizationId",
-                "data": "scopeOrganizationId",
                 "caption": {
-                    "i18n": "backup_scope_org_field"
+                    "i18n": "backup_tab_keys"
                 },
-                "properties": {
-                    "selection": {
-                        "table": "organizations",
-                        "idField": "UID",
-                        "displayField": "name"
-                    }
-                }
-            }
-        ]
-    },
-    {
-        "type": "group",
-        "name": "grpFiles",
-        "caption": {
-            "i18n": "backup_files_group"
-        },
-        "layout": [
-            {
-                "type": "relatedList",
-                "name": "backupFilesTable",
-                "data": "related_backup_files",
-                "caption": "",
-                "properties": {
-                    "tableName": "backup_files",
-                    "appName": "uniForm",
-                    "editable": true,
-                    "columnOverrides": {
-                        "fileName": {
-                            "readOnly": true
+                "layout": [
+                    {
+                        "type": "group",
+                        "name": "grpKey",
+                        "caption": {
+                            "i18n": "backup_key_group"
                         },
-                        "date": {
-                            "readOnly": true
-                        },
-                        "scopeType": {
-                            "readOnly": true
-                        },
-                        "scopeOrganizationName": {
-                            "readOnly": true
-                        },
-                        "triggeredBy": {
-                            "readOnly": true
-                        },
-                        "rowsTotal": {
-                            "readOnly": true
-                        },
-                        "sizeBytes": {
-                            "readOnly": true
-                        },
-                        "verifyStatus": {
-                            "readOnly": true
-                        },
-                        "acked": {
-                            "readOnly": true
-                        },
-                        "missing": {
-                            "readOnly": true
-                        }
+                        "vertical": true,
+                        "layout": [
+                            {
+                                "type": "group",
+                                "name": "grpKeyRow",
+                                "noBorder": true,
+                                "horizontal": true,
+                                "layout": [
+                                    {
+                                        "type": "textbox",
+                                        "name": "keyFingerprint",
+                                        "caption": {
+                                            "i18n": "backup_key_fingerprint_field"
+                                        },
+                                        "readOnly": true,
+                                        "properties": {
+                                            "width": 560
+                                        },
+                                        "data": "keyFingerprint"
+                                    },
+                                    {
+                                        "type": "button",
+                                        "name": "btnGenerateKeys",
+                                        "caption": {
+                                            "i18n": "backup_generate_keys_btn"
+                                        },
+                                        "icon": "/apps/general_icons/resources/public/16x16/key.png",
+                                        "events": {
+                                            "onClick": "generateKeys"
+                                        }
+                                    }
+                                ]
+                            },
+                            {
+                                "type": "textarea",
+                                "name": "publicKeyPem",
+                                "caption": {
+                                    "i18n": "backup_public_key_field"
+                                },
+                                "properties": {
+                                    "rows": 6
+                                },
+                                "data": "publicKeyPem"
+                            }
+                        ]
                     },
-                    "fields": [
-                        "date",
-                        "title",
-                        "fileName",
-                        "scopeType",
-                        "scopeOrganizationName",
-                        "triggeredBy",
-                        "rowsTotal",
-                        "sizeBytes",
-                        "verifyStatus",
-                        "acked",
-                        "missing"
-                    ],
-                    "visibleRows": 10
-                }
+                    {
+                        "type": "group",
+                        "name": "grpApi",
+                        "caption": {
+                            "i18n": "backup_api_group"
+                        },
+                        "vertical": true,
+                        "layout": [
+                            {
+                                "type": "label",
+                                "name": "apiHint",
+                                "caption": {
+                                    "i18n": "backup_api_hint"
+                                }
+                            },
+                            {
+                                "type": "table",
+                                "name": "apiClientsTable",
+                                "data": "apiClients",
+                                "columns": [
+                                    {
+                                        "caption": {
+                                            "i18n": "backup_api_client_name_col"
+                                        },
+                                        "data": "name",
+                                        "width": 200,
+                                        "inputType": "textbox"
+                                    },
+                                    {
+                                        "caption": {
+                                            "i18n": "backup_api_client_state_col"
+                                        },
+                                        "data": "stateText",
+                                        "width": 110,
+                                        "inputType": "textbox"
+                                    },
+                                    {
+                                        "caption": {
+                                            "i18n": "backup_api_client_seen_col"
+                                        },
+                                        "data": "lastSeenText",
+                                        "width": 190,
+                                        "inputType": "textbox"
+                                    },
+                                    {
+                                        "caption": {
+                                            "i18n": "backup_api_client_fp_col"
+                                        },
+                                        "data": "fingerprint",
+                                        "autoWidth": true,
+                                        "inputType": "textbox"
+                                    }
+                                ],
+                                "properties": {
+                                    "readOnly": true,
+                                    "visibleRows": 4,
+                                    "hiddenButtons": [
+                                        "recordAdd",
+                                        "recordDelete",
+                                        "recordOpen",
+                                        "listSettings"
+                                    ]
+                                }
+                            },
+                            {
+                                "type": "group",
+                                "name": "grpApiSelectionRow",
+                                "noBorder": true,
+                                "horizontal": true,
+                                "layout": [
+                                    {
+                                        "type": "button",
+                                        "name": "btnApiToggle",
+                                        "caption": {
+                                            "i18n": "backup_api_toggle_btn"
+                                        },
+                                        "icon": "/apps/general_icons/resources/public/16x16/cancel.png",
+                                        "events": {
+                                            "onClick": "toggleApiClient"
+                                        },
+                                        "enabledWhen": {
+                                            "currentRow": "apiClientsTable"
+                                        }
+                                    },
+                                    {
+                                        "type": "button",
+                                        "name": "btnApiRemove",
+                                        "caption": {
+                                            "i18n": "backup_api_remove_btn"
+                                        },
+                                        "icon": "/apps/general_icons/resources/public/16x16/delete.png",
+                                        "events": {
+                                            "onClick": "removeApiClient"
+                                        },
+                                        "enabledWhen": {
+                                            "currentRow": "apiClientsTable"
+                                        }
+                                    }
+                                ]
+                            },
+                            {
+                                "type": "group",
+                                "name": "grpApiRegister",
+                                "caption": {
+                                    "i18n": "backup_api_register_group"
+                                },
+                                "vertical": true,
+                                "layout": [
+                                    {
+                                        "type": "textarea",
+                                        "name": "apiClientKeyPem",
+                                        "caption": {
+                                            "i18n": "backup_api_new_key_field"
+                                        },
+                                        "properties": {
+                                            "rows": 4
+                                        },
+                                        "data": "apiClientKeyPem"
+                                    },
+                                    {
+                                        "type": "group",
+                                        "name": "grpApiRow",
+                                        "noBorder": true,
+                                        "horizontal": true,
+                                        "layout": [
+                                            {
+                                                "type": "textbox",
+                                                "name": "apiClientName",
+                                                "caption": {
+                                                    "i18n": "backup_api_new_name_field"
+                                                },
+                                                "properties": {
+                                                    "width": 220
+                                                },
+                                                "data": "apiClientName"
+                                            },
+                                            {
+                                                "type": "button",
+                                                "name": "btnApiAdd",
+                                                "caption": {
+                                                    "i18n": "backup_api_add_btn"
+                                                },
+                                                "icon": "/apps/general_icons/resources/public/16x16/add.png",
+                                                "events": {
+                                                    "onClick": "addApiClient"
+                                                }
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        "type": "group",
+                        "name": "grpRecovery",
+                        "caption": {
+                            "i18n": "backup_recovery_group"
+                        },
+                        "vertical": true,
+                        "layout": [
+                            {
+                                "type": "label",
+                                "name": "recoveryHint",
+                                "caption": {
+                                    "i18n": "backup_recovery_hint"
+                                }
+                            },
+                            {
+                                "type": "group",
+                                "name": "grpRecoveryRow",
+                                "noBorder": true,
+                                "horizontal": true,
+                                "layout": [
+                                    {
+                                        "type": "textbox",
+                                        "name": "recoveryState",
+                                        "caption": {
+                                            "i18n": "backup_recovery_state_field"
+                                        },
+                                        "readOnly": true,
+                                        "data": "recoveryState"
+                                    },
+                                    {
+                                        "type": "textbox",
+                                        "name": "recoveryPassword",
+                                        "caption": {
+                                            "i18n": "backup_recovery_password_field"
+                                        },
+                                        "data": "recoveryPassword"
+                                    },
+                                    {
+                                        "type": "button",
+                                        "name": "btnSetRecovery",
+                                        "caption": {
+                                            "i18n": "backup_recovery_set_btn"
+                                        },
+                                        "icon": "/apps/general_icons/resources/public/16x16/key.png",
+                                        "events": {
+                                            "onClick": "setRecoveryPassword"
+                                        }
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                ]
             }
         ]
     }

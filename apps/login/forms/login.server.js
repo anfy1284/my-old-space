@@ -33,6 +33,19 @@ module.exports = function (modelsDB, Utilities) {
             return { success: false, error: await tForSession('Invalid password', sessionID) };
         }
 
+        // Отключённая учётная запись. Проверка стоит ПОСЛЕ пароля намеренно: иначе по
+        // ответу можно перебором выяснять, какие учётки существуют и отключены, не зная
+        // ни одного пароля. А тому, кто пароль знает, сказать причину прямо — правильно:
+        // «неверный пароль» отправило бы человека искать несуществующую опечатку вместо
+        // того, чтобы позвонить администратору.
+        //
+        // Отключёнными, в частности, возвращаются пользователи, воскрешённые при
+        // восстановлении базы из копии (см. backup/systemDataUsers): они существуют
+        // ради ссылочной целостности, а не ради входа.
+        if (user.disabled) {
+            return { success: false, error: await tForSession('Account is disabled', sessionID) };
+        }
+
         const session = await modelsDB.Sessions.findOne({ where: { sessionId: sessionID } });
         if (session) {
             await session.update({ userId: user.UID });

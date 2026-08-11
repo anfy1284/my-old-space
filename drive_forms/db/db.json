@@ -25,6 +25,9 @@
             },
             "options": {
                 "timestamps": true
+            },
+            "entityConfig": {
+                "systemData": "users_and_roles"
             }
         },
         {
@@ -43,6 +46,9 @@
             },
             "options": {
                 "timestamps": false
+            },
+            "entityConfig": {
+                "systemData": "users_and_roles"
             }
         },
         {
@@ -78,6 +84,9 @@
                         "key": "UID"
                     }
                 }
+            },
+            "entityConfig": {
+                "systemData": "users_and_roles"
             }
         }
     ],
