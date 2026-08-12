@@ -177,7 +177,9 @@ async function runPhases(opts) {
                 + 'системные данные размечаются по снимку из копии');
             currentModels = result.models || [];
         }
-        const sysRes = await require('./systemData').applyAll({
+        // Именно `systemDataStrategies`, а не `./systemData`: реестр стратегий собирает
+        // он, и в этом процессе (воркер восстановления) больше некому.
+        const sysRes = await require('./systemDataStrategies').applyAll({
             sequelize,
             shadow: shadowSchema,
             models: currentModels,
@@ -297,7 +299,8 @@ async function buildAndLoad(p) {
     // Там, где ключи уже созданы вместе с таблицами (SQLite), проверки снимаются на
     // время загрузки — ВНЕ транзакции, иначе `PRAGMA` не действует.
     if (!deferFk) await dialect.setForeignKeysEnabled(sequelize, false);
-    const loaded = await loadRows({ sequelize, filePath, privateKeyPem, passphrase, schema, dumpModels, report });
+    const loaded = await loadRows({ sequelize, filePath, privateKeyPem, passphrase, schema, dumpModels, report,
+        rowsTotal: Number(info.header && info.header.rowsTotal) || 0 });
     result.tables = loaded.tables;
     result.totalRows = loaded.totalRows;
     result.summary = loaded.summary;
@@ -362,6 +365,13 @@ async function buildAndLoad(p) {
  */
 async function loadRows(p) {
     const { sequelize, filePath, privateKeyPem, passphrase, schema, dumpModels, report } = p;
+    // Знаменатель полосы прогресса. Самая долгая фаза восстановления — загрузка, и до сих
+    // пор она не отдавала долю вовсе: полоса замирала на том, что осталось от фазы
+    // структуры, и операция выглядела зависшей ровно тогда, когда шла дольше всего.
+    // Копии, снятые до того, как в заголовок стало попадать реальное число строк, несут
+    // там ноль — для них знаменателем берём таблицы: полоса грубее, но движется.
+    const rowsTotal = Number(p.rowsTotal) || 0;
+    const tablesTotal = (dumpModels || []).length;
     const fieldsByTable = new Map(dumpModels.map(m => [m.tableName, serialize.modelFields(m)]));
     const tables = {};
     const pending = [];                 // накопленные операции вставки (см. ниже)
@@ -394,7 +404,9 @@ async function loadRows(p) {
             }
             tables[job.table] = (tables[job.table] || 0) + job.rows.length;
             totalRows += job.rows.length;
-            report('data', `${job.table}: ${tables[job.table]}`);
+            report('data', `${job.table}: ${tables[job.table]}`, rowsTotal
+                ? { done: totalRows, total: rowsTotal }
+                : { done: Object.keys(tables).length, total: tablesTotal });
         }
     }
 
@@ -517,7 +529,7 @@ async function runDestructive(p) {
     const { models: dumpModels } = await readModelsSection(filePath, privateKeyPem, passphrase);
     const q = dialect.quoter(sequelize);
 
-    const systemData = require('./systemData');
+    const systemData = require('./systemDataStrategies');
     let currentModels = [];
     try { currentModels = require('../globalServerContext').collectMergedModelDefs().models || []; }
     catch (e) { currentModels = dumpModels; }

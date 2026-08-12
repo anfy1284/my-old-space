@@ -127,6 +127,159 @@ function tablesByType(models) {
 }
 
 /**
+ * Сколько строк затронул сырой запрос.
+ *
+ * Драйвер отвечает по-разному: у `UPDATE`/`DELETE` во втором элементе объект с
+ * `rowCount`, у `INSERT` — просто число. Читать один способ нельзя — второй вид молча
+ * даёт ноль, и этот ноль уходит в отчёт администратора как факт о его данных.
+ */
+function affected(meta) {
+    if (typeof meta === 'number') return meta;
+    return (meta && typeof meta.rowCount === 'number') ? meta.rowCount : 0;
+}
+
+/** Колонки таблицы в схеме, в порядке объявления. */
+async function columnsOf(sequelize, schema, table) {
+    const rows = await sequelize.query(
+        `SELECT column_name FROM information_schema.columns
+          WHERE table_schema = :schema AND table_name = :table ORDER BY ordinal_position`,
+        { replacements: { schema, table }, type: sequelize.QueryTypes.SELECT }
+    );
+    return (rows || [])
+        .map(r => (Array.isArray(r) ? r[0] : (r.column_name !== undefined ? r.column_name : Object.values(r)[0])))
+        .filter(Boolean);
+}
+
+/**
+ * Общие колонки двух схем — ЕДИНСТВЕННЫЙ допустимый способ переносить строки между
+ * живой схемой и схемой, построенной из копии.
+ *
+ * `INSERT … SELECT *` здесь недопустим, и это не вкусовщина. Снимок моделей в копии
+ * хранит поля ОТСОРТИРОВАННЫМИ по имени (`serialize.modelFields`), поэтому схема из
+ * копии всегда получает алфавитный порядок колонок, а живая база — исторический, в
+ * котором добавленные позже поля стоят в конце. Наборы имён при этом совпадают, и
+ * проверка структуры расхождения не видит. `SELECT *` сопоставляет колонки ПО ПОЗИЦИИ:
+ * `backup_config.publicKeyPem` уезжал в `keyFingerprint varchar(255)` и валил
+ * восстановление сообщением «значение не умещается». Там, где длины совпадают, отказа
+ * не было бы вовсе — данные легли бы в чужие колонки молча.
+ */
+async function commonColumns(sequelize, shadow, live, table) {
+    const liveCols = new Set(await columnsOf(sequelize, live, table));
+    return (await columnsOf(sequelize, shadow, table)).filter(c => liveCols.has(c));
+}
+
+/**
+ * Кто ссылается на таблицу ВНУТРИ схемы — по фактическим ограничениям, а не по списку в
+ * коде. Список пришлось бы дописывать при каждой новой ссылке, и он молча разошёлся бы
+ * с базой, а расхождение здесь стоит отказа посреди восстановления.
+ *
+ * @returns {Promise<Array<{table: string, column: string, parentColumn: string}>>}
+ */
+async function dependentsOf(sequelize, schema, parent) {
+    const rows = await sequelize.query(
+        `SELECT tc.table_name AS child, kcu.column_name AS col, ccu.column_name AS pcol
+           FROM information_schema.table_constraints tc
+           JOIN information_schema.key_column_usage kcu
+             ON kcu.constraint_name = tc.constraint_name AND kcu.constraint_schema = tc.constraint_schema
+           JOIN information_schema.constraint_column_usage ccu
+             ON ccu.constraint_name = tc.constraint_name AND ccu.constraint_schema = tc.constraint_schema
+          WHERE tc.constraint_type = 'FOREIGN KEY'
+            AND tc.table_schema = :schema AND ccu.table_schema = :schema
+            AND ccu.table_name = :parent`,
+        { replacements: { schema, parent }, type: sequelize.QueryTypes.SELECT }
+    );
+    return (rows || [])
+        .map(r => (Array.isArray(r)
+            ? { table: r[0], column: r[1], parentColumn: r[2] }
+            : { table: r.child, column: r.col, parentColumn: r.pcol }))
+        .filter(d => d.table && d.column && d.parentColumn && d.table !== parent);
+}
+
+/**
+ * На что ссылается таблица — обратная сторона `dependentsOf`.
+ * @returns {Promise<Array<{column: string, parentTable: string, parentColumn: string}>>}
+ */
+async function foreignKeysOf(sequelize, schema, table) {
+    const rows = await sequelize.query(
+        `SELECT kcu.column_name AS col, ccu.table_name AS parent, ccu.column_name AS pcol
+           FROM information_schema.table_constraints tc
+           JOIN information_schema.key_column_usage kcu
+             ON kcu.constraint_name = tc.constraint_name AND kcu.constraint_schema = tc.constraint_schema
+           JOIN information_schema.constraint_column_usage ccu
+             ON ccu.constraint_name = tc.constraint_name AND ccu.constraint_schema = tc.constraint_schema
+          WHERE tc.constraint_type = 'FOREIGN KEY'
+            AND tc.table_schema = :schema AND ccu.table_schema = :schema
+            AND tc.table_name = :table`,
+        { replacements: { schema, table }, type: sequelize.QueryTypes.SELECT }
+    );
+    return (rows || [])
+        .map(r => (Array.isArray(r)
+            ? { column: r[0], parentTable: r[1], parentColumn: r[2] }
+            : { column: r.col, parentTable: r.parent, parentColumn: r.pcol }))
+        .filter(f => f.column && f.parentTable && f.parentColumn);
+}
+
+/**
+ * Привести таблицу к содержимому живой схемы, НЕ ПОРВАВ ссылки на неё.
+ *
+ * Очевидное «`DELETE` всё, затем `INSERT` живое» неисполнимо, как только на таблицу
+ * кто-то ссылается без каскада: на `access_roles` смотрит `user_systems.roleId`, и
+ * первый же `DELETE` упирается в внешний ключ. Снять ключи нельзя — они к этому моменту
+ * навешены, ими и проверено загруженное. Поэтому замена идёт как замена:
+ *   1. строки, которых в живой схеме нет, исчезнут — сначала убираем ссылки на них;
+ *   2. затем сами исчезнувшие строки;
+ *   3. остальные обновляем/добавляем `ON CONFLICT` — ссылки на них не рвутся ни на миг.
+ */
+async function replaceReferenced({ sequelize, q, shadow, live, table, report }) {
+    const dst = dialect.qualify(q, table, shadow);
+    const src = dialect.qualify(q, table, live);
+    const uid = q('UID');
+    // На разрушающем пути теневой схемы нет (`shadow === null`) — работаем прямо в живой.
+    // Для ИМЕНИ в SQL это правильный null (имя без схемы уходит по `search_path`), а вот
+    // интроспекции нужно настоящее имя: запрос с `table_schema = null` вернёт пусто, и
+    // перенос молча выродится в «нет общих колонок», то есть в потерю системных данных
+    // ровно на том пути, где страховки уже нет.
+    const shadowSchema = shadow || LIVE_SCHEMA;
+
+    let orphans = 0;
+    for (const dep of await dependentsOf(sequelize, shadowSchema, table)) {
+        const [, res] = await sequelize.query(
+            `DELETE FROM ${dialect.qualify(q, dep.table, shadow)} d
+              WHERE d.${q(dep.column)} IS NOT NULL
+                AND NOT EXISTS (SELECT 1 FROM ${src} s WHERE s.${q(dep.parentColumn)} = d.${q(dep.column)})`
+        );
+        const n = affected(res);
+        if (!n) continue;
+        orphans += n;
+        // Молчать нельзя: это удаление ДАННЫХ КОПИИ. Строка ссылалась на то, чего в
+        // этой сборке больше нет; сохранить её невозможно, но знать о ней администратор
+        // обязан.
+        log.warn(`[restore/systemData] ${dep.table}.${dep.column}: удалено ${n} ссылок на `
+            + `отсутствующие строки ${table}`);
+        report && report(`${dep.table}: удалено ${n} ссылок на исчезнувшие ${table}`);
+    }
+
+    await sequelize.query(`DELETE FROM ${dst} WHERE ${uid} NOT IN (SELECT ${uid} FROM ${src})`);
+
+    const cols = await commonColumns(sequelize, shadowSchema, live, table);
+    if (!cols.length) {
+        log.warn(`[restore/systemData] ${table}: нет общих колонок со схемой ${live} — пропущена`);
+        return { orphans, moved: 0 };
+    }
+    const colList = cols.map(q).join(', ');
+    const setList = cols.filter(c => c !== 'UID').map(c => `${q(c)} = EXCLUDED.${q(c)}`).join(', ');
+    const [, ins] = await sequelize.query(
+        `INSERT INTO ${dst} (${colList}) SELECT ${colList} FROM ${src}`
+        + (setList ? ` ON CONFLICT (${uid}) DO UPDATE SET ${setList}` : ` ON CONFLICT (${uid}) DO NOTHING`)
+    );
+    const moved = affected(ins);
+
+    report && report(`${table}: приведён к текущей базе (${moved})`
+        + (orphans ? `, удалено висячих ссылок: ${orphans}` : ''));
+    return { orphans, moved };
+}
+
+/**
  * Стратегия по умолчанию: содержимое живой схемы вытесняет содержимое теневой.
  *
  * Для конфигурации инсталляции это ровно то, что нужно: копия описывает, как машина
@@ -134,18 +287,14 @@ function tablesByType(models) {
  * копии не «сливаются» — они отбрасываются целиком, потому что частичное совпадение
  * конфигураций смысла не имеет: половина старого расписания и половина нового — это
  * не расписание.
+ *
+ * Выполняется через `replaceReferenced`, а не «`DELETE` + `INSERT SELECT *`»: колонки
+ * сопоставляются ПО ИМЕНИ (порядок в двух схемах разный, см. `commonColumns`), а
+ * ссылающиеся строки переживают замену.
  */
 async function carryOver({ sequelize, q, shadow, live, tables, report }) {
     for (const table of tables) {
-        const src = dialect.qualify(q, table, live);
-        const dst = dialect.qualify(q, table, shadow);
-        await sequelize.query(`DELETE FROM ${dst}`);
-        // Явного списка колонок нет намеренно: структура теневой схемы построена по
-        // тем же слитым определениям, что и живая, поэтому набор колонок совпадает.
-        // Расхождение здесь означало бы, что копия несовместима по структуре, а это
-        // проверяется раньше (`compareStructure`) и отдельным сообщением.
-        await sequelize.query(`INSERT INTO ${dst} SELECT * FROM ${src}`);
-        report && report(`${table}: перенесено из текущей базы`);
+        await replaceReferenced({ sequelize, q, shadow, live, table, report });
     }
     log.info(`[restore/systemData] Перенесено из живой схемы: ${tables.join(', ')}`);
 }
@@ -191,8 +340,13 @@ async function applyAll(opts) {
             report(`${code}: нет ни одной применимой таблицы — пропущен`);
             continue;
         }
-        const fn = _strategies.get(code) || carryOver;
-        await fn({ sequelize, q, shadow, live, tables: present, report });
+        // Какая стратегия выбрана — в отчёт, а не только в код. Подмена собственной
+        // стратегии умолчанием (реестр не собран в этом процессе) иначе видна лишь как
+        // падение по внешнему ключу где-то в чужой таблице, и разбираться приходится с
+        // симптомом. Строка в журнале операции называет причину сразу.
+        const fn = _strategies.get(code);
+        report(`${code}: стратегия — ${fn ? 'собственная' : 'умолчание (текущее целиком)'}`);
+        await (fn || carryOver)({ sequelize, q, shadow, live, tables: present, report });
         applied.push(code);
     }
 
@@ -252,5 +406,9 @@ async function dropSnapshot(sequelize, name) {
 
 module.exports = {
     registerStrategy, hasStrategy, tablesByType, applyAll, carryOver,
-    snapshotForDestructive, dropSnapshot, LIVE_SCHEMA
+    snapshotForDestructive, dropSnapshot, LIVE_SCHEMA,
+    // Общие примитивы переноса между схемами. Живут здесь, а не в конкретной стратегии:
+    // сопоставлять колонки по имени обязан КАЖДЫЙ, кто переносит строки между живой
+    // схемой и построенной из копии.
+    affected, columnsOf, commonColumns, dependentsOf, foreignKeysOf, replaceReferenced
 };

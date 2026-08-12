@@ -160,6 +160,12 @@ async function createBackup(opts) {
             onProgress(`ВНИМАНИЕ: таблица ${w.table} без реквизита доступа и вне excluded_tables`);
         }
 
+        // Считаем ДО записи заголовка: он уходит в файл первым, а `stats.totalRows`
+        // набирается по ходу выгрузки и в этот момент равен нулю (именно поэтому у всех
+        // прежних копий в заголовке стоял ноль).
+        const rowsPlanned = await payload.countPlannedRows();
+        onProgress(`Строк к выгрузке: ${rowsPlanned}`);
+
         encryptor = new container.EncryptStream({
             publicKeyPem: pre.settings.publicKeyPem,
             header: {
@@ -181,7 +187,7 @@ async function createBackup(opts) {
                 // считается по готовому файлу ВМЕСТЕ с заголовком (см. спутник).
                 triggeredBy: String(opts.triggeredBy || 'manual'),
                 title: String(opts.title || ''),
-                rowsTotal: payload.stats.totalRows
+                rowsTotal: rowsPlanned
             }
         });
         tap = new TapStream();
@@ -433,14 +439,11 @@ function deleteFile(storageDir, fileName) {
 // `scheduler_runs`: он в базе, деплой переживает и от каталога не зависит.
 
 
-// Стратегии системных данных регистрируются ЗДЕСЬ, при сборке модуля резервного
-// копирования, а не внутри `systemData`: тот обязан оставаться механизмом, не знающим,
-// какие типы бывают. Так добавление типа — это строка справочника, метка на моделях и
-// регистрация рядом с остальными, а не правка кода восстановления.
-const systemData = require('./systemData');
-systemData.registerStrategy('users_and_roles', require('./systemDataUsers').mergeUsers);
-// Остальным типам («настройки копирования», «регламентные задания») отдельная
-// стратегия не нужна: у них побеждает текущее целиком, а это и есть умолчание.
+// Стратегии системных данных регистрируются не внутри `systemData` (тот обязан
+// оставаться механизмом, не знающим, какие типы бывают) и не здесь: восстановление
+// исполняется в дочернем процессе, который `index.js` не грузит, и регистрация в нём
+// не отработала бы. Реестр собирает `systemDataStrategies`, его берут ОБА процесса.
+const systemData = require('./systemDataStrategies');
 
 module.exports = {
     createBackup, createPlainStream, checkPreconditions, selectForPruning, deleteFile, buildFileName,

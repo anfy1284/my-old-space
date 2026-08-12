@@ -87,6 +87,35 @@ function createPayloadStream(opts) {
     };
     const line = (obj) => JSON.stringify(obj) + '\n';
 
+    /**
+     * Сколько строк ВСЕГО уедет в копию — до того, как поток начнёт их отдавать.
+     *
+     * Нужно, потому что заголовок контейнера пишется ПЕРВЫМ, а `stats.totalRows`
+     * набирается по ходу выгрузки: подставляя его в заголовок, мы всегда записывали
+     * туда ноль. Ноль в заголовке — это не косметика: по нему список копий показывает
+     * «строк 0» у каждой копии, а восстановление лишается знаменателя и рисует
+     * неподвижную полосу.
+     *
+     * Считается в ТОЙ ЖЕ транзакции-снимке, что и сама выгрузка, поэтому число точное,
+     * а не оценка: расходиться с фактически выгруженным ему неоткуда. Цена — по одному
+     * `COUNT(*)` на таблицу плана; на снимке это дёшево и происходит один раз.
+     */
+    async function countPlannedRows() {
+        let total = 0;
+        for (const entry of plan.tables) {
+            const where = dumpScope.type === 'organization'
+                ? scope.buildWhere(entry.filter, dumpScope.organizationId, q)
+                : null;
+            total += await dialect.countRows(sequelize, {
+                table: entry.table,
+                where: where ? where.sql : null,
+                params: where ? where.params : null,
+                transaction
+            });
+        }
+        return total;
+    }
+
     async function* generate() {
         yield line({
             kind: 'header',
@@ -160,7 +189,7 @@ function createPayloadStream(opts) {
         yield line({ kind: 'summary', totalRows: stats.totalRows, tables: stats.tables });
     }
 
-    return { stream: Readable.from(generate()), stats, plan };
+    return { stream: Readable.from(generate()), stats, plan, countPlannedRows };
 }
 
 module.exports = { createPayloadStream, modelsSnapshot, canonical, compareWithDatabase, DUMP_FORMAT, PAGE_SIZE };
