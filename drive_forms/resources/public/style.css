@@ -1088,6 +1088,18 @@ input[type="checkbox"],
     white-space: normal;
     word-break: break-word;
 }
+/* Полоса из-под наложения (строка поделена на под-дорожки): места мало — уменьшаем
+   шрифт и поля, чтобы подпись оставалась читаемой. Полный текст — в подсказке. */
+.ui-calendar-bar.ui-cal-thin {
+    font-size: 9px;
+    line-height: 1;
+    padding: 0 3px;
+    text-shadow: none;
+}
+.ui-calendar-bar-v.ui-cal-thin {
+    padding-top: 1px;
+    white-space: nowrap;
+}
 .ui-calendar-bar.ui-cal-selected {
     outline: 2px solid #000000;
     outline-offset: -2px;

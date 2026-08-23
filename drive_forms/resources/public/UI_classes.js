@@ -12056,6 +12056,11 @@ class Calendar extends UIObject {
         const roomIndex = {};
         rooms.forEach((room, idx) => { roomIndex[room.UID] = idx; });
 
+        // Наложение броней в одном ресурсе — нормальная ситуация (две семьи делят номер и
+        // приезжают/уезжают в разные дни). Полосы не рисуются друг поверх друга: сначала
+        // собираем размещения, затем раскладываем их по под-дорожкам внутри строки-ресурса
+        // (_assignSubLanes), и толщина делится на число дорожек кластера пересечений.
+        const placements = [];
         (this.events || []).forEach(ev => {
             const resId = ev[this.resourceField];
             const r = roomIndex[resId];
@@ -12069,6 +12074,12 @@ class Calendar extends UIObject {
             const visS = Math.max(sIdx, 0);
             const visE = Math.min(eIdx, timeCount);
             if (visE <= visS) return;
+            placements.push({ ev, r, sIdx, eIdx, sub: 0, subCount: 1 });
+        });
+        this._assignSubLanes(placements);
+
+        placements.forEach(pl => {
+            const ev = pl.ev, r = pl.r, sIdx = pl.sIdx, eIdx = pl.eIdx;
 
             const bar = document.createElement('div');
             bar.classList.add('ui-calendar-bar');
@@ -12093,18 +12104,25 @@ class Calendar extends UIObject {
             if (lenPx <= 1) return;
             // Зазор между соседними бронями (день смены), поля по оси ресурса —
             // полоса растягивается на высоту строки, оставляя разделители между строками.
+            // При наложении строка делится на subCount под-дорожек: толщина уменьшается
+            // пропорционально числу пересекающихся броней, полосы идут одна под другой.
             const gap = 1;
             const marginCross = 4;
-            const thick = Math.max(10, lane - marginCross * 2);
+            const full = Math.max(10, lane - marginCross * 2);
+            const k = pl.subCount > 1 ? pl.subCount : 1;
+            const subGap = k > 1 ? 1 : 0;
+            const thick = (k > 1) ? Math.max(4, Math.floor((full - subGap * (k - 1)) / k)) : full;
+            const crossOff = marginCross + pl.sub * (thick + subGap);
+            if (thick < 14) bar.classList.add('ui-cal-thin');
             if (horizontal) {
                 bar.style.left = (a + gap) + 'px';
                 bar.style.width = Math.max(1, lenPx - gap * 2) + 'px';
-                bar.style.top = (r * lane + marginCross) + 'px';
+                bar.style.top = (r * lane + crossOff) + 'px';
                 bar.style.height = thick + 'px';
             } else {
                 bar.style.top = (a + gap) + 'px';
                 bar.style.height = Math.max(1, lenPx - gap * 2) + 'px';
-                bar.style.left = (r * lane + marginCross) + 'px';
+                bar.style.left = (r * lane + crossOff) + 'px';
                 bar.style.width = thick + 'px';
                 bar.classList.add('ui-calendar-bar-v');
             }
@@ -12173,6 +12191,42 @@ class Calendar extends UIObject {
         scroll.appendChild(canvas);
         this._canvasEl = canvas;
         this._dates = dates;
+    }
+
+    // Раскладка пересекающихся полос по под-дорожкам внутри одной строки-ресурса.
+    // Пересечением считаем пересечение интервалов ночей [sIdx, eIdx): бронь, выезд которой
+    // совпадает с заездом следующей, НЕ пересекается и остаётся на той же дорожке.
+    // Каждому размещению проставляется sub (номер дорожки) и subCount (сколько дорожек в
+    // его кластере связанных наложений) — толщина делится только внутри кластера, поэтому
+    // одиночные брони в той же комнате сохраняют полную толщину строки.
+    _assignSubLanes(placements) {
+        const byRes = new Map();
+        (placements || []).forEach(pl => {
+            if (!byRes.has(pl.r)) byRes.set(pl.r, []);
+            byRes.get(pl.r).push(pl);
+        });
+        byRes.forEach(list => {
+            list.sort((a, b) => (a.sIdx - b.sIdx) || (a.eIdx - b.eIdx));
+            let cluster = [];
+            let laneEnd = [];        // дата конца последней брони на каждой под-дорожке
+            let clusterEnd = -Infinity;
+            const closeCluster = () => {
+                const n = laneEnd.length || 1;
+                cluster.forEach(p => { p.subCount = n; });
+                cluster = []; laneEnd = []; clusterEnd = -Infinity;
+            };
+            list.forEach(p => {
+                // Начало не раньше конца всего кластера — прежние наложения закончились.
+                if (p.sIdx >= clusterEnd) closeCluster();
+                let ln = 0;
+                while (ln < laneEnd.length && laneEnd[ln] > p.sIdx) ln++;
+                laneEnd[ln] = p.eIdx;
+                p.sub = ln;
+                cluster.push(p);
+                if (p.eIdx > clusterEnd) clusterEnd = p.eIdx;
+            });
+            closeCluster();
+        });
     }
 
     _darken(hex, k) {
