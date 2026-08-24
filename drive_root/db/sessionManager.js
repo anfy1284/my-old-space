@@ -15,7 +15,7 @@ const { generateUID } = require('./utilites');
 
 const Session = sequelize.define(sessionDef.name, Object.fromEntries(
   Object.entries(sessionDef.fields).map(([k, v]) => {
-      const fieldDef = { ...v, type: Sequelize.DataTypes[v.type] };
+      const fieldDef = require('./fieldTypes').resolveFieldDef(v);
       if (fieldDef.defaultValue === 'GENERATE_UID') {
           fieldDef.defaultValue = () => generateUID('Session');
       }
@@ -25,7 +25,7 @@ const Session = sequelize.define(sessionDef.name, Object.fromEntries(
 
 const User = sequelize.define(userDef.name, Object.fromEntries(
   Object.entries(userDef.fields).map(([k, v]) => {
-      const fieldDef = { ...v, type: Sequelize.DataTypes[v.type] };
+      const fieldDef = require('./fieldTypes').resolveFieldDef(v);
       if (fieldDef.defaultValue === 'GENERATE_UID') {
           fieldDef.defaultValue = () => generateUID('User');
       }

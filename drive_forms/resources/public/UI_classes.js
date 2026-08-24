@@ -671,6 +671,50 @@ if (typeof window !== 'undefined') {
                 return true;
             },
 
+            /**
+             * Деньги на клиенте — та же арифметика, что на сервере
+             * (`drive_root/db/money.js`).
+             *
+             * Зачем в ядре. Форма считает сумму строки для немедленного отклика,
+             * а сервер потом пересчитывает её авторитетно. Если две стороны
+             * округляют по-разному, пользователь видит одно число, а сохраняется
+             * другое — молча, без ошибки. Общий метод в ядре — единственный
+             * способ этого избежать, не копируя формулу в каждый client.js.
+             *
+             * Две тонкости, ради которых это не однострочник:
+             *   • `Math.round(v * 100) / 100` ошибается на половине цента:
+             *     1.005 * 100 в двоичном виде даёт 100.49999999999999 → 1.00.
+             *     Здесь округление идёт по ДЕСЯТИЧНОЙ записи числа.
+             *   • Денежные поля приходят с сервера СТРОКОЙ («12.00» — колонка
+             *     DECIMAL), поэтому всё принимает и строку, и число.
+             */
+            money: {
+                // Значение → целые центы (с округлением половины от нуля).
+                cents(v) {
+                    if (v === null || v === undefined || v === '') return 0;
+                    let s = typeof v === 'string' ? v.trim() : String(Number(v));
+                    if (s === '' || s === 'NaN') return 0;
+                    if (/e/i.test(s)) return Math.round(Number(s) * 100);
+                    const m = s.match(/^([+-]?)(\d*)(?:[.,](\d*))?$/);
+                    if (!m) return 0;
+                    const sign = m[1] === '-' ? -1 : 1;
+                    const frac = m[3] || '';
+                    let c = Number(m[2] || '0') * 100 + Number((frac.slice(0, 2) || '').padEnd(2, '0'));
+                    if (frac.slice(2) && frac.charCodeAt(2) >= 53) c += 1;
+                    return sign * c;
+                },
+                num(v)        { return this.cents(v) / 100; },
+                round(v)      { return this.num(v); },
+                add(a, b)     { return (this.cents(a) + this.cents(b)) / 100; },
+                sub(a, b)     { return (this.cents(a) - this.cents(b)) / 100; },
+                mul(v, factor) {
+                    const f = Number(factor);
+                    if (!isFinite(f)) return 0;
+                    const x = this.cents(v) * f;
+                    return (x < 0 ? -Math.round(-x) : Math.round(x)) / 100;
+                }
+            },
+
             register(name, descriptor) {
                 apps[name] = descriptor;
                 try { if (descriptor && typeof descriptor.init === 'function') descriptor.init(); } catch (e) { console.error('MySpace.register.init error', e); }
@@ -11096,13 +11140,18 @@ class Table extends UIObject {
             const v = Number(row[field]);
             if (isFinite(v)) nums.push(v);
         }
+        // Сумма и среднее копятся в ЦЕНТАХ (MySpace.money): подвал стоит под
+        // колонкой сумм документа и обязан совпадать с итогом печатной формы,
+        // а обычное `a + b` над дробями накапливает двоичную погрешность тем
+        // заметнее, чем больше строк.
+        const addAll = arr => arr.reduce((acc, v) => MySpace.money.add(acc, v), 0);
         switch (kind) {
             case 'count': return rows ? rows.length : 0;
             case 'min':   return nums.length ? Math.min(...nums) : null;
             case 'max':   return nums.length ? Math.max(...nums) : null;
-            case 'avg':   return nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : null;
+            case 'avg':   return nums.length ? addAll(nums) / nums.length : null;
             case 'sum':
-            default:      return nums.reduce((a, b) => a + b, 0);
+            default:      return addAll(nums);
         }
     }
 

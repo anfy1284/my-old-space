@@ -561,7 +561,7 @@ function defineModels(sequelize, mergedModelsDef, allAssociations, opts = {}) {
   for (const def of mergedModelsDef) {
     const fields = {};
     for (const [field, fieldOpts] of Object.entries(def.fields)) {
-      const type = Sequelize.DataTypes[fieldOpts.type];
+      const type = require('./fieldTypes').resolveDataType(fieldOpts.type);
       fields[field] = { ...fieldOpts, type };
 
       // Внешний ключ в теневой схеме обязан ссылаться ВНУТРЬ неё.

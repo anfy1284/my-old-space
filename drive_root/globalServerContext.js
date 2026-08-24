@@ -127,7 +127,7 @@ function generateModelsFromDefs(modelDefs) {
         try {
             const fields = Object.fromEntries(
                 Object.entries(def.fields).map(([k, v]) => {
-                    const fieldDef = { ...v, type: DataTypes[v.type] };
+                    const fieldDef = require('./db/fieldTypes').resolveFieldDef(v);
                     if (fieldDef.defaultValue === 'GENERATE_UID') {
                         fieldDef.defaultValue = () => require('./db/utilites').generateUID(def.name);
                     }
@@ -379,11 +379,12 @@ const dbConfig = require('./db/db.json');
 const modelsDef = dbConfig.models;
 const sessionDef = modelsDef.find(m => m.name === 'Sessions');
 const userDef = modelsDef.find(m => m.name === 'Users');
+const _fieldTypes = require('./db/fieldTypes');
 const Session = sequelize.define(sessionDef.name, Object.fromEntries(
-    Object.entries(sessionDef.fields).map(([k, v]) => [k, { ...v, type: DataTypes[v.type] }])
+    Object.entries(sessionDef.fields).map(([k, v]) => [k, _fieldTypes.resolveFieldDef(v)])
 ), { ...sessionDef.options, tableName: sessionDef.tableName });
 const User = sequelize.define(userDef.name, Object.fromEntries(
-    Object.entries(userDef.fields).map(([k, v]) => [k, { ...v, type: DataTypes[v.type] }])
+    Object.entries(userDef.fields).map(([k, v]) => [k, _fieldTypes.resolveFieldDef(v)])
 ), { ...userDef.options, tableName: userDef.tableName });
 const _memoryStore = require('./memory_store');
 const _SESSION_USER_NS = 'session_users';

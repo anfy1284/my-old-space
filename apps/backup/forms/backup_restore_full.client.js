@@ -20,6 +20,11 @@ var _inspected = false;
 // ни в DOM. Он читается из файла, живёт в переменной и уходит одним вызовом.
 var _privateKeyPem = '';
 var _keyFileName = '';
+// Аварийный пароль — там же, где приватный ключ, и по той же причине: в набор
+// данных формы и в DOM он не попадает. Уходит на сервер при ЗАПУСКЕ, потому что
+// проверять его обязан сам запуск: раньше сервер верил флагу `passwordReady`,
+// который приходил с клиента, — то есть гейт стоял только в интерфейсе.
+var _recoveryPassword = '';
 // Копия из домашнего архива приходит расшифрованной — ключ для неё не нужен вовсе.
 var _needsKey = true;
 
@@ -231,11 +236,13 @@ async function verifyRecoveryPassword(ev, ctx) {
     var res = await callServer('__SERVER_SCRIPT__', 'verifyRecoveryPassword', params);
     if (!res || !res.ok) {
         _passwordReady = false;
+        _recoveryPassword = '';
         refreshRunButton(form);
         showAlert(__t('Error: ') + ((res && res.error) || ''));
         return;
     }
     _passwordReady = true;
+    _recoveryPassword = params.recoveryPassword;
     form.setControlValue('recoveryPassword', '');
     form.setControlValue('passwordState', res.message || '');
     refreshRunButton(form);
@@ -260,6 +267,7 @@ async function generateRecoveryPassword(ev, ctx) {
 
     var saved = await showConfirm(__t('restore_full_pwd_saved_confirm') + '\n\n' + res.password);
     _passwordReady = !!saved;
+    _recoveryPassword = saved ? res.password : '';
     refreshRunButton(form);
     if (!saved) showAlert(__t('restore_full_pwd_not_saved'));
 }
@@ -300,7 +308,10 @@ async function runFullRestore(ev, ctx) {
 
     var res;
     try {
-        res = await callServer('__SERVER_SCRIPT__', 'runFullRestore', collect(form));
+        var runParams = collect(form);
+        runParams.recoveryPassword = _recoveryPassword;
+        res = await callServer('__SERVER_SCRIPT__', 'runFullRestore', runParams);
+        _recoveryPassword = '';
     } catch (e) {
         // Обрыв связи здесь — норма, а не сбой: сервер уходит в режим обслуживания и
         // перестаёт отвечать. Состояние операции видно на странице обслуживания.

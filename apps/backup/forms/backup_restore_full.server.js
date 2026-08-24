@@ -570,7 +570,20 @@ module.exports = function (modelsDB, Utilities) {
             // Шаг с паролем нужен ТОЛЬКО полному восстановлению: после переключения
             // обычный вход невозможен, вместе со старой схемой уходит таблица сессий.
             // Организация этого шага не требует — сервер продолжает работать.
-            if (!passwordReady || !recovery.isSet()) {
+            //
+            // Пароль проверяется ЗДЕСЬ, в самом запуске, а не принимается флагом.
+            // Раньше сервер верил полю `passwordReady`, которое приходило с клиента:
+            // отдельный вызов `verifyRecoveryPassword` проверял пароль по-настоящему,
+            // но его результат жил в переменной браузера, и запуск ничем не был с ним
+            // связан. То есть единственная защита от необратимой операции стояла в
+            // интерфейсе — а гейт обязан стоять на сервере (иначе достаточно послать
+            // `passwordReady: true`, и предусловие исчезает).
+            if (!recovery.isSet()) {
+                return { error: await tForSession('restore_full_pwd_unset', ctx.sessionID) };
+            }
+            const pwdOk = await recovery.verify(String((params && params.recoveryPassword) || ''));
+            maintenance.audit(`RECOVERY_PWD_VERIFY ${pwdOk ? 'OK' : 'FAIL'} at=runFullRestore user=${ctx.user && ctx.user.UID}`);
+            if (!pwdOk || !passwordReady) {
                 return { error: await tForSession('restore_full_err_password_step', ctx.sessionID) };
             }
 

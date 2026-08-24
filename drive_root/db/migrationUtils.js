@@ -17,7 +17,11 @@
  */
 function normalizeType(t, dialect = 'postgres', origin = 'db') {
   if (!t) return '';
-  const s = String(t).toUpperCase();
+  // Параметры типа в сравнении не участвуют: postgres описывает колонку как
+  // `NUMERIC(12,2)`, а модель объявляет `DECIMAL(12,2)` — без обрезки скобок
+  // эти два описания одного и того же типа считались бы разными, и таблица
+  // перестраивалась бы при КАЖДОМ старте (уже случалось с DATE/FLOAT).
+  const s = String(t).toUpperCase().replace(/\s*\(.*$/, '').trim();
 
   if (dialect === 'sqlite') {
     if (s.includes('VARCHAR') || s.includes('STRING') || s.includes('TEXT')) return 'STRING';
@@ -88,7 +92,7 @@ async function compareSchemas(currentSchema, desiredSchema, dialect = 'postgres'
       // временной копии. Именно эта перестройка и обнуляла представления
       // записей и отметки времени.
       const desiredTypeNorm = normalizeType(
-        (Sequelize.DataTypes[fieldDef.type] && Sequelize.DataTypes[fieldDef.type].key) || fieldDef.type,
+        require('./fieldTypes').typeKey(fieldDef.type),
         dialect,
         'model'
       );

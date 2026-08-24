@@ -128,11 +128,11 @@ const accessRoleDef = modelsDef.find(m => m.name === 'AccessRoles');
 const userSystemDef = modelsDef.find(m => m.name === 'UserSystems');
 
 const AccessRole = sequelize.define(accessRoleDef.name, Object.fromEntries(
-  Object.entries(accessRoleDef.fields).map(([k, v]) => [k, { ...v, type: DataTypes[v.type] }])
+  Object.entries(accessRoleDef.fields).map(([k, v]) => [k, require('../drive_root/db/fieldTypes').resolveFieldDef(v)])
 ), { ...accessRoleDef.options, tableName: accessRoleDef.tableName });
 
 const UserSystem = sequelize.define(userSystemDef.name, Object.fromEntries(
-  Object.entries(userSystemDef.fields).map(([k, v]) => [k, { ...v, type: DataTypes[v.type] }])
+  Object.entries(userSystemDef.fields).map(([k, v]) => [k, require('../drive_root/db/fieldTypes').resolveFieldDef(v)])
 ), { ...userSystemDef.options, tableName: userSystemDef.tableName });
 
 const _memStoreForRoles = require('../drive_root/memory_store');
