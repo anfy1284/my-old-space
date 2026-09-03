@@ -291,6 +291,37 @@ class FormInput extends UIObject {
         }
     }
 
+    // ── `locked`: значение нельзя изменить ВООБЩЕ ─────────────────────────────────
+    //
+    // Отличается от `readOnly`, у которого в этих классах уже есть свой смысл — «в
+    // само поле не печатают». Поле выбора записи и список состояний как раз таковы:
+    // текст не набирается, но значение меняется кнопкой выбора или выпадающим
+    // списком. `locked` закрывает и их: так выглядит поле проведённого документа.
+    setLocked(locked) {
+        this.locked = !!locked;
+        if (this.locked && typeof this.setReadOnly === 'function') {
+            try { this.setReadOnly(true); } catch (e) {}
+        }
+        this._applyLocked();
+    }
+
+    /** Применить `locked` к уже отрисованному элементу. Наследники дополняют. */
+    _applyLocked() {
+        const el = this.element;
+        if (!el) return;
+        try {
+            const tag = (el.tagName || '').toLowerCase();
+            if (tag === 'input' || tag === 'textarea') { if (this.locked) el.readOnly = true; }
+            else if (this.locked) el.disabled = true;
+        } catch (e) {}
+        // Погашенное поле обязано объяснять себя: иначе форма выглядит сломанной.
+        // Текст — тот же, что в отказе базы, чтобы объяснение и запрет не разошлись.
+        try {
+            if (this.locked && !el.title) el.title = __t('immutable_refuse_update');
+            else if (!this.locked && el.title === __t('immutable_refuse_update')) el.title = '';
+        } catch (e) {}
+    }
+
     // ЖИВОЙ «двойник» контрола: тот, кто сейчас занимает моё место на форме.
     // Возвращает не-null ТОЛЬКО если мой элемент уже оторван от документа, а по
     // моему адресу (`_ownerForm.controlsMap[_ownerKey]`, см. DataForm.registerControl)
@@ -2364,6 +2395,7 @@ class DataForm extends Form {
         this._formReady = false;   // true после первичной отрисовки — гейт для onChange
         this._suppressFormChange = false; // защита от рекурсии при программном изменении данных
         this._prefilled = null;    // реестр программно заполненных значений (formSpec.prefilled)
+        this._lock = null;         // замок проведённого документа (formSpec.lock)
     }
 
     // Override setTitle to keep track of the base (non-modified) title
@@ -2456,7 +2488,77 @@ class DataForm extends Form {
                 else this._dataMap[name].value = value;
             }
         } catch (e) {}
+        // Состояние документа сменилось прямо в открытом окне (команда «Выставить»
+        // пишет его по ответу RPC) — форма обязана запереться сразу, а не при
+        // следующем открытии: иначе пользователь продолжает править документ,
+        // который база уже не примет.
+        try {
+            if (this._lock && name === this._lock.field) this.applyRecordLock(value);
+        } catch (e) {}
+        try { this.refreshEnabledWhen(); } catch (e) {}
         return true;
+    }
+
+    // ── Замок проведённого документа (drive_root/db/immutable.js) ─────────────────
+    //
+    // Форма закрытого документа обязана быть НЕРЕДАКТИРУЕМОЙ. Отказ при сохранении
+    // приходит слишком поздно: пользователь к этому моменту уже заполнил поля, и
+    // введённое теряется. Что именно заперто, решает ОДНА декларация —
+    // `entityConfig.immutable` модели; описание приходит с сервера в spec.lock
+    // (`immutable.describeLock`), второго списка полей на клиенте нет.
+
+    /** Заперто ли поле формы: документ закрыт и поле не объявлено доступным. */
+    _isFieldLocked(name) {
+        const L = this._lock;
+        if (!L || !L.closed || !name) return false;
+        // Поле состояния живёт по своим правилам: у закрытого документа могут
+        // оставаться законные переходы (выставленный → оплачен), и сервер уже
+        // сократил список значений до допустимых.
+        if (name === L.field) return false;
+        return (L.editable || []).indexOf(name) === -1;
+    }
+
+    /**
+     * Запереть форму по новому состоянию записи. Отпирания нет: закрытый документ
+     * назад не открывается, а перерисовка формы сама построит её по новому spec.
+     */
+    applyRecordLock(state) {
+        const L = this._lock;
+        if (!L) return;
+        const val = (state === undefined) ? L.state : state;
+        const key = (val === null || val === undefined || val === '') ? null : String(val);
+        L.state = key;
+
+        // Список выбора состояний пересчитывается ВСЕГДА, даже если документ не
+        // закрылся: после смены состояния прежний набор переходов уже неверен.
+        if (key && L.manual) {
+            const allowed = [key].concat(L.manual[key] || []);
+            const ctrl = this.getControl(L.field);
+            if (ctrl) {
+                try { ctrl.allowedValues = allowed; } catch (e) {}
+                try { if (allowed.length <= 1 && typeof ctrl.setLocked === 'function') ctrl.setLocked(true); } catch (e) {}
+            }
+        }
+
+        if (!key || (L.closedStates || []).indexOf(key) === -1) return;
+        if (L.closed) return; // уже заперта
+        L.closed = true;
+
+        for (const name in this.controlsMap) {
+            if (!Object.prototype.hasOwnProperty.call(this.controlsMap, name)) continue;
+            const ctrl = this.controlsMap[name];
+            if (!ctrl || typeof ctrl.setLocked !== 'function') continue;
+            // Ячейки табличных частей идут под составными ключами (ts_x__r0__field):
+            // их запирает сама таблица, поимённо перебирать их незачем.
+            if (name.indexOf('__r') !== -1) continue;
+            const isTable = (typeof ctrl.getRows === 'function' && typeof ctrl.updateAllRowsReadOnly === 'function');
+            // Замок объявлен по ПОЛЯМ, а имя контрола в лейауте может отличаться от
+            // имени поля — берём поле с самого контрола (dataset.field его проставляет).
+            let field = name;
+            try { if (ctrl.element && ctrl.element.dataset && ctrl.element.dataset.field) field = ctrl.element.dataset.field; } catch (e) {}
+            if (!isTable && !this._isFieldLocked(field)) continue;
+            try { ctrl.setLocked(true); } catch (e) {}
+        }
     }
 
     // ── Декларативная доступность элемента: `enabledWhen` в лейауте ────────────────
@@ -2468,6 +2570,14 @@ class DataForm extends Form {
     //   "enabledWhen": { "currentRow": "backupFilesTable" }
     //   "enabledWhen": { "currentRow": "backupFilesTable", "where": { "missing": false } }
     //   "enabledWhen": { "rowsIn": "backupFilesTable" }        // в таблице есть хоть одна строка
+    //   "enabledWhen": { "field": "status", "in": ["draft"] }  // по значению поля записи
+    //   "enabledWhen": { "field": "status", "notIn": ["cancelled"] }
+    //   "enabledWhen": { "unlocked": true }                    // документ ещё не проведён
+    //
+    // Форма документа без этого выглядит работающей: у выставленного счёта кнопки
+    // «Заполнить» и «Выставить» остаются нажимаемыми, а нажатие приводит к отказу
+    // из базы. Условие по состоянию записи — то же знание, что и замок формы, и
+    // объявляется там же, в лейауте, рядом с кнопкой.
     //
     // Кнопка при этом ОСТАЁТСЯ ВИДИМОЙ и выключается — прятать неприменимое действие
     // нельзя, командная панель начнёт прыгать.
@@ -2478,6 +2588,18 @@ class DataForm extends Form {
     }
 
     _evalEnabledWhen(decl) {
+        // Условие по значению поля записи (состояние документа).
+        if (decl.field) {
+            const v = this.getControlValue(decl.field);
+            const cur = (v === null || v === undefined) ? '' : String(v);
+            if (Array.isArray(decl.in) && decl.in.map(String).indexOf(cur) === -1) return false;
+            if (Array.isArray(decl.notIn) && decl.notIn.map(String).indexOf(cur) !== -1) return false;
+            return true;
+        }
+        // Условие «документ ещё открыт»: замок описан сервером в spec.lock.
+        if (decl.unlocked === true) return !(this._lock && this._lock.closed);
+        if (decl.locked === true) return !!(this._lock && this._lock.closed);
+
         const tableName = decl.currentRow || decl.rowsIn || decl.table;
         const tbl = this.getControl(tableName);
         if (!tbl) return false;
@@ -2615,6 +2737,18 @@ class DataForm extends Form {
             // деталь-таблицы перефильтровываются уже на экране (видимая «дорисовка»).
             try { this._activateFirstRows(); } catch(e) {}
             try { this._setupDefaultButtonHandler(); } catch (e) {}
+            // Доступность элементов по `enabledWhen` считается СРАЗУ после отрисовки:
+            // условия по состоянию записи («кнопка только у черновика») не связаны ни с
+            // какой таблицей, и события таблиц их бы никогда не пересчитали.
+            try { this.refreshEnabledWhen(); } catch (e) {}
+            // Контролы, рождённые запертыми: досказать то, что видно только после
+            // отрисовки, — подсказку «почему нельзя» и выключение неполей ввода.
+            try {
+                for (const k in this.controlsMap) {
+                    const c = this.controlsMap[k];
+                    if (c && c.locked && typeof c._applyLocked === 'function') c._applyLocked();
+                }
+            } catch (e) {}
             // Программно заполненные значения (prefill/prefillTabular/автозаполнение)
             // обязаны отработать те же обработчики «при изменении», что и ручной ввод.
             // НЕ await: обработчики ходят на сервер (дефолтные услуги номера, пересчёт
@@ -2842,6 +2976,19 @@ class DataForm extends Form {
         contentArea = contentArea || this.getContentArea();
         let element = null;
         const properties = item.properties || {};
+        // Закрытый документ: контрол РОЖДАЕТСЯ запертым. Решение принимается здесь,
+        // в единственном месте создания контролов, — вкладки рисуются позже, и
+        // запирание «по списку контролов» после отрисовки формы их пропускало бы.
+        // `readOnly` рядом с `locked` — потому что часть контролов (выбор записи,
+        // флажок, дата) уже умеет учитывать его при создании.
+        try {
+            if (this._isFieldLocked(item.data)) { properties.readOnly = true; properties.locked = true; }
+        } catch (e) {}
+        // `readOnly`, объявленный на САМОМ элементе лейаута, а не в его properties,
+        // молча пропадал: контрол создаётся из properties. Так дата выставления
+        // счёта (`issuedAt`, "readOnly": true) оставалась редактируемой, хотя в
+        // лейауте была помечена. Объявление на элементе — то же самое объявление.
+        if (item.readOnly === true) properties.readOnly = true;
         // Резолвим caption: если пришёл объект { i18n: 'key' } — сервер должен был перевести,
         // но на случай если не перевёл — берём ключ как fallback (не показываем [object Object])
         const rawCaption = (properties && properties.noCaption) ? '' : (item.caption || '');
@@ -3854,6 +4001,7 @@ class DataForm extends Form {
                 try { this._clientScript = both.clientScript || null; } catch (e) {}
                 try { this._formEvents = both.events || null; } catch (e) { this._formEvents = null; }
                 try { this._prefilled = both.prefilled || null; } catch (e) { this._prefilled = null; }
+                try { this._lock = both.lock || null; } catch (e) { this._lock = null; }
                 try { this._windowState = both.windowState || null; } catch (e) {}
                 // Apply app caption (human-readable translated name) and icon
                 try {
@@ -4019,10 +4167,14 @@ class DataForm extends Form {
         }
         if (action === 'save') {
             const data = this.collectData();
-            // Собираем данные табличных частей из _dataMap (записи с tabularSection: true)
+            // Собираем данные табличных частей из _dataMap (записи с tabularSection: true).
+            // У ЗАКРЫТОГО документа не собираем вовсе: строки правке не подлежат, а
+            // сохранение сводится к разрешённым полям шапки (отметка об оплате).
+            // Отправив строки, форма получила бы отказ на записи, которых не меняла:
+            // сохранение перезаписывает табличную часть целиком.
             try {
                 const tabularSections = {};
-                if (this._dataMap) {
+                if (this._dataMap && !(this._lock && this._lock.closed)) {
                     for (const key in this._dataMap) {
                         const entry = this._dataMap[key];
                         if (entry && entry.tabularSection === true) {
@@ -4852,6 +5004,10 @@ class TextBox extends FormInput {
         this.label = null;
         // List mode: when enabled, a small button appears to open a prepared list
         if (typeof this.listMode === 'undefined' || this.listMode === null) this.listMode = false;
+        // `locked` (см. FormInput): значение не меняется вообще. Список значений при
+        // этом СОХРАНЯЕТСЯ — им поле показывает подпись состояния («Ausgestellt»)
+        // вместо самого значения; убирается только кнопка, открывающая выбор.
+        if (typeof this.locked === 'undefined' || this.locked === null) this.locked = false;
         // Optional: show a selection button ("...") to trigger a selection procedure
         if (typeof this.showSelectionButton === 'undefined' || this.showSelectionButton === null) this.showSelectionButton = false;
         // editorButton: рисует кнопку «...» как у селектора, НО поле остаётся обычным
@@ -4982,6 +5138,21 @@ class TextBox extends FormInput {
         this.readOnly = readOnly;
         if (this.element) {
             this.element.readOnly = readOnly;
+        }
+    }
+
+    /**
+     * Запирание уже отрисованного поля (документ провели в открытом окне).
+     * Убирает обе кнопки, меняющие значение, и закрывает открытый список —
+     * `readOnly` их не трогает: у поля выбора он означает лишь «не набирают руками».
+     */
+    _applyLocked() {
+        super._applyLocked();
+        try { if (this.locked && this._listOpen && this._closeList) this._closeList(); } catch (e) {}
+        try { if (this.locked && this._calOpen && this._closeCalendar) this._closeCalendar(); } catch (e) {}
+        const spin = this._spinWrap || {};
+        for (const btn of [this._listBtn, this._selectBtn, this._dateBtn, spin.plus, spin.minus]) {
+            try { if (btn) btn.style.display = this.locked ? 'none' : ''; } catch (e) {}
         }
     }
 
@@ -5157,7 +5328,7 @@ class TextBox extends FormInput {
             // If requested, add selection button ("...") to the input container.
             // It should appear to the right of the input and (if present) to the left of the dropdown list button.
             try {
-                if (this.showSelectionButton || this.editorButton) {
+                if ((this.showSelectionButton || this.editorButton) && !this.locked) {
                     if (!this._selectBtn) {
                         const sbtn = document.createElement('button');
                         sbtn.type = 'button';
@@ -5200,7 +5371,10 @@ class TextBox extends FormInput {
             // updates through the normal path. Disabled inactive-row state is handled by
             // the table cell logic (button without dataset.role='selection').
             try {
-                if (this.spinButtons && this.digitsOnly && !this._spinWrap) {
+                // Тот же принцип, что у календаря: у нередактируемого поля кнопки «−/+»
+                // были мёртвыми (`_spinValue` выходит по readOnly) — интерфейс обещал
+                // действие, которого нет.
+                if (this.spinButtons && this.digitsOnly && !this._spinWrap && !this.locked && !this.readOnly) {
                     const mkSpin = (glyph, delta, role) => {
                         const b = document.createElement('button');
                         b.type = 'button';
@@ -5234,7 +5408,10 @@ class TextBox extends FormInput {
 
             // Calendar button: for date picker mode, a button identical in style to "..."
             try {
-                if (this.isDate && !this._dateBtn) {
+                // Кнопка календаря — только у поля, которое вправе менять значение.
+                // Нередактируемому она обещала действие, которое запрещено (и
+                // выполнялось: календарь писал дату мимо readOnly).
+                if (this.isDate && !this._dateBtn && !this.locked && !this.readOnly) {
                     const calBtn = document.createElement('button');
                     calBtn.type = 'button';
                     calBtn.tabIndex = -1;
@@ -5392,7 +5569,8 @@ class TextBox extends FormInput {
             // If listMode is enabled, add a small Win95-style button at right to open prepared list
             try {
                 // remove stale button/popup if present and mode disabled
-                if (!this.listMode && this._listBtn) {
+                // (запертое поле — тот же случай: список остаётся ради подписи, кнопка уходит)
+                if ((!this.listMode || this.locked) && this._listBtn) {
                     try { if (this._listBtn._ro && typeof this._listBtn._ro.disconnect === 'function') this._listBtn._ro.disconnect(); } catch (_) {}
                     try { if (this._listBtn._win) window.removeEventListener('resize', this._listBtn._win); } catch (_) {}
                     try { this._listBtn.remove(); } catch (_) {}
@@ -5400,7 +5578,7 @@ class TextBox extends FormInput {
                     try { this._closeList && this._closeList(); } catch (_) {}
                 }
 
-                if (this.listMode) {
+                if (this.listMode && !this.locked) {
                     // create button if missing
                     if (!this._listBtn) {
                         const btn = document.createElement('button');
@@ -5460,6 +5638,9 @@ class TextBox extends FormInput {
                         this._openList = () => {
                             try {
                                 if (this._listOpen) return;
+                                // Запертое поле не открывает список ни по кнопке, ни по
+                                // фокусу: кнопки уже нет, но фокус на поле остаётся.
+                                if (this.locked) return;
                                 // build popup
                                 const popup = document.createElement('div');
                                 popup.className = 'textbox-list-popup';
@@ -5481,7 +5662,15 @@ class TextBox extends FormInput {
                                 popup.style.minWidth = (this.containerElement ? this.containerElement.clientWidth : (container ? container.clientWidth : 120)) + 'px';
 
                                 // populate items
-                                const items = Array.isArray(this.listItems) ? this.listItems : [];
+                                //
+                                // `allowedValues` сужает ВЫБОР, не трогая список подписей:
+                                // состояние документа показывается словом («Ausgestellt»)
+                                // и после того, как переход в него стал недоступен. Убери
+                                // значение из listItems — и поле начнёт показывать голый
+                                // код состояния.
+                                const allowed = Array.isArray(this.allowedValues) ? this.allowedValues.map(String) : null;
+                                const items = (Array.isArray(this.listItems) ? this.listItems : [])
+                                    .filter(it => !allowed || allowed.indexOf(String(it && it.value)) !== -1);
                                 for (let i = 0; i < items.length; i++) {
                                     const it = items[i] || {};
                                     const row = document.createElement('div');
@@ -6704,6 +6893,12 @@ class TextBox extends FormInput {
         const k = e.key;
         // Allow standard shortcuts (copy/paste/select all)
         if (e.ctrlKey || e.metaKey) return;
+        // Дата правится ИСКЛЮЧИТЕЛЬНО этим обработчиком, а не набором в input, —
+        // поэтому `element.readOnly` её не останавливал: нередактируемое поле даты
+        // спокойно менялось с клавиатуры (дата проведённого документа в том числе).
+        // Выходим ДО preventDefault: браузер сам обработает стрелки и Tab, а ввод
+        // в readOnly-поле не пройдёт.
+        if (this.readOnly || this.locked) return;
         e.preventDefault();
         const secs = this._dateSecs();
         const lastSec = secs.length - 1;
@@ -6835,6 +7030,9 @@ class TextBox extends FormInput {
 
     _openCalendar() {
         if (this._calOpen) return;
+        // Нередактируемое поле даты календарь не открывает: кнопки у него нет, но
+        // вызов приходит и с клавиатуры (см. обработчик над этим методом).
+        if (this.locked || this.readOnly) return;
         const today = new Date();
         let year = today.getFullYear(), month = today.getMonth() + 1;
         if (this._yyyy) { const y = parseInt(this._yyyy, 10); if (y >= 1000) year = y; }
@@ -7123,6 +7321,10 @@ class TextBox extends FormInput {
     }
 
     onSelectionStart() {
+        // Запертое поле не открывает справочник: кнопки «...» у него нет, но
+        // выбор запускается и другими путями (автовыбор единственной ссылки в
+        // новой строке таблицы), а результат лёг бы в документ, правке не подлежащий.
+        if (this.locked) return;
         // Open uniListForm chooser directly and forward selection to `handleSelection`.
         try {
             const selMeta = this.selection || {};
@@ -9591,7 +9793,13 @@ class Table extends UIObject {
         this.dataKey = properties.dataKey || properties.data || null;
         this.appForm = properties.appForm || null;
         this.caption = properties.caption || '';
-        this.readOnly = properties.readOnly || false;
+        // `readOnly` — ячейки не правятся на месте (обычный список именно таков, и
+        // кнопки «Добавить»/«Удалить» у него при этом работают: он ведёт ЗАПИСИ).
+        // `locked` — данные не меняются вообще: табличная часть проведённого
+        // документа. Тогда из тулбара уходят и действия записи, иначе форма
+        // предлагает добавить строку, которую база не примет.
+        this.locked = !!properties.locked;
+        this.readOnly = properties.readOnly || this.locked || false;
         this.element = null;
         // If visibleRows === 0 => show all rows (no fixed height). If >0 => body height = visibleRows * rowHeight
         this.visibleRows = (typeof properties.visibleRows === 'number') ? (properties.visibleRows | 0) : 0;
@@ -10937,6 +11145,26 @@ class Table extends UIObject {
         } catch (e) {}
     }
 
+    /**
+     * Запереть таблицу целиком: данные не меняются вообще (табличная часть
+     * проведённого документа). В отличие от `readOnly` убирает из тулбара и
+     * действия записи — иначе форма предлагает добавить строку, которую база
+     * не примет. Зовётся, когда документ провели в уже открытом окне.
+     */
+    setLocked(locked) {
+        this.locked = !!locked;
+        if (this.locked) this.readOnly = true;
+        try {
+            const btns = this._toolbarButtons || {};
+            for (const action of ['recordAdd', 'recordDelete']) {
+                const b = btns[action];
+                if (!b || !b.element) continue;
+                b.element.style.display = this.locked ? 'none' : '';
+            }
+        } catch (e) {}
+        try { this.updateAllRowsReadOnly(); } catch (e) {}
+    }
+
     // Iterate rows and set readOnly/disabled state on controls depending on active row
     updateAllRowsReadOnly() {
         try {
@@ -10955,7 +11183,10 @@ class Table extends UIObject {
                     if (el.closest && el.closest('[data-col-readonly]')) continue;
                     try {
                         // Selection buttons ("...") stay always clickable — skip disabling them.
-                        const isSelectionBtn = !!(el.dataset && el.dataset.role === 'selection');
+                        // Исключение — ЗАПЕРТАЯ таблица: там кнопка выбора открыла бы
+                        // справочник и дала записать значение в ячейку документа,
+                        // который правке не подлежит.
+                        const isSelectionBtn = !this.locked && !!(el.dataset && el.dataset.role === 'selection');
                         if (el.tagName) {
                             const tag = el.tagName.toLowerCase();
                             if (tag === 'input' || tag === 'textarea') el.readOnly = !isActive;
@@ -11371,10 +11602,16 @@ class Table extends UIObject {
                     if (btnDef.hideInSelectMode && isSelectMode) continue;
                     if (btnDef.dynamicOnly && typeof this.refresh !== 'function') continue;
                     if (hiddenButtons.includes(btnDef.action)) continue;
+                    // Запертая таблица (ТЧ проведённого документа) не предлагает
+                    // того, чего не сделает: строку нельзя ни добавить, ни удалить.
+                    if (this.locked && (btnDef.action === 'recordAdd' || btnDef.action === 'recordDelete')) continue;
                     const btn = new Button(toolbarContainer, { caption: btnDef.caption, tooltip: btnDef.caption, icon: btnDef.icon, showIcon: !!btnDef.icon, showText: false });
                     btn.Draw(toolbarContainer);
                     const action = btnDef.action;
                     const self = this;
+                    // Кнопку запоминаем: при запирании уже отрисованной таблицы
+                    // (документ провели в открытом окне) её надо убрать.
+                    try { (this._toolbarButtons || (this._toolbarButtons = {}))[btnDef.action] = btn; } catch (e) {}
                     btn.onClick = () => {
                         // Кнопка "Настройки": передаём себя как tableInstance чтобы listSettings
                         // мог читать/писать фильтры напрямую на экземпляре таблицы
@@ -12601,7 +12838,7 @@ class Tabs extends UIObject {
 // DynamicTable class for displaying tabular data with virtual scrolling
 class DynamicTable extends Table {
     constructor(options = {}) {
-        super(null, { columns: options.fields || options.columns || [], rowHeight: options.rowHeight, appForm: options.appForm, dataKey: options.dataKey || options.data || options.tableName, readOnly: options.readOnly !== false, showToolbar: options.showToolbar, hiddenButtons: options.hiddenButtons });
+        super(null, { columns: options.fields || options.columns || [], rowHeight: options.rowHeight, appForm: options.appForm, dataKey: options.dataKey || options.data || options.tableName, readOnly: options.readOnly !== false, locked: !!options.locked, showToolbar: options.showToolbar, hiddenButtons: options.hiddenButtons });
 
         this.appName = options.appName || '';
         this.tableName = options.tableName || '';

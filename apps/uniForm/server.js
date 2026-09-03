@@ -131,6 +131,48 @@ function getEntityTypeForTable(tableName) {
 }
 
 /**
+ * Обходит все элементы дерева layout (те же ветви, что и translateLayoutI18n).
+ * Вызывает `fn(item)` на каждом. Мутировать элемент внутри `fn` можно.
+ */
+function walkLayoutItems(items, fn) {
+    if (!Array.isArray(items)) return;
+    for (const item of items) {
+        if (!item || typeof item !== 'object') continue;
+        fn(item);
+        if (Array.isArray(item.layout)) walkLayoutItems(item.layout, fn);
+        if (Array.isArray(item.columns)) walkLayoutItems(item.columns, fn);
+        if (Array.isArray(item.extraButtons)) walkLayoutItems(item.extraButtons, fn);
+        if (Array.isArray(item.tabs)) {
+            for (const tab of item.tabs) {
+                if (tab && Array.isArray(tab.layout)) walkLayoutItems(tab.layout, fn);
+            }
+        }
+    }
+}
+
+/**
+ * Замок проведённого документа НА ФОРМЕ (`drive_root/db/immutable.js`).
+ *
+ * Здесь делается только то, что нельзя сделать на клиенте: сужается набор
+ * состояний, доступных для ВЫБОРА. Сами поля гасит клиент — он же обязан запереть
+ * форму, когда документ проводится командой из уже открытого окна.
+ *
+ * Список значений (`options`) при этом остаётся полным: им поле показывает подпись
+ * состояния («Ausgestellt») вместо кода. Ограничение выражается отдельным
+ * свойством `allowedValues`, а поле запирается совсем, когда выбирать не из чего:
+ * единственное значение в выпадающем списке — не выбор, а обманка.
+ */
+function applyLockToLayout(layout, lock) {
+    if (!lock || !Array.isArray(lock.states)) return;
+    walkLayoutItems(layout, (item) => {
+        if (item.data !== lock.field || !Array.isArray(item.options)) return;
+        const props = Object.assign({}, item.properties, { allowedValues: lock.states.slice() });
+        if (lock.states.length <= 1) props.locked = true;
+        item.properties = props;
+    });
+}
+
+/**
  * Рекурсивно переводит все { i18n: 'key' } объекты в дереве layout.
  * Обрабатывает: item.caption, item.options[].caption, item.columns[].caption,
  *               tab.caption, item.layout[], item.tabs[].layout[],
@@ -341,7 +383,7 @@ async function getLayoutWithData(params, sessionID) {
                     });
                     const spec = await generateFormSpec(resolvedParams.tableName, resolvedParams, sessionID);
                     return { layout: spec.layout, data: spec.data, datasetId: spec.datasetId,
-                             clientScript: spec.clientScript || null, formIcon: spec.formIcon || null, appCaption: spec.appCaption || null, windowState: spec.windowState || null, fkLookups: spec.fkLookups || null, isNew: !!spec.isNew, events: spec.events || null, prefilled: spec.prefilled || null };
+                             clientScript: spec.clientScript || null, formIcon: spec.formIcon || null, appCaption: spec.appCaption || null, windowState: spec.windowState || null, fkLookups: spec.fkLookups || null, isNew: !!spec.isNew, events: spec.events || null, prefilled: spec.prefilled || null, lock: spec.lock || null };
                 }
             } catch (e) {
                 console.error('[uniForm/getLayoutWithData] datasetId refresh error:', e && e.message || e);
@@ -358,7 +400,7 @@ async function getLayoutWithData(params, sessionID) {
                     table: params.tableName,
                     id: params.recordID || params.recordId || params.id
                 });
-                return { layout: spec.layout, data: spec.data, datasetId, clientScript: spec.clientScript || null, formIcon: spec.formIcon || null, appCaption: spec.appCaption || null, windowState: spec.windowState || null, fkLookups: spec.fkLookups || null, isNew: !!spec.isNew, events: spec.events || null, prefilled: spec.prefilled || null };
+                return { layout: spec.layout, data: spec.data, datasetId, clientScript: spec.clientScript || null, formIcon: spec.formIcon || null, appCaption: spec.appCaption || null, windowState: spec.windowState || null, fkLookups: spec.fkLookups || null, isNew: !!spec.isNew, events: spec.events || null, prefilled: spec.prefilled || null, lock: spec.lock || null };
             } catch (e) {
                 console.error('[uniForm/getLayoutWithData] generateFormSpec error:', e && e.message || e);
             }
@@ -1515,6 +1557,26 @@ async function generateFormSpec(tableName, params, sessionID) {
         // хардкода размера/позиции окно оказалось бы 0×0 в углу.
         let finalWindowState = windowState || (getEntityTypeForTable(tableName) ? 'maximized' : 'centered');
 
+        // ── Замок проведённого документа ─────────────────────────────────────
+        // Состояние берём из ЗНАЧЕНИЙ ФОРМЫ, а не из записи: у новой записи записи
+        // ещё нет, а значение по умолчанию («черновик») уже есть — иначе на новой
+        // форме список состояний остался бы полным и «выставлено» выбиралось бы
+        // прямо в нём, мимо команды.
+        let lock = null;
+        try {
+            const gCtxLock = require('../../drive_root/globalServerContext');
+            const lockModelName = gCtxLock.getModelNameForTable(tableName) || tableName;
+            const LockModel = (gCtxLock.modelsDB || {})[lockModelName];
+            if (LockModel) {
+                const values = {};
+                for (const d of data) values[d.name] = d.value;
+                lock = require('../../drive_root/db/immutable').describeLock(LockModel, values);
+                if (lock) applyLockToLayout(layout, lock);
+            }
+        } catch (e) {
+            console.error('[uniForm/generateFormSpec] lock resolve error:', e && e.message || e);
+        }
+
         // Translate all { i18n: 'key' } objects in layout before sending to client
         if (Array.isArray(layout)) {
             await translateLayoutI18n(layout, sessionID);
@@ -1543,7 +1605,7 @@ async function generateFormSpec(tableName, params, sessionID) {
             }
         }
 
-        return { data, layout, datasetId, clientScript, formIcon, appCaption: resolvedCaption, windowState: finalWindowState, fkLookups: await fkLookupsPromise, isNew: isNew, events: clientEvents, prefilled };
+        return { data, layout, datasetId, clientScript, formIcon, appCaption: resolvedCaption, windowState: finalWindowState, fkLookups: await fkLookupsPromise, isNew: isNew, events: clientEvents, prefilled, lock };
     } catch (e) {
         console.error('[uniForm/generateFormSpec] failed:', e && e.message || e);
         return { data: [], layout: [] };
@@ -1808,6 +1870,9 @@ module.exports = {
     deleteRecord,
     getMultiInstanceTables,
     generateFormSpec,
+    // Экспортируется ради самопроверки (tmp/2026-09-03_formlock_selftest.js):
+    // копия этой функции в тесте разошлась бы с оригиналом и перестала его проверять.
+    applyLockToLayout,
     registerBeforeSaveTSRow,
     quickSearch,
     getPlacesConfig,

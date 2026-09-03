@@ -15,9 +15,14 @@
  *         "draft":  ["issued"],
  *         "issued": ["paid", "cancelled"]
  *       },
- *       "deletable": ["draft"]                      // из каких состояний можно удалять
+ *       "deletable": ["draft"],                     // из каких состояний можно удалять
+ *       "formEditable":  ["paidAt"],                // что остаётся доступным на ФОРМЕ
+ *       "commandStates": ["issued", "cancelled"]    // состояния, которые ставит команда
  *     }
  *   }
+ *
+ * Последние два — для формы записи (`describeLock`): она гасит поля закрытого
+ * документа сама, не дожидаясь отказа при сохранении.
  *
  * Табличные части документа закрываются ВМЕСТЕ с ним: строка счёта принадлежит
  * счёту, и без этого блокировка дырявая — запись правится через `uniForm.updateRow`
@@ -31,6 +36,11 @@
  */
 
 const SYSTEM_SESSION_ID = '__SYS_INTERNAL__';
+
+// Сравнение «то же самое значение» берём у журнала изменений, а не пишем второе:
+// разойдясь, они начали бы считать изменением разное — журнал молчал бы там, где
+// запрет отказывает, и наоборот.
+const { same } = require('./auditLog');
 
 /** Ошибка отказа: распознаётся клиентом по `code` и показывается пользователю как есть. */
 class ImmutableError extends Error {
@@ -218,9 +228,24 @@ async function check(request, globalCtx, t) {
 
             // Документ закрыт: разрешены только поля из `except` (плюс само поле
             // состояния, если переход выше признан законным).
+            //
+            // «Правка» — это ОТЛИЧАЮЩЕЕСЯ значение, а не присутствие поля в запросе.
+            // Форма присылает запись целиком, поэтому без сравнения со старым
+            // значением отказ приходил бы на любое сохранение закрытого документа —
+            // в том числе такое, где пользователь тронул одно лишь разрешённое поле
+            // (отметку об оплате). Сравнение то же, что в журнале изменений: DECIMAL
+            // приезжает из драйвера строкой, а с формы числом.
             const allowedFields = cfg.except.concat([cfg.field]);
-            const forbidden = changed.filter(k => allowedFields.indexOf(k) === -1
+            const suspect = changed.filter(k => allowedFields.indexOf(k) === -1
                 && k !== 'UID' && k !== 'updatedAt');
+            let forbidden = suspect;
+            if (suspect.length) {
+                const current = await Model.findOne({
+                    where: { UID: row.UID }, raw: true,
+                    transaction: options && options.transaction
+                });
+                if (current) forbidden = suspect.filter(k => !same(current[k], data[k]));
+            }
             if (forbidden.length) {
                 throw new ImmutableError(await refusalText(t, 'update'), 'DOCUMENT_IMMUTABLE',
                     { table, UID: row.UID, state, fields: forbidden });
@@ -278,6 +303,65 @@ async function checkInsert(request, globalCtx, t) {
     }
 }
 
+/**
+ * Описание «замка» для ФОРМЫ записи — из ТОЙ ЖЕ декларации, что и запрет записи.
+ *
+ * Форма обязана гасить поля сама, а не узнавать об отказе при сохранении: иначе
+ * пользователь заполняет закрытый документ и теряет введённое. Второй список полей
+ * (в лейауте, в клиентском скрипте) для этого не годится — разъехавшись с
+ * `entityConfig.immutable`, он показал бы редактируемым то, что база не примет.
+ *
+ * Дополнения декларации, нужные только форме:
+ *   "formEditable": ["paidAt"]           // поля, доступные у ЗАКРЫТОГО документа
+ *   "commandStates": ["issued", "cancelled"]  // состояния, которые ставит КОМАНДА
+ *
+ * `commandStates` — про побочные действия: выставление снимает архивную копию и
+ * проверяет реквизиты § 14, отмена оформляется сторно. Разрешённый переход
+ * `draft → issued` без этого выбирался бы прямо в списке состояний на форме, и
+ * счёт оказывался бы выставленным без архивной копии и без проверки.
+ *
+ * @param {Object} Model — модель Sequelize (нужен только `entityConfig`)
+ * @param {Object} values — значения записи (для новой — значения по умолчанию формы)
+ * @returns {{field, state, closed, closedStates, editable, states}|null}
+ */
+function describeLock(Model, values) {
+    const cfg = readConfig(Model);
+    if (!cfg) return null;
+
+    const raw = (Model.entityConfig && Model.entityConfig.immutable) || {};
+    const rawState = values ? values[cfg.field] : undefined;
+    const state = (rawState === undefined || rawState === null || rawState === '')
+        ? null : String(rawState);
+
+    const commandStates = Array.isArray(raw.commandStates) ? raw.commandStates : [];
+    const formEditable  = Array.isArray(raw.formEditable)  ? raw.formEditable  : [];
+
+    // Ручные переходы КАЖДОГО состояния: разрешённые минус командные. Отдаём картой,
+    // а не только для текущего состояния: документ может быть проведён в уже открытом
+    // окне, и список выбора обязан пересчитаться там же, без переоткрытия формы.
+    let manual = null;
+    if (cfg.transitions) {
+        manual = {};
+        for (const from of Object.keys(cfg.transitions)) {
+            manual[from] = (cfg.transitions[from] || []).filter(s => commandStates.indexOf(s) === -1);
+        }
+    }
+
+    // Состояния, доступные для выбора на форме: текущее плюс его ручные переходы.
+    // Текущее — всегда, иначе поле показало бы пустоту.
+    const states = (state !== null && manual) ? [state].concat(manual[state] || []) : null;
+
+    return {
+        field: cfg.field,
+        state,
+        closed: state !== null && cfg.when.indexOf(state) !== -1,
+        closedStates: cfg.when.slice(),
+        editable: formEditable.slice(),
+        states,
+        manual
+    };
+}
+
 /** Закрыт ли документ прямо сейчас (для прикладных проверок до записи). */
 async function isClosed(globalCtx, table, uid) {
     const modelName = globalCtx.getModelNameForTable(table);
@@ -294,6 +378,7 @@ module.exports = {
     SYSTEM_SESSION_ID,
     readConfig,
     findParent,
+    describeLock,
     check,
     checkInsert,
     isClosed
