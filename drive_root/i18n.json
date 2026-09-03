@@ -850,5 +850,215 @@
         "ru": "Порядок",
         "de": "Reihenfolge",
         "pl": "Kolejność"
+    },
+    "immutable_refuse_update": {
+        "en": "The document is already issued and cannot be changed. To correct an error, create a storno document.",
+        "ru": "Документ уже выставлен и не может быть изменён. Чтобы исправить ошибку, оформите сторно.",
+        "de": "Der Beleg ist bereits ausgestellt und kann nicht geändert werden. Zur Korrektur bitte einen Stornobeleg erstellen.",
+        "pl": "Dokument został już wystawiony i nie może być zmieniony. Aby poprawić błąd, utwórz dokument storno."
+    },
+    "immutable_refuse_line": {
+        "en": "These rows belong to an issued document and cannot be changed. To correct an error, create a storno document.",
+        "ru": "Строки принадлежат выставленному документу и не могут быть изменены. Чтобы исправить ошибку, оформите сторно.",
+        "de": "Die Zeilen gehören zu einem ausgestellten Beleg und können nicht geändert werden. Zur Korrektur bitte einen Stornobeleg erstellen.",
+        "pl": "Wiersze należą do wystawionego dokumentu i nie mogą być zmienione. Aby poprawić błąd, utwórz dokument storno."
+    },
+    "immutable_refuse_delete": {
+        "en": "An issued document cannot be deleted. To reverse it, create a storno document.",
+        "ru": "Выставленный документ нельзя удалить. Чтобы отменить его действие, оформите сторно.",
+        "de": "Ein ausgestellter Beleg kann nicht gelöscht werden. Zur Aufhebung bitte einen Stornobeleg erstellen.",
+        "pl": "Wystawionego dokumentu nie można usunąć. Aby go odwrócić, utwórz dokument storno."
+    },
+    "immutable_refuse_transition": {
+        "en": "This status change is not allowed.",
+        "ru": "Такой переход состояния не разрешён.",
+        "de": "Dieser Statuswechsel ist nicht zulässig.",
+        "pl": "Taka zmiana statusu jest niedozwolona."
+    },
+    "immutable_refuse_log_update": {
+        "en": "Journal and archive entries cannot be changed.",
+        "ru": "Записи журнала и архива изменению не подлежат.",
+        "de": "Journal- und Archiveinträge können nicht geändert werden.",
+        "pl": "Wpisy dziennika i archiwum nie podlegają zmianie."
+    },
+    "immutable_refuse_log_delete": {
+        "en": "Journal and archive entries cannot be deleted.",
+        "ru": "Записи журнала и архива удалению не подлежат.",
+        "de": "Journal- und Archiveinträge können nicht gelöscht werden.",
+        "pl": "Wpisów dziennika i archiwum nie można usunąć."
+    },
+    "doc_archive_table_field": {
+        "en": "Document table",
+        "ru": "Таблица документа",
+        "de": "Belegtabelle",
+        "pl": "Tabela dokumentu"
+    },
+    "doc_archive_document_field": {
+        "en": "Document",
+        "ru": "Документ",
+        "de": "Beleg",
+        "pl": "Dokument"
+    },
+    "doc_archive_number_field": {
+        "en": "Number",
+        "ru": "Номер",
+        "de": "Nummer",
+        "pl": "Numer"
+    },
+    "doc_archive_organization_field": {
+        "en": "Organization",
+        "ru": "Организация",
+        "de": "Organisation",
+        "pl": "Organizacja"
+    },
+    "doc_archive_lang_field": {
+        "en": "Language",
+        "ru": "Язык",
+        "de": "Sprache",
+        "pl": "Język"
+    },
+    "doc_archive_html_field": {
+        "en": "Printed form",
+        "ru": "Печатная форма",
+        "de": "Druckform",
+        "pl": "Forma drukowana"
+    },
+    "doc_archive_payload_field": {
+        "en": "Source data",
+        "ru": "Исходные данные",
+        "de": "Quelldaten",
+        "pl": "Dane źródłowe"
+    },
+    "doc_archive_sha_field": {
+        "en": "Checksum",
+        "ru": "Контрольная сумма",
+        "de": "Prüfsumme",
+        "pl": "Suma kontrolna"
+    },
+    "doc_archive_created_by_field": {
+        "en": "Created by",
+        "ru": "Кто выставил",
+        "de": "Ausgestellt von",
+        "pl": "Wystawił"
+    },
+    "doc_audit_table_field": {
+        "en": "Table",
+        "ru": "Таблица",
+        "de": "Tabelle",
+        "pl": "Tabela"
+    },
+    "doc_audit_record_field": {
+        "en": "Record",
+        "ru": "Запись",
+        "de": "Datensatz",
+        "pl": "Rekord"
+    },
+    "doc_audit_organization_field": {
+        "en": "Organization",
+        "ru": "Организация",
+        "de": "Organisation",
+        "pl": "Organizacja"
+    },
+    "doc_audit_operation_field": {
+        "en": "Operation",
+        "ru": "Операция",
+        "de": "Vorgang",
+        "pl": "Operacja"
+    },
+    "doc_audit_changed_at_field": {
+        "en": "Changed at",
+        "ru": "Когда изменено",
+        "de": "Geändert am",
+        "pl": "Data zmiany"
+    },
+    "doc_audit_user_field": {
+        "en": "User",
+        "ru": "Пользователь",
+        "de": "Benutzer",
+        "pl": "Użytkownik"
+    },
+    "doc_audit_user_name_field": {
+        "en": "User name",
+        "ru": "Имя пользователя",
+        "de": "Benutzername",
+        "pl": "Nazwa użytkownika"
+    },
+    "doc_audit_before_field": {
+        "en": "Before",
+        "ru": "Было",
+        "de": "Vorher",
+        "pl": "Przed"
+    },
+    "doc_audit_after_field": {
+        "en": "After",
+        "ru": "Стало",
+        "de": "Nachher",
+        "pl": "Po"
+    },
+    "doc_audit_seq_field": {
+        "en": "Sequence",
+        "ru": "Порядковый номер",
+        "de": "Laufende Nummer",
+        "pl": "Numer kolejny"
+    },
+    "doc_audit_prev_hash_field": {
+        "en": "Previous hash",
+        "ru": "Хэш предыдущей",
+        "de": "Vorheriger Hash",
+        "pl": "Poprzedni hash"
+    },
+    "doc_audit_hash_field": {
+        "en": "Hash",
+        "ru": "Хэш",
+        "de": "Hash",
+        "pl": "Hash"
+    },
+    "storno_refuse_of_storno": {
+        "en": "A cancellation document cannot itself be cancelled.",
+        "ru": "Сторнирующий документ нельзя сторнировать.",
+        "de": "Ein Stornobeleg kann nicht selbst storniert werden.",
+        "pl": "Dokumentu storno nie można stornować."
+    },
+    "storno_refuse_already": {
+        "en": "The document has already been cancelled.",
+        "ru": "Документ уже сторнирован.",
+        "de": "Der Beleg wurde bereits storniert.",
+        "pl": "Dokument został już stornowany."
+    },
+    "storno_refuse_cancelled": {
+        "en": "The document is already cancelled.",
+        "ru": "Документ уже отменён.",
+        "de": "Der Beleg ist bereits storniert.",
+        "pl": "Dokument jest już anulowany."
+    },
+    "storno_refuse_not_issued": {
+        "en": "Only an issued document can be cancelled.",
+        "ru": "Сторнировать можно только выставленный документ.",
+        "de": "Nur ein ausgestellter Beleg kann storniert werden.",
+        "pl": "Stornować można tylko wystawiony dokument."
+    },
+    "storno_refuse_no_target": {
+        "en": "Document not found.",
+        "ru": "Документ не найден.",
+        "de": "Beleg nicht gefunden.",
+        "pl": "Nie znaleziono dokumentu."
+    },
+    "storno_refuse_not_declared": {
+        "en": "Cancellation is not declared for this document type.",
+        "ru": "Для этого документа сторно не объявлено.",
+        "de": "Für diese Belegart ist kein Storno vorgesehen.",
+        "pl": "Dla tego typu dokumentu storno nie jest przewidziane."
+    },
+    "storno_refuse_no_model": {
+        "en": "Model for the table was not found.",
+        "ru": "Модель для таблицы не найдена.",
+        "de": "Modell für die Tabelle nicht gefunden.",
+        "pl": "Nie znaleziono modelu tabeli."
+    },
+    "storno_refuse_create_failed": {
+        "en": "The cancellation document could not be created.",
+        "ru": "Не удалось создать сторно-документ.",
+        "de": "Der Stornobeleg konnte nicht erstellt werden.",
+        "pl": "Nie udało się utworzyć dokumentu storno."
     }
 }

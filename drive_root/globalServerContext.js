@@ -71,7 +71,11 @@ function mergeModelDefs(modelDefs) {
                 tableName: def.tableName,
                 fields: { ...def.fields },
                 options: { ...def.options },
-                entityConfig: def.entityConfig || null
+                entityConfig: def.entityConfig || null,
+                // Принадлежность табличной части документу-владельцу нужна на
+                // рантайме (проверка неизменности проведённого документа), а не
+                // только при сборке формы — иначе строку ТЧ можно править в обход.
+                tabularSection: def.tabularSection || null
             });
         } else {
             // Merge with existing definition
@@ -82,6 +86,7 @@ function mergeModelDefs(modelDefs) {
             if (def.options) {
                 Object.assign(existing.options, def.options);
             }
+            if (def.tabularSection) existing.tabularSection = def.tabularSection;
             console.log(`[globalModels] Merged model ${def.name}: added ${Object.keys(def.fields).length} fields`);
         }
     }
@@ -142,6 +147,7 @@ function generateModelsFromDefs(modelDefs) {
             );
             // Attach entityConfig for use by entityHooks middleware
             models[def.name].entityConfig = def.entityConfig || null;
+            models[def.name].tabularSection = def.tabularSection || null;
         } catch (e) {
             console.error(`Error defining model ${def.name}:`, e.message);
             throw e;

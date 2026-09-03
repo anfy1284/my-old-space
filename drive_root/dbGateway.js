@@ -255,6 +255,63 @@ function clearMiddleware(level) {
     _cachedChain = null; // 5.1
 }
 
+// ── Неизменность проведённого документа (GoBD) ───────────────────────────────
+// Регистрируется ПЕРВЫМ на уровне 'root': отказ должен случиться до того, как
+// хуки сущности начнут править данные (номер, представление) и до executor'а.
+// Системная сессия (__SYS_INTERNAL__) исключением НЕ является — неизменность
+// выставленного документа не про права доступа, а про требование закона.
+use('root', async function immutableMiddleware(request, next) {
+    const { operation } = request;
+    if (operation === 'update' || operation === 'delete' || operation === 'create') {
+        const globalCtx = require('./globalServerContext');
+        const immutable = require('./db/immutable');
+        const sessionID = request.context && request.context.sessionID;
+
+        // Переводчик языка сессии: ключей может не быть — тогда модуль возьмёт
+        // собственный запасной текст.
+        const t = async (key) => {
+            try {
+                const forms = require('../drive_forms/globalServerContext');
+                return await forms.tForSession(key, sessionID);
+            } catch (e) { return null; }
+        };
+
+        if (operation === 'create') {
+            await immutable.checkInsert(request, globalCtx, t);
+        } else {
+            await immutable.check(request, globalCtx, t);
+        }
+    }
+    return await next(request);
+});
+
+// ── Журнал изменений документов (GoBD) ───────────────────────────────────────
+// Пишет только по таблицам с пометкой `entityConfig.auditLog`. Стоит ПОСЛЕ
+// проверки неизменности (отказ журналировать нечего) и ПЕРЕД хуками сущности:
+// снимок «после» снимается уже после их работы, когда `data` содержит номер и
+// представление, — потому что хуки правят `request.data` по ссылке.
+use('root', async function auditLogMiddleware(request, next) {
+    const { operation } = request;
+    if (operation !== 'create' && operation !== 'update' && operation !== 'delete') {
+        return await next(request);
+    }
+
+    const globalCtx = require('./globalServerContext');
+    const auditLog = require('./db/auditLog');
+
+    const before = await auditLog.snapshotBefore(request, globalCtx);
+    const result = await next(request);
+
+    // Сбой журналирования не должен отменять уже выполненную операцию, но и
+    // молчать о нём нельзя: незаписанная строка журнала — дыра в цепочке.
+    try {
+        await auditLog.record(request, globalCtx, before, result);
+    } catch (e) {
+        console.error('[auditLog] Failed to record change:', e && e.message || e);
+    }
+    return result;
+});
+
 // ── Entity Hooks root-level middleware ───────────────────────────────────────
 // Перехватывает create/update и запускает хуки из entityConfig модели.
 // Регистрируется на уровне 'root' чтобы срабатывать для всех источников данных.

@@ -1226,6 +1226,142 @@
             "options": {
                 "timestamps": true
             }
+        },
+        {
+            "name": "DocumentArchive",
+            "tableName": "document_archive",
+            "entityConfig": {
+                "appendOnly": true
+            },
+            "fields": {
+                "documentTable": {
+                    "type": "STRING",
+                    "allowNull": false,
+                    "caption": { "i18n": "doc_archive_table_field" }
+                },
+                "documentUID": {
+                    "type": "STRING",
+                    "allowNull": false,
+                    "caption": { "i18n": "doc_archive_document_field" }
+                },
+                "documentNumber": {
+                    "type": "STRING",
+                    "allowNull": true,
+                    "caption": { "i18n": "doc_archive_number_field" }
+                },
+                "organizationId": {
+                    "type": "STRING",
+                    "allowNull": true,
+                    "caption": { "i18n": "doc_archive_organization_field" }
+                },
+                "lang": {
+                    "type": "STRING",
+                    "allowNull": true,
+                    "caption": { "i18n": "doc_archive_lang_field" }
+                },
+                "html": {
+                    "type": "TEXT",
+                    "allowNull": false,
+                    "caption": { "i18n": "doc_archive_html_field" }
+                },
+                "payload": {
+                    "type": "TEXT",
+                    "allowNull": false,
+                    "caption": { "i18n": "doc_archive_payload_field" }
+                },
+                "sha256": {
+                    "type": "STRING",
+                    "allowNull": false,
+                    "caption": { "i18n": "doc_archive_sha_field" }
+                },
+                "createdBy": {
+                    "type": "STRING",
+                    "allowNull": true,
+                    "caption": { "i18n": "doc_archive_created_by_field" }
+                }
+            },
+            "options": {
+                "timestamps": true,
+                "indexes": [
+                    { "fields": ["documentTable", "documentUID"] }
+                ]
+            }
+        },
+        {
+            "name": "DocumentAuditLog",
+            "tableName": "document_audit_log",
+            "entityConfig": {
+                "appendOnly": true
+            },
+            "fields": {
+                "documentTable": {
+                    "type": "STRING",
+                    "allowNull": false,
+                    "caption": { "i18n": "doc_audit_table_field" }
+                },
+                "documentUID": {
+                    "type": "STRING",
+                    "allowNull": false,
+                    "caption": { "i18n": "doc_audit_record_field" }
+                },
+                "organizationId": {
+                    "type": "STRING",
+                    "allowNull": true,
+                    "caption": { "i18n": "doc_audit_organization_field" }
+                },
+                "operation": {
+                    "type": "STRING",
+                    "allowNull": false,
+                    "caption": { "i18n": "doc_audit_operation_field" }
+                },
+                "changedAt": {
+                    "type": "DATE",
+                    "allowNull": false,
+                    "caption": { "i18n": "doc_audit_changed_at_field" }
+                },
+                "userId": {
+                    "type": "STRING",
+                    "allowNull": true,
+                    "caption": { "i18n": "doc_audit_user_field" }
+                },
+                "userName": {
+                    "type": "STRING",
+                    "allowNull": true,
+                    "caption": { "i18n": "doc_audit_user_name_field" }
+                },
+                "before": {
+                    "type": "TEXT",
+                    "allowNull": true,
+                    "caption": { "i18n": "doc_audit_before_field" }
+                },
+                "after": {
+                    "type": "TEXT",
+                    "allowNull": true,
+                    "caption": { "i18n": "doc_audit_after_field" }
+                },
+                "seq": {
+                    "type": "INTEGER",
+                    "allowNull": false,
+                    "defaultValue": 0,
+                    "caption": { "i18n": "doc_audit_seq_field" }
+                },
+                "prevHash": {
+                    "type": "STRING",
+                    "allowNull": true,
+                    "caption": { "i18n": "doc_audit_prev_hash_field" }
+                },
+                "hash": {
+                    "type": "STRING",
+                    "allowNull": false,
+                    "caption": { "i18n": "doc_audit_hash_field" }
+                }
+            },
+            "options": {
+                "timestamps": false,
+                "indexes": [
+                    { "fields": ["documentTable", "documentUID"] }
+                ]
+            }
         }
     ],
     "associations": [
