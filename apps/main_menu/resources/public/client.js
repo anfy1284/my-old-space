@@ -39,10 +39,7 @@
                 });
 
                 if (item.icon) {
-                    const iconImg = document.createElement('img');
-                    iconImg.src = item.icon;
-                    iconImg.style.width = '16px';
-                    iconImg.style.height = '16px';
+                    const iconImg = MySpace.icon.img(item.icon, 16);
                     iconImg.style.flexShrink = '0';
                     iconImg.style.pointerEvents = 'none';
                     itemDiv.appendChild(iconImg);
@@ -365,9 +362,8 @@
                         btnElement.style.width = btnHeight + 'px';
                         btnElement.style.padding = '0';
                     } else if (btnData.icon) {
-                        const iconImg = document.createElement('img');
-                        iconImg.src = btnData.icon;
-                        iconImg.style.cssText = 'width:16px;height:16px;flex-shrink:0;pointer-events:none;margin-right:4px;';
+                        const iconImg = MySpace.icon.img(btnData.icon, 16);
+                        iconImg.style.cssText += 'flex-shrink:0;pointer-events:none;margin-right:4px;';
                         btnElement.prepend(iconImg);
                     }
 

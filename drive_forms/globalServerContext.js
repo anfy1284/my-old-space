@@ -29,6 +29,58 @@ require('../drive_root/dbLifecycle').onDatabaseReset('drive_forms/globalServerCo
     }
 });
 
+// ── Индекс иконок ────────────────────────────────────────────────────
+// Клиент берёт файл иконки под нужный размер, а если файла такого размера нет —
+// master (одна крупная иконка, которую браузер сжимает сам). Проверять наличие
+// файла запросом нельзя: это 404 на каждую отсутствующую иконку при каждой
+// отрисовке. Поэтому состав папок иконок снимается ОДИН раз и уезжает к клиенту
+// вместе с бандлом приложений — до того, как отрисуется первая кнопка.
+//
+// Индекс строится здесь, а не отдельным модулем, потому что здесь уже разрешены
+// фактические пути приложений (проектные перекрывают фреймворковые) — второй
+// раз разбирать apps.json значит завести вторую версию той же логики.
+//
+// Состав приложений фиксируется при старте (см. кэш бандла выше), поэтому индекс
+// тоже строится один раз за процесс: добавили или удалили файл иконки — нужен
+// перезапуск сервера, как и для нового приложения.
+const ICON_DIR_RE = /^(\d+x\d+|master)$/;
+const ICON_FILE_RE = /\.(png|svg|gif|webp|jpe?g)$/i;
+let _iconIndexCode;
+
+function buildIconIndexCode(appsList) {
+    if (_iconIndexCode !== undefined) return _iconIndexCode;
+    const index = {};
+    for (const app of appsList) {
+        try {
+            const baseDir = app.__appsBaseDir || path.resolve(__dirname, '..');
+            const appsBasePath = app.__appsPath || 'apps';
+            const cleanAppPath = (app.path || `/${app.name}`).replace(/^[/\\]+/, '');
+            const publicDir = path.resolve(baseDir, appsBasePath, cleanAppPath, 'resources', 'public');
+            if (!fs.existsSync(publicDir)) continue;
+
+            const folders = {};
+            for (const entry of fs.readdirSync(publicDir, { withFileTypes: true })) {
+                if (!entry.isDirectory() || !ICON_DIR_RE.test(entry.name)) continue;
+                const ids = fs.readdirSync(path.join(publicDir, entry.name))
+                    .filter(f => ICON_FILE_RE.test(f))
+                    .map(f => f.replace(ICON_FILE_RE, ''));
+                if (ids.length) folders[entry.name] = ids;
+            }
+            // Ключ — URL-база, ровно в том виде, в каком её видит клиент в ссылке
+            // на иконку: /apps/<app>/resources/public
+            if (Object.keys(folders).length) {
+                index[`/${appsBasePath}/${cleanAppPath}/resources/public`] = folders;
+            }
+        } catch (e) {
+            log.debug('[iconIndex] skip app', app && app.name, e.message);
+        }
+    }
+    const total = Object.values(index).reduce((n, f) => n + Object.values(f).reduce((m, a) => m + a.length, 0), 0);
+    log.debug(`[iconIndex] коллекций: ${Object.keys(index).length}, файлов: ${total}`);
+    _iconIndexCode = 'window.MySpaceIconIndex = ' + JSON.stringify(index) + ';\n\n';
+    return _iconIndexCode;
+}
+
 async function loadApps(user, sessionID) {
   const accessRole = await getUserAccessRole(user);
   log.debug(`[loadApps] Loading apps for user: ${user ? user.name : 'null'}, role: ${accessRole}`);
@@ -69,7 +121,8 @@ async function loadApps(user, sessionID) {
   }
 
   const appsList = Array.from(appsMap.values());
-  let allCode = '';
+  // Индекс иконок идёт первым в бандле: он нужен уже при отрисовке первой кнопки.
+  let allCode = buildIconIndexCode(appsList);
 
   // Don't convert nologged to public - keep as is to load login app
   const effectiveRole = accessRole || 'nologged';

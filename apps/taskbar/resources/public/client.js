@@ -84,7 +84,7 @@ const Taskbar = {
         icon.style.marginRight = '3px';
         icon.style.flexShrink = '0';
         if (form.formIcon) {
-            icon.src = form.formIcon;
+            MySpace.icon.apply(icon, form.formIcon, 16);
             icon.style.display = 'inline';
         } else {
             icon.style.display = 'none';

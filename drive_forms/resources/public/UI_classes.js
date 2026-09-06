@@ -22,6 +22,127 @@ function isEmptyDateValue(v) {
     return d.getFullYear() <= EMPTY_DATE_MAX_YEAR;
 }
 
+// ─────────────────────────────────────────────────────────────────────
+// Иконки: выбор файла под нужный размер.
+//
+// Зачем в ядре. Иконку в интерфейс вставляли девять разных мест, и каждое
+// делало это само: createElement('img') + src + width/height 16px. Пока файл
+// был ровно один, это работало; как только у иконки появляется несколько
+// вариантов хранения, девять копий кода начинают расходиться. Поэтому выбор
+// файла живёт здесь, а места вставки только просят «иконку такого-то размера».
+//
+// ПРАВИЛО. Сначала берётся файл под нужный размер (16 px → папка 16x16),
+// а если такого файла нет — master: одна крупная иконка, которую под нужный
+// размер сжимает браузер. Правило общее для всех иконок; отдельного признака
+// «эта масштабируемая, а эта нет» нет — решает наличие файла.
+//
+// Откуда известно, что файла нет. Из window.MySpaceIconIndex — состав папок
+// иконок, снятый сервером один раз при старте и приехавший вместе с бандлом
+// приложений (drive_forms/globalServerContext.js → buildIconIndexCode).
+// Проверять наличие запросом нельзя: это 404 на каждую отсутствующую иконку
+// при каждой отрисовке. Пока индекс не загружен, путь используется как есть —
+// поведение ровно то, что было до появления master.
+//
+// Побочный эффект для серий: когда файл нужного размера есть и есть файл
+// вдвое крупнее, ядро отдаёт srcset «16 → 1x, 32 → 2x». На экране с масштабом
+// 150–200 % браузер возьмёт 32×32 вместо растянутого 16×16.
+const ICON_SERIES_SIZES = [16, 32];   // размеры, в которых бывает своя папка
+const ICON_MASTER_DIR = 'master';     // папка одной масштабируемой иконки
+// /apps/<app>/resources/public + /16x16|32x32|master/ + <id>.<ext>
+const ICON_PATH_RE = /^(.*)\/(\d+x\d+|master)\/([^/]+)\.([a-z0-9]+)$/i;
+
+// Ссылка на иконку → { src }. Принимает строку-путь или объект { src }.
+function parseIconRef(ref) {
+    if (!ref) return null;
+    const src = (typeof ref === 'object') ? String(ref.src || ref.url || '') : String(ref);
+    return src ? { src } : null;
+}
+
+// Есть ли файл <id> в папке <dir> коллекции <base> по индексу.
+// null — про эту коллекцию индекс ничего не знает (тогда решать нечего).
+function iconIndexHas(base, dir, id) {
+    const idx = (typeof window !== 'undefined' && window.MySpaceIconIndex) || null;
+    if (!idx) return null;
+    const coll = idx[base];
+    if (!coll) return null;
+    const list = coll[dir];
+    return !!(list && list.indexOf(id) >= 0);
+}
+
+// Собрать путь: <base>/<dir>/<id>.<ext>
+function iconPath(p, dir) {
+    return p.base + '/' + dir + '/' + p.id + '.' + p.ext;
+}
+
+// Ссылка + требуемый размер → { src, srcset, fromMaster }.
+function resolveIcon(ref, px) {
+    const parsed = parseIconRef(ref);
+    if (!parsed) return null;
+    const size = px || 16;
+
+    // Не иконка из коллекции (логотип, произвольная картинка) — отдаём как есть.
+    const m = ICON_PATH_RE.exec(parsed.src);
+    if (!m) return { src: parsed.src, srcset: '', fromMaster: false, size };
+    const p = { base: m[1], dir: m[2], id: m[3], ext: m[4] };
+
+    // Папка под запрошенный размер: ближайшая не меньшая из существующих.
+    const bigger = ICON_SERIES_SIZES.filter(s => s >= size);
+    const want = bigger.length ? bigger[0] : ICON_SERIES_SIZES[ICON_SERIES_SIZES.length - 1];
+    const wantDir = want + 'x' + want;
+
+    const hasWanted = iconIndexHas(p.base, wantDir, p.id);
+    if (hasWanted === null) {
+        // Индекса нет — прежнее поведение: путь как передали.
+        return { src: parsed.src, srcset: '', fromMaster: false, size };
+    }
+    if (!hasWanted) {
+        // Файла нужного размера нет → master. Если нет и его — оставляем путь
+        // как передали, чтобы в консоли был честный 404 на конкретный файл,
+        // а не молча пустая кнопка.
+        if (iconIndexHas(p.base, ICON_MASTER_DIR, p.id)) {
+            return { src: iconPath(p, ICON_MASTER_DIR), srcset: '', fromMaster: true, size };
+        }
+        return { src: parsed.src, srcset: '', fromMaster: false, size };
+    }
+
+    // Файл нужного размера есть. Более крупные размеры, которые реально лежат
+    // на диске, уходят в srcset для экранов с высокой плотностью пикселей.
+    const set = bigger
+        .filter(s => iconIndexHas(p.base, s + 'x' + s, p.id))
+        .map(s => iconPath(p, s + 'x' + s) + ' ' + (s / size) + 'x');
+    return {
+        src: iconPath(p, wantDir),
+        srcset: (set.length > 1) ? set.join(', ') : '',
+        fromMaster: false,
+        size
+    };
+}
+
+// Проставить иконку в существующий <img>. size передаётся, только если этот
+// вызывающий сам задаёт размер картинки; места, где размер диктует CSS
+// (кнопки поля ввода — max-width/max-height), вызывают без него.
+function applyIcon(img, ref, px, opts) {
+    const r = resolveIcon(ref, px);
+    if (!img) return null;
+    if (!r) { img.removeAttribute('src'); img.removeAttribute('srcset'); return null; }
+    img.src = r.src;
+    if (r.srcset) img.srcset = r.srcset; else img.removeAttribute('srcset');
+    if (px && !(opts && opts.noSize)) {
+        img.style.width = px + 'px';
+        img.style.height = px + 'px';
+    }
+    return r;
+}
+
+// Готовый <img> с иконкой.
+function createIconImg(ref, px, opts) {
+    const img = document.createElement('img');
+    img.alt = (opts && opts.alt) || '';
+    img.draggable = false;
+    applyIcon(img, ref, px, opts);
+    return img;
+}
+
 class UIObject {
     constructor() {
         this.element = null;
@@ -746,6 +867,24 @@ if (typeof window !== 'undefined') {
                 }
             },
 
+            /**
+             * Иконки — выбор файла под нужный размер: сначала папка этого
+             * размера, при отсутствии файла — master (см. комментарий к
+             * resolveIcon в начале файла). Публикуется, потому что вставляют
+             * иконки и приложения тоже (main_menu, taskbar), а правило выбора
+             * файла должно быть одно на всех.
+             *
+             *   MySpace.icon.resolve(ref, 16) → { src, srcset, fromMaster }
+             *   MySpace.icon.apply(imgEl, ref, 16)
+             *   MySpace.icon.img(ref, 16)     → готовый <img>
+             */
+            icon: {
+                resolve: (ref, px) => resolveIcon(ref, px),
+                apply:   (img, ref, px, opts) => applyIcon(img, ref, px, opts),
+                img:     (ref, px, opts) => createIconImg(ref, px, opts),
+                seriesSizes: () => ICON_SERIES_SIZES.slice()
+            },
+
             register(name, descriptor) {
                 apps[name] = descriptor;
                 try { if (descriptor && typeof descriptor.init === 'function') descriptor.init(); } catch (e) { console.error('MySpace.register.init error', e); }
@@ -968,9 +1107,11 @@ class Form extends UIObject {
 
     setFormIcon(url) {
         this.formIcon = url || null;
+        // Заголовок окна и кнопка в таскбаре — 16 px; файл под этот размер
+        // (или масштабируемый мастер) выбирает ядро, см. applyIcon.
         if (this.titleIconElement) {
             if (url) {
-                this.titleIconElement.src = url;
+                applyIcon(this.titleIconElement, url, 16);
                 this.titleIconElement.style.display = 'inline';
             } else {
                 this.titleIconElement.style.display = 'none';
@@ -979,7 +1120,7 @@ class Form extends UIObject {
         // Update taskbar button icon if it exists
         if (this._taskbarIcon) {
             if (url) {
-                this._taskbarIcon.src = url;
+                applyIcon(this._taskbarIcon, url, 16);
                 this._taskbarIcon.style.display = 'inline';
             } else {
                 this._taskbarIcon.style.display = 'none';
@@ -4430,10 +4571,7 @@ class Button extends UIObject {
         this.element.innerHTML = '';
         
         if (this.showIcon && this.icon) {
-            const iconImg = document.createElement('img');
-            iconImg.src = this.icon;
-            iconImg.style.width = '16px';
-            iconImg.style.height = '16px';
+            const iconImg = createIconImg(this.icon, 16);
             iconImg.style.verticalAlign = 'middle';
             if (this.showText && this.caption) {
                 iconImg.style.marginRight = '4px';
@@ -4795,10 +4933,7 @@ class SplitButton extends Button {
             row.style.display = 'flex';
             row.style.alignItems = 'center';
             if (it && it.icon) {
-                const img = document.createElement('img');
-                img.src = it.icon;
-                img.style.width = '16px';
-                img.style.height = '16px';
+                const img = createIconImg(it.icon, 16);
                 img.style.marginRight = '4px';
                 row.appendChild(img);
             }
@@ -5295,10 +5430,8 @@ class TextBox extends FormInput {
                     obtn.title = __t('Open record (F2)');
                     try { obtn.classList.add('input-field-button'); } catch (e) {}
                     try {
-                        const oimg = document.createElement('img');
-                        oimg.src = '/apps/general_icons/resources/public/16x16/open.png';
-                        oimg.alt = '';
-                        oimg.draggable = false;
+                        // Размер задаёт CSS кнопки поля (max-width/height), не ядро.
+                        const oimg = createIconImg('/apps/general_icons/resources/public/16x16/open.png', 16, { noSize: true });
                         oimg.style.maxWidth = '100%';
                         oimg.style.maxHeight = '100%';
                         oimg.style.display = 'block';
@@ -5419,10 +5552,7 @@ class TextBox extends FormInput {
                     try { calBtn.classList.add('input-field-button'); } catch (e) {}
                     // Calendar glyph replaced by a proper icon from the catalog.
                     try {
-                        const calImg = document.createElement('img');
-                        calImg.src = '/apps/general_icons/resources/public/16x16/calendar.png';
-                        calImg.alt = '';
-                        calImg.draggable = false;
+                        const calImg = createIconImg('/apps/general_icons/resources/public/16x16/calendar.png', 16, { noSize: true });
                         calImg.style.maxWidth = '100%';
                         calImg.style.maxHeight = '100%';
                         calImg.style.display = 'block';
@@ -5962,9 +6092,8 @@ class TextBox extends FormInput {
                                     const createRow = document.createElement('div');
                                     createRow.style.cssText = 'padding:3px 6px;cursor:pointer;user-select:none;color:#000080;display:flex;align-items:center;gap:4px;';
                                     createRow.setAttribute('data-qs-item', '1');
-                                    const icon = document.createElement('img');
-                                    icon.src = '/apps/general_icons/resources/public/16x16/add.png';
-                                    icon.style.cssText = 'width:16px;height:16px;flex-shrink:0;';
+                                    const icon = createIconImg('/apps/general_icons/resources/public/16x16/add.png', 16);
+                                    icon.style.flexShrink = '0';
                                     createRow.appendChild(icon);
                                     const createSpan = document.createElement('span');
                                     createSpan.textContent = __t('Create');
