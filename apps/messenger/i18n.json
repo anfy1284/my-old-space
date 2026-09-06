@@ -1,0 +1,247 @@
+{
+    "messenger_app_caption": {
+        "en": "Messenger",
+        "ru": "Мессенджер",
+        "de": "Messenger",
+        "pl": "Komunikator"
+    },
+    "msg_no_chats": {
+        "en": "No conversations yet",
+        "ru": "Разговоров пока нет",
+        "de": "Noch keine Unterhaltungen",
+        "pl": "Brak rozmów"
+    },
+    "msg_online": {
+        "en": "online",
+        "ru": "в сети",
+        "de": "online",
+        "pl": "w sieci"
+    },
+    "msg_offline": {
+        "en": "offline",
+        "ru": "не в сети",
+        "de": "offline",
+        "pl": "poza siecią"
+    },
+    "msg_last_seen": {
+        "en": "last seen",
+        "ru": "был(а) в",
+        "de": "zuletzt online",
+        "pl": "ostatnio widziano"
+    },
+    "msg_chat_unavailable": {
+        "en": "This conversation is no longer available",
+        "ru": "Этот разговор больше недоступен",
+        "de": "Diese Unterhaltung ist nicht mehr verfügbar",
+        "pl": "Ta rozmowa nie jest już dostępna"
+    },
+    "msg_empty_message": {
+        "en": "Message is empty",
+        "ru": "Сообщение пустое",
+        "de": "Nachricht ist leer",
+        "pl": "Wiadomość jest pusta"
+    },
+    "msg_attachment_too_big": {
+        "en": "Attachment is too large",
+        "ru": "Вложение слишком большое",
+        "de": "Anhang ist zu groß",
+        "pl": "Załącznik jest za duży"
+    },
+    "Access denied": {
+        "en": "Access denied",
+        "ru": "Доступ запрещён",
+        "de": "Zugriff verweigert",
+        "pl": "Brak dostępu"
+    },
+
+    "msg_chat_owner_field": {
+        "en": "Owner",
+        "ru": "Владелец",
+        "de": "Eigentümer",
+        "pl": "Właściciel"
+    },
+    "msg_chat_name_field": {
+        "en": "Name",
+        "ru": "Название",
+        "de": "Name",
+        "pl": "Nazwa"
+    },
+    "msg_chat_kind_field": {
+        "en": "Kind",
+        "ru": "Вид",
+        "de": "Art",
+        "pl": "Rodzaj"
+    },
+    "msg_chat_kind_private": {
+        "en": "Private",
+        "ru": "Личный",
+        "de": "Privat",
+        "pl": "Prywatny"
+    },
+    "msg_chat_kind_group": {
+        "en": "Group",
+        "ru": "Групповой",
+        "de": "Gruppe",
+        "pl": "Grupowy"
+    },
+    "msg_chat_description_field": {
+        "en": "Description",
+        "ru": "Описание",
+        "de": "Beschreibung",
+        "pl": "Opis"
+    },
+    "msg_chat_active_field": {
+        "en": "Active",
+        "ru": "Активен",
+        "de": "Aktiv",
+        "pl": "Aktywny"
+    },
+    "msg_chat_last_message_field": {
+        "en": "Last message",
+        "ru": "Последнее сообщение",
+        "de": "Letzte Nachricht",
+        "pl": "Ostatnia wiadomość"
+    },
+
+    "msg_member_chat_field": {
+        "en": "Chat",
+        "ru": "Чат",
+        "de": "Chat",
+        "pl": "Czat"
+    },
+    "msg_member_user_field": {
+        "en": "User",
+        "ru": "Пользователь",
+        "de": "Benutzer",
+        "pl": "Użytkownik"
+    },
+    "msg_member_role_field": {
+        "en": "Role",
+        "ru": "Роль",
+        "de": "Rolle",
+        "pl": "Rola"
+    },
+    "msg_member_custom_name_field": {
+        "en": "Display name",
+        "ru": "Отображаемое имя",
+        "de": "Anzeigename",
+        "pl": "Nazwa wyświetlana"
+    },
+    "msg_member_joined_field": {
+        "en": "Joined at",
+        "ru": "Присоединился",
+        "de": "Beigetreten am",
+        "pl": "Dołączył"
+    },
+    "msg_member_active_field": {
+        "en": "Active",
+        "ru": "Активен",
+        "de": "Aktiv",
+        "pl": "Aktywny"
+    },
+
+    "msg_message_chat_field": {
+        "en": "Chat",
+        "ru": "Чат",
+        "de": "Chat",
+        "pl": "Czat"
+    },
+    "msg_message_author_field": {
+        "en": "Author",
+        "ru": "Автор",
+        "de": "Autor",
+        "pl": "Autor"
+    },
+    "msg_message_content_field": {
+        "en": "Text",
+        "ru": "Текст",
+        "de": "Text",
+        "pl": "Tekst"
+    },
+    "msg_message_client_id_field": {
+        "en": "Client message id",
+        "ru": "Идентификатор клиента",
+        "de": "Client-Nachrichtenkennung",
+        "pl": "Identyfikator klienta"
+    },
+
+    "msg_read_message_field": {
+        "en": "Message",
+        "ru": "Сообщение",
+        "de": "Nachricht",
+        "pl": "Wiadomość"
+    },
+    "msg_read_user_field": {
+        "en": "Recipient",
+        "ru": "Получатель",
+        "de": "Empfänger",
+        "pl": "Odbiorca"
+    },
+    "msg_read_chat_field": {
+        "en": "Chat",
+        "ru": "Чат",
+        "de": "Chat",
+        "pl": "Czat"
+    },
+    "msg_read_delivered_field": {
+        "en": "Delivered at",
+        "ru": "Доставлено",
+        "de": "Zugestellt am",
+        "pl": "Dostarczono"
+    },
+    "msg_read_read_field": {
+        "en": "Read at",
+        "ru": "Прочитано",
+        "de": "Gelesen am",
+        "pl": "Przeczytano"
+    },
+
+    "msg_att_message_field": {
+        "en": "Message",
+        "ru": "Сообщение",
+        "de": "Nachricht",
+        "pl": "Wiadomość"
+    },
+    "msg_att_owner_field": {
+        "en": "Uploaded by",
+        "ru": "Загрузил",
+        "de": "Hochgeladen von",
+        "pl": "Przesłał"
+    },
+    "msg_att_name_field": {
+        "en": "File name",
+        "ru": "Имя файла",
+        "de": "Dateiname",
+        "pl": "Nazwa pliku"
+    },
+    "msg_att_mime_field": {
+        "en": "Content type",
+        "ru": "Тип содержимого",
+        "de": "Inhaltstyp",
+        "pl": "Typ zawartości"
+    },
+    "msg_att_size_field": {
+        "en": "Size",
+        "ru": "Размер",
+        "de": "Größe",
+        "pl": "Rozmiar"
+    },
+    "msg_att_is_image_field": {
+        "en": "Image",
+        "ru": "Изображение",
+        "de": "Bild",
+        "pl": "Obraz"
+    },
+    "msg_att_data_field": {
+        "en": "Content",
+        "ru": "Содержимое",
+        "de": "Inhalt",
+        "pl": "Zawartość"
+    },
+    "msg_att_thumb_field": {
+        "en": "Thumbnail",
+        "ru": "Миниатюра",
+        "de": "Vorschaubild",
+        "pl": "Miniatura"
+    }
+}

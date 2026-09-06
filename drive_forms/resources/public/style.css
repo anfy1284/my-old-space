@@ -1106,4 +1106,491 @@ input[type="checkbox"],
     z-index: 3;
 }
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   Лента переписки — элемент лейаута `messageFeed` (класс MessageFeed)
+
+   Раскладка: прокручиваемая лента занимает всё свободное место, поле ввода
+   прижато книзу и не сжимается. Пузыри — плоские рамки Win95, свои справа.
+   ═══════════════════════════════════════════════════════════════════════════ */
+.ui-msgfeed {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;          /* иначе flex-ребёнок не даёт ленте прокручиваться */
+    box-sizing: border-box;
+    font-family: 'MS Sans Serif', Tahoma, Arial, sans-serif;
+    font-size: 11px;
+    color: var(--color-text);
+}
+
+.ui-msgfeed-scroll {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 6px;
+    background-color: #ffffff;
+    border: 1px solid #808080;
+    box-shadow: inset 1px 1px 0px #000000, inset -1px -1px 0px var(--color-light);
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.ui-msgfeed-older {
+    align-self: center;
+    flex-shrink: 0;
+}
+
+.ui-msgfeed-empty {
+    margin: auto;
+    color: #808080;
+    text-align: center;
+    padding: 12px;
+}
+
+/* Кнопка «вниз» со счётчиком новых — поверх ленты, у нижнего края. */
+.ui-msgfeed-jump {
+    position: absolute;
+    right: 16px;
+    bottom: 86px;
+    z-index: 2;
+    display: none;
+    padding: 2px 8px;
+    cursor: default;
+    background-color: var(--color-mid);
+    box-shadow:
+        inset 1px 1px 0px var(--color-light),
+        inset -1px -1px 0px #808080,
+        1px 1px 0px #000000;
+}
+
+/* ── Сообщение ───────────────────────────────────────────────────────────── */
+.ui-msg {
+    display: flex;
+    justify-content: flex-start;
+    flex-shrink: 0;
+}
+
+.ui-msg-own {
+    justify-content: flex-end;
+}
+
+.ui-msg-bubble {
+    max-width: 78%;
+    box-sizing: border-box;
+    padding: 4px 6px;
+    background-color: #e8e8e8;
+    border: 1px solid #808080;
+    box-shadow: inset 1px 1px 0px var(--color-light);
+}
+
+/* Свои — другим фоном: отправителя видно без чтения подписи. */
+.ui-msg-own .ui-msg-bubble {
+    background-color: #cfe0f5;
+}
+
+.ui-msg-failed .ui-msg-bubble {
+    border-color: #b44141;
+    background-color: #f5d7d7;
+}
+
+.ui-msg-author {
+    font-weight: bold;
+    margin-bottom: 2px;
+}
+
+.ui-msg-text {
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+}
+
+.ui-msg-meta {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 4px;
+    margin-top: 2px;
+    color: #404040;
+}
+
+.ui-msg-ticks-read {
+    color: #000080;
+}
+
+/* Разделитель дат */
+.ui-msg-daysep {
+    display: flex;
+    justify-content: center;
+    flex-shrink: 0;
+    margin: 4px 0;
+}
+
+.ui-msg-daysep span {
+    padding: 1px 8px;
+    background-color: var(--color-mid);
+    border: 1px solid #808080;
+    box-shadow: inset 1px 1px 0px var(--color-light);
+}
+
+/* ── Вложения ────────────────────────────────────────────────────────────── */
+.ui-msg-attachments {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    margin-bottom: 3px;
+}
+
+/* Миниатюра; развёрнутая — та же картинка во всю ширину пузыря. */
+.ui-msg-thumb {
+    max-width: 120px;
+    max-height: 120px;
+    cursor: default;
+    border: 1px solid #808080;
+    align-self: flex-start;
+}
+
+.ui-msg-thumb-full {
+    max-width: 100%;
+    max-height: none;
+}
+
+.ui-msg-file {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 4px;
+    cursor: default;
+    background-color: #ffffff;
+    border: 1px solid #808080;
+}
+
+.ui-msg-file:hover {
+    background-color: #f0f0f0;
+}
+
+.ui-msg-file-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ui-msg-file-size {
+    flex-shrink: 0;
+    color: #404040;
+}
+
+/* ── Поле ввода ──────────────────────────────────────────────────────────── */
+.ui-msgfeed-composer {
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding-top: 4px;
+}
+
+.ui-msgfeed-inputrow {
+    display: flex;
+    align-items: flex-end;
+    gap: 4px;
+}
+
+.ui-msgfeed-input {
+    flex: 1 1 auto;
+    resize: none;
+    box-sizing: border-box;
+    padding: 3px 4px;
+    font-family: 'MS Sans Serif', Tahoma, Arial, sans-serif;
+    font-size: 11px;
+    background-color: #ffffff;
+    border: 1px solid #808080;
+    box-shadow: inset 1px 1px 0px #000000, inset -1px -1px 0px var(--color-light);
+}
+
+.ui-msgfeed-actions {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    flex-shrink: 0;
+}
+
+/* Скрытое поле выбора файла — открывается кнопкой со скрепкой. */
+.ui-msgfeed-file {
+    display: none;
+}
+
+.ui-msgfeed-pending {
+    display: none;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+.ui-msgfeed-chip {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    padding: 1px 4px;
+    background-color: var(--color-mid);
+    box-shadow: inset 1px 1px 0px var(--color-light), inset -1px -1px 0px #808080;
+}
+
+.ui-msgfeed-chip-drop {
+    cursor: default;
+    padding: 0 2px;
+}
+
+.ui-msgfeed-chip-drop:hover {
+    color: #b44141;
+}
+
+/* Палитра смайликов */
+.ui-msgfeed-emoji {
+    position: absolute;
+    right: 6px;
+    bottom: 64px;
+    z-index: 3;
+    width: 232px;
+    display: grid;
+    grid-template-columns: repeat(8, 1fr);
+    gap: 1px;
+    padding: 4px;
+    background-color: var(--color-mid);
+    box-shadow:
+        inset 1px 1px 0px var(--color-light),
+        inset -1px -1px 0px #808080,
+        1px 1px 0px #000000,
+        2px 2px 6px rgba(0, 0, 0, 0.35);
+}
+
+.ui-msgfeed-emoji-cell {
+    text-align: center;
+    font-size: 16px;
+    line-height: 22px;
+    cursor: default;
+}
+
+.ui-msgfeed-emoji-cell:hover {
+    background-color: #000080;
+}
+
+/* Группа «во весь экран» (layout: `fill: true`) — растягивается сама и
+   растягивает содержимое, иначе прокручиваемым спискам не от чего оттолкнуться.
+
+   Селектор из ДВУХ классов намеренно: у `.ui-group.horizontal` стоит
+   `align-items: flex-start`, и одноклассовый `.ui-group-fill` ему проигрывал по
+   специфичности — группа оставалась прижатой к верху, а лента переписки
+   схлопывалась в одну строку. Тот же приём уже применён к `.ui-group-aligned`
+   (см. комментарий выше по файлу). */
+.ui-group.ui-group-fill {
+    flex: 1 1 auto;
+    min-height: 0;
+    align-items: stretch;
+}
+
+/* ── Список строк (элемент лейаута `itemList`) ───────────────────────────── */
+.ui-chatlist {
+    flex: 0 0 220px;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    background-color: #ffffff;
+    border: 1px solid #808080;
+    box-shadow: inset 1px 1px 0px #000000, inset -1px -1px 0px var(--color-light);
+    font-family: 'MS Sans Serif', Tahoma, Arial, sans-serif;
+    font-size: 11px;
+}
+
+.ui-chatlist-item {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 5px;
+    cursor: default;
+    border-bottom: 1px solid #d4d0c8;
+}
+
+.ui-chatlist-item:hover {
+    background-color: #f0f0f0;
+}
+
+.ui-chatlist-item.ui-chatlist-active {
+    background-color: #000080;
+    color: #ffffff;
+}
+
+/* Точка присутствия: зелёная — в сети, серая — нет. */
+.ui-chatlist-dot {
+    flex-shrink: 0;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background-color: #909090;
+    border: 1px solid #606060;
+}
+
+.ui-chatlist-dot.ui-chatlist-online {
+    background-color: #4b875f;
+    border-color: #2d5039;
+}
+
+.ui-chatlist-body {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.ui-chatlist-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Непрочитанный чат — отдельное состояние, а не просто цифра. */
+.ui-chatlist-unread .ui-chatlist-name {
+    font-weight: bold;
+}
+
+.ui-chatlist-preview {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: #606060;
+}
+
+.ui-chatlist-active .ui-chatlist-preview {
+    color: #d0d8f0;
+}
+
+.ui-chatlist-side {
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 2px;
+}
+
+.ui-chatlist-time {
+    color: #606060;
+}
+
+.ui-chatlist-active .ui-chatlist-time {
+    color: #d0d8f0;
+}
+
+.ui-chatlist-badge {
+    min-width: 16px;
+    padding: 0 4px;
+    text-align: center;
+    color: #ffffff;
+    background-color: #b44141;
+    border: 1px solid #8c2d2d;
+}
+
+/* Счётчик непрочитанного на значке в трее. */
+.ui-tray-badge {
+    position: absolute;
+    right: -2px;
+    bottom: -2px;
+    min-width: 12px;
+    padding: 0 2px;
+    font-family: 'MS Sans Serif', Tahoma, Arial, sans-serif;
+    font-size: 9px;
+    line-height: 11px;
+    text-align: center;
+    color: #ffffff;
+    background-color: #b44141;
+    border: 1px solid #8c2d2d;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Пуш-уведомления (приложение notifications)
+
+   Стек в правом нижнем углу поверх всех окон. Сама область ПРОЗРАЧНА — видны
+   только карточки уведомлений; поэтому у области нет фона и она не перехватывает
+   клики мимо карточек (pointer-events переключается на дочерних элементах).
+   ═══════════════════════════════════════════════════════════════════════════ */
+.mos-notify-area {
+    position: fixed;
+    right: 8px;
+    width: 320px;
+    max-width: 90vw;
+    z-index: 99990; /* выше окон и панели задач, ниже .mos-busy (100000) */
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 4px;
+    font-family: 'MS Sans Serif', Tahoma, Arial, sans-serif;
+    font-size: 11px;
+    color: var(--color-text);
+    /* Пустая область не должна ловить мышь: под ней рабочий стол и окна. */
+    pointer-events: none;
+}
+
+/* Кнопка «Очистить все сообщения» — наверху области, появляется при наведении.
+   visibility, а не display: иначе появление кнопки сдвигало бы весь стек. */
+.mos-notify-clear {
+    position: sticky;
+    top: 0;
+    align-self: flex-end;
+    flex-shrink: 0;
+    visibility: hidden;
+    pointer-events: auto;
+    z-index: 1;
+}
+
+.mos-notify-area:hover .mos-notify-clear {
+    visibility: visible;
+}
+
+/* Карточка уведомления — приподнятая панель Win95.
+   Жёсткой чёрной кромки нет намеренно: карточки висят поверх рабочего стола
+   стопкой, и у каждой обводка складывалась в решётку из чёрных линий. Объём даёт
+   светлая/тёмная фаска плюс мягкая тень. */
+.mos-notify-item {
+    pointer-events: auto;
+    box-sizing: border-box;
+    flex-shrink: 0;
+    padding: 6px 8px;
+    background-color: var(--color-mid);
+    cursor: default;
+    border: 1px solid var(--color-mid);
+    box-shadow:
+        inset 1px 1px 0px var(--color-light),
+        inset -1px -1px 0px #808080,
+        2px 2px 5px rgba(0, 0, 0, 0.28);
+}
+
+.mos-notify-item.mos-notify-clickable:hover {
+    background-color: #d4d0c8;
+}
+
+.mos-notify-head {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-bottom: 3px;
+}
+
+.mos-notify-title {
+    font-weight: bold;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex: 1 1 auto;
+}
+
+.mos-notify-time {
+    flex-shrink: 0;
+    color: #404040;
+}
+
+.mos-notify-text {
+    /* Длинное сообщение переносится, а не растягивает карточку. */
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+}
+
 

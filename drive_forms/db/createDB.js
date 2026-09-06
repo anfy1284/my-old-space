@@ -33,7 +33,15 @@ function collectModels() {
   try {
     if (fs.existsSync(localAppsJsonPath)) {
       const cfg = JSON.parse(fs.readFileSync(localAppsJsonPath, 'utf8'));
-      sources.push({ cfg, baseDir: path.resolve(__dirname, '..') });
+      // baseDir — КОРЕНЬ ПАКЕТА, а не drive_forms: приложения фреймворка лежат в
+      // my-old-space/apps, а этот файл — в my-old-space/drive_forms/db, то есть на
+      // два уровня глубже. С прежним '..' пути складывались в
+      // drive_forms/apps/<app>/db/…, которых не существует, и `defaultValues.json`
+      // ВСЕХ приложений фреймворка молча не собирались: предопределённые записи
+      // (общий чат мессенджера) не заводились никогда. Модели при этом были на
+      // месте — их собирает другой путь (globalServerContext.collectAllModelDefs),
+      // поэтому расхождение и не бросалось в глаза.
+      sources.push({ cfg, baseDir: path.resolve(__dirname, '../..') });
     }
   } catch (e) { console.error('[COLLECT] Error reading', localAppsJsonPath, e.message); }
 

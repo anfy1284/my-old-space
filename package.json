@@ -27,6 +27,7 @@
     "bcrypt": "^6.0.0",
     "cron-parser": "^4.9.0",
     "dotenv": "^16.0.0",
+    "jimp": "^0.22.12",
     "selfsigned": "^2.0.0",
     "sequelize": "^6.0.0",
     "terser": "^5.46.2",

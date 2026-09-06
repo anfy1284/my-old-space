@@ -827,6 +827,12 @@
         "de": "Deaktiviert",
         "pl": "Wyłączony"
     },
+    "user_last_seen_field": {
+        "en": "Last seen",
+        "ru": "Последний раз в сети",
+        "de": "Zuletzt online",
+        "pl": "Ostatnio w sieci"
+    },
     "sysdata_code_field": {
         "en": "Code",
         "ru": "Код",

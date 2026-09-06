@@ -87,6 +87,13 @@
                     "caption": {
                         "i18n": "user_disabled_field"
                     }
+                },
+                "lastSeenAt": {
+                    "type": "DATE",
+                    "allowNull": true,
+                    "caption": {
+                        "i18n": "user_last_seen_field"
+                    }
                 }
             },
             "entityConfig": {

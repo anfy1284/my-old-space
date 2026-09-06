@@ -1,0 +1,188 @@
+{
+    "models": [
+        {
+            "name": "SystemSettingsTypes",
+            "tableName": "system_settings_types",
+            "fields": {
+                "name": {
+                    "type": "STRING",
+                    "allowNull": false,
+                    "unique": true
+                },
+                "valueTableName": {
+                    "type": "STRING",
+                    "allowNull": false
+                },
+                "organizationId": {
+                    "type": "STRING",
+                    "allowNull": true
+                }
+            },
+            "options": {
+                "timestamps": true
+            }
+        },
+        {
+            "name": "SystemSettingsFields",
+            "tableName": "system_settings_fields",
+            "fields": {
+                "name": {
+                    "type": "STRING",
+                    "allowNull": false,
+                    "unique": true
+                },
+                "displayName": {
+                    "type": "STRING",
+                    "allowNull": false
+                },
+                "typeId": {
+                    "type": "STRING",
+                    "allowNull": false,
+                    "references": { "model": "system_settings_types", "key": "UID" },
+                    "onUpdate": "CASCADE",
+                    "onDelete": "RESTRICT"
+                },
+                "options": {
+                    "type": "JSON",
+                    "allowNull": true,
+                    "defaultValue": null
+                },
+                "displayOrder": {
+                    "type": "INTEGER",
+                    "allowNull": true,
+                    "defaultValue": 50
+                },
+                "organizationId": {
+                    "type": "STRING",
+                    "allowNull": true
+                }
+            },
+            "options": {
+                "timestamps": true
+            }
+        },
+        {
+            "name": "SystemSettingsStringValues",
+            "tableName": "system_settings_string_values",
+            "fields": {
+                "settingsFieldId": {
+                    "type": "STRING",
+                    "allowNull": false,
+                    "references": { "model": "system_settings_fields", "key": "UID" },
+                    "onUpdate": "CASCADE",
+                    "onDelete": "CASCADE"
+                },
+                "value": {
+                    "type": "TEXT",
+                    "allowNull": true
+                },
+                "organizationId": {
+                    "type": "STRING",
+                    "allowNull": true
+                }
+            },
+            "options": {
+                "timestamps": true,
+                "indexes": [
+                    { "unique": true, "fields": ["settingsFieldId"] }
+                ]
+            }
+        },
+        {
+            "name": "SystemSettingsNumberValues",
+            "tableName": "system_settings_number_values",
+            "fields": {
+                "settingsFieldId": {
+                    "type": "STRING",
+                    "allowNull": false,
+                    "references": { "model": "system_settings_fields", "key": "UID" },
+                    "onUpdate": "CASCADE",
+                    "onDelete": "CASCADE"
+                },
+                "value": {
+                    "type": "FLOAT",
+                    "allowNull": true
+                },
+                "organizationId": {
+                    "type": "STRING",
+                    "allowNull": true
+                }
+            },
+            "options": {
+                "timestamps": true,
+                "indexes": [
+                    { "unique": true, "fields": ["settingsFieldId"] }
+                ]
+            }
+        },
+        {
+            "name": "SystemSettingsBooleanValues",
+            "tableName": "system_settings_boolean_values",
+            "fields": {
+                "settingsFieldId": {
+                    "type": "STRING",
+                    "allowNull": false,
+                    "references": { "model": "system_settings_fields", "key": "UID" },
+                    "onUpdate": "CASCADE",
+                    "onDelete": "CASCADE"
+                },
+                "value": {
+                    "type": "BOOLEAN",
+                    "allowNull": true
+                },
+                "organizationId": {
+                    "type": "STRING",
+                    "allowNull": true
+                }
+            },
+            "options": {
+                "timestamps": true,
+                "indexes": [
+                    { "unique": true, "fields": ["settingsFieldId"] }
+                ]
+            }
+        },
+        {
+            "name": "SystemSettingsDateValues",
+            "tableName": "system_settings_date_values",
+            "fields": {
+                "settingsFieldId": {
+                    "type": "STRING",
+                    "allowNull": false,
+                    "references": { "model": "system_settings_fields", "key": "UID" },
+                    "onUpdate": "CASCADE",
+                    "onDelete": "CASCADE"
+                },
+                "value": {
+                    "type": "DATEONLY",
+                    "allowNull": true
+                },
+                "organizationId": {
+                    "type": "STRING",
+                    "allowNull": true
+                }
+            },
+            "options": {
+                "timestamps": true,
+                "indexes": [
+                    { "unique": true, "fields": ["settingsFieldId"] }
+                ]
+            }
+        }
+    ],
+    "associations": [
+        {
+            "type": "hasMany",
+            "source": "SystemSettingsTypes",
+            "target": "SystemSettingsFields",
+            "foreignKey": "typeId"
+        },
+        {
+            "type": "belongsTo",
+            "source": "SystemSettingsFields",
+            "target": "SystemSettingsTypes",
+            "foreignKey": "typeId",
+            "options": { "as": "type" }
+        }
+    ]
+}

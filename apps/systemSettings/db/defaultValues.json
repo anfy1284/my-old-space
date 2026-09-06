@@ -1,0 +1,27 @@
+{
+    "system_settings_types": [
+        { "UID": "000000000-sysset-type-str",  "name": "string",  "valueTableName": "system_settings_string_values" },
+        { "UID": "000000000-sysset-type-num",  "name": "number",  "valueTableName": "system_settings_number_values" },
+        { "UID": "000000000-sysset-type-bool", "name": "boolean", "valueTableName": "system_settings_boolean_values" },
+        { "UID": "000000000-sysset-type-date", "name": "date",    "valueTableName": "system_settings_date_values" },
+        { "UID": "000000000-sysset-type-enum", "name": "enum",    "valueTableName": "system_settings_string_values" }
+    ],
+    "system_settings_fields": [
+        {
+            "UID": "000000000-sysset-fld-notifdays",
+            "name": "notificationRetentionDays",
+            "displayName": "sysset_notification_retention_days",
+            "typeId": "000000000-sysset-type-num",
+            "options": { "default": 30 },
+            "displayOrder": 10
+        },
+        {
+            "UID": "000000000-sysset-fld-msgattmb",
+            "name": "messengerMaxAttachmentMb",
+            "displayName": "sysset_messenger_max_attachment_mb",
+            "typeId": "000000000-sysset-type-num",
+            "options": { "default": 10 },
+            "displayOrder": 20
+        }
+    ]
+}

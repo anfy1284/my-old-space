@@ -22,6 +22,18 @@
             "path": "/taskbar"
         },
         {
+            "name": "tray",
+            "path": "/tray"
+        },
+        {
+            "name": "notifications",
+            "path": "/notifications"
+        },
+        {
+            "name": "systemSettings",
+            "path": "/systemSettings"
+        },
+        {
             "name": "main_menu",
             "path": "/main_menu"
         },

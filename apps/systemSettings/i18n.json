@@ -1,0 +1,32 @@
+{
+    "system_settings_app_caption": {
+        "en": "System Settings",
+        "ru": "Настройки системы",
+        "de": "Systemeinstellungen",
+        "pl": "Ustawienia systemu"
+    },
+    "sysset_notification_retention_days": {
+        "en": "Keep notifications, days",
+        "ru": "Хранить уведомления, дней",
+        "de": "Benachrichtigungen aufbewahren, Tage",
+        "pl": "Przechowywanie powiadomień, dni"
+    },
+    "sysset_messenger_max_attachment_mb": {
+        "en": "Messenger: max attachment size, MB",
+        "ru": "Мессенджер: предел размера вложения, МБ",
+        "de": "Messenger: maximale Anhangsgröße, MB",
+        "pl": "Komunikator: maksymalny rozmiar załącznika, MB"
+    },
+    "Settings saved": {
+        "en": "Settings saved",
+        "ru": "Настройки сохранены",
+        "de": "Einstellungen gespeichert",
+        "pl": "Ustawienia zapisane"
+    },
+    "Error: ": {
+        "en": "Error: ",
+        "ru": "Ошибка: ",
+        "de": "Fehler: ",
+        "pl": "Błąd: "
+    }
+}

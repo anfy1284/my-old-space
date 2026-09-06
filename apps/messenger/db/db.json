@@ -1,197 +1,309 @@
 {
     "models": [
         {
-            "name": "Messenger_Chats",
-            "tableName": "Messenger_Chats",
+            "name": "MessengerChats",
+            "tableName": "messenger_chats",
             "fields": {
-                "UID": {
-                    "type": "STRING",
-                    "allowNull": false,
-                    "defaultValue": "GENERATE_UID",
-                    "primaryKey": true
-                },
                 "userId": {
                     "type": "STRING",
                     "allowNull": false,
-                    "references": {
-                        "model": "users",
-                        "key": "UID"
-                    }
+                    "references": { "model": "users", "key": "UID" },
+                    "onUpdate": "CASCADE",
+                    "onDelete": "CASCADE",
+                    "caption": { "i18n": "msg_chat_owner_field" }
                 },
                 "name": {
                     "type": "STRING",
-                    "allowNull": false
+                    "allowNull": false,
+                    "translatable": true,
+                    "caption": { "i18n": "msg_chat_name_field" }
+                },
+                "kind": {
+                    "type": "STRING",
+                    "allowNull": false,
+                    "defaultValue": "private",
+                    "caption": { "i18n": "msg_chat_kind_field" },
+                    "inputType": "emunList",
+                    "options": [
+                        { "value": "private", "caption": { "i18n": "msg_chat_kind_private" } },
+                        { "value": "group", "caption": { "i18n": "msg_chat_kind_group" } }
+                    ]
                 },
                 "description": {
                     "type": "STRING",
-                    "allowNull": true
+                    "allowNull": true,
+                    "caption": { "i18n": "msg_chat_description_field" }
                 },
                 "isActive": {
                     "type": "BOOLEAN",
                     "allowNull": false,
-                    "defaultValue": true
-                }
-            },
-            "options": {
-                "timestamps": true
-            }
-        },
-        {
-            "name": "Messenger_Messages",
-            "tableName": "Messenger_Messages",
-            "fields": {
-                "chatId": {
-                    "type": "STRING",
-                    "allowNull": false,
-                    "references": {
-                        "model": "Messenger_Chats",
-                        "key": "UID"
-                    }
+                    "defaultValue": true,
+                    "caption": { "i18n": "msg_chat_active_field" }
                 },
-                "userId": {
-                    "type": "STRING",
-                    "allowNull": false,
-                    "references": {
-                        "model": "users",
-                        "key": "UID"
-                    }
-                },
-                "content": {
-                    "type": "STRING",
-                    "allowNull": false
-                },
-                "isRead": {
-                    "type": "BOOLEAN",
-                    "allowNull": false,
-                    "defaultValue": false
-                },
-                "isDelivered": {
-                    "type": "BOOLEAN",
-                    "allowNull": false,
-                    "defaultValue": false
-                },
-                "UID": {
-                    "type": "STRING",
-                    "primaryKey": true,
-                    "defaultValue": "GENERATE_UID"
-                }
-            },
-            "options": {
-                "timestamps": true
-            }
-        },
-        {
-            "name": "Messenger_ChatMembers",
-            "tableName": "Messenger_ChatMembers",
-            "fields": {
-                "chatId": {
-                    "type": "STRING",
-                    "allowNull": false,
-                    "references": {
-                        "model": "Messenger_Chats",
-                        "key": "UID"
-                    }
-                },
-                "userId": {
-                    "type": "STRING",
-                    "allowNull": false,
-                    "references": {
-                        "model": "users",
-                        "key": "UID"
-                    }
-                },
-                "role": {
-                    "type": "STRING",
-                    "allowNull": false,
-                    "defaultValue": "member"
-                },
-                "customName": {
-                    "type": "STRING",
-                    "allowNull": true
-                },
-                "joinedAt": {
+                "lastMessageAt": {
                     "type": "DATE",
-                    "allowNull": false
-                },
-                "isActive": {
-                    "type": "BOOLEAN",
-                    "allowNull": false,
-                    "defaultValue": true
-                },
-                "UID": {
-                    "type": "STRING",
-                    "primaryKey": true,
-                    "defaultValue": "GENERATE_UID"
+                    "allowNull": true,
+                    "caption": { "i18n": "msg_chat_last_message_field" }
                 }
             },
             "options": {
                 "timestamps": true,
                 "indexes": [
-                    {
-                        "unique": true,
-                        "fields": [
-                            "chatId",
-                            "userId"
-                        ]
-                    }
+                    { "fields": ["lastMessageAt"] }
+                ]
+            }
+        },
+        {
+            "name": "MessengerChatMembers",
+            "tableName": "messenger_chat_members",
+            "fields": {
+                "chatId": {
+                    "type": "STRING",
+                    "allowNull": false,
+                    "references": { "model": "messenger_chats", "key": "UID" },
+                    "onUpdate": "CASCADE",
+                    "onDelete": "CASCADE",
+                    "caption": { "i18n": "msg_member_chat_field" }
+                },
+                "userId": {
+                    "type": "STRING",
+                    "allowNull": false,
+                    "references": { "model": "users", "key": "UID" },
+                    "onUpdate": "CASCADE",
+                    "onDelete": "CASCADE",
+                    "caption": { "i18n": "msg_member_user_field" }
+                },
+                "role": {
+                    "type": "STRING",
+                    "allowNull": false,
+                    "defaultValue": "member",
+                    "caption": { "i18n": "msg_member_role_field" }
+                },
+                "customName": {
+                    "type": "STRING",
+                    "allowNull": true,
+                    "caption": { "i18n": "msg_member_custom_name_field" }
+                },
+                "joinedAt": {
+                    "type": "DATE",
+                    "allowNull": true,
+                    "caption": { "i18n": "msg_member_joined_field" }
+                },
+                "isActive": {
+                    "type": "BOOLEAN",
+                    "allowNull": false,
+                    "defaultValue": true,
+                    "caption": { "i18n": "msg_member_active_field" }
+                }
+            },
+            "options": {
+                "timestamps": true,
+                "indexes": [
+                    { "unique": true, "fields": ["chatId", "userId"] }
+                ]
+            }
+        },
+        {
+            "name": "MessengerMessages",
+            "tableName": "messenger_messages",
+            "fields": {
+                "chatId": {
+                    "type": "STRING",
+                    "allowNull": false,
+                    "references": { "model": "messenger_chats", "key": "UID" },
+                    "onUpdate": "CASCADE",
+                    "onDelete": "CASCADE",
+                    "caption": { "i18n": "msg_message_chat_field" }
+                },
+                "userId": {
+                    "type": "STRING",
+                    "allowNull": false,
+                    "references": { "model": "users", "key": "UID" },
+                    "onUpdate": "CASCADE",
+                    "onDelete": "CASCADE",
+                    "caption": { "i18n": "msg_message_author_field" }
+                },
+                "content": {
+                    "type": "TEXT",
+                    "allowNull": true,
+                    "caption": { "i18n": "msg_message_content_field" }
+                },
+                "clientMsgId": {
+                    "type": "STRING",
+                    "allowNull": true,
+                    "caption": { "i18n": "msg_message_client_id_field" }
+                }
+            },
+            "options": {
+                "timestamps": true,
+                "indexes": [
+                    { "fields": ["chatId", "createdAt"] },
+                    { "unique": true, "fields": ["userId", "clientMsgId"] }
+                ]
+            }
+        },
+        {
+            "name": "MessengerMessageReads",
+            "tableName": "messenger_message_reads",
+            "fields": {
+                "messageId": {
+                    "type": "STRING",
+                    "allowNull": false,
+                    "references": { "model": "messenger_messages", "key": "UID" },
+                    "onUpdate": "CASCADE",
+                    "onDelete": "CASCADE",
+                    "caption": { "i18n": "msg_read_message_field" }
+                },
+                "userId": {
+                    "type": "STRING",
+                    "allowNull": false,
+                    "references": { "model": "users", "key": "UID" },
+                    "onUpdate": "CASCADE",
+                    "onDelete": "CASCADE",
+                    "caption": { "i18n": "msg_read_user_field" }
+                },
+                "chatId": {
+                    "type": "STRING",
+                    "allowNull": false,
+                    "references": { "model": "messenger_chats", "key": "UID" },
+                    "onUpdate": "CASCADE",
+                    "onDelete": "CASCADE",
+                    "caption": { "i18n": "msg_read_chat_field" }
+                },
+                "deliveredAt": {
+                    "type": "DATE",
+                    "allowNull": true,
+                    "caption": { "i18n": "msg_read_delivered_field" }
+                },
+                "readAt": {
+                    "type": "DATE",
+                    "allowNull": true,
+                    "caption": { "i18n": "msg_read_read_field" }
+                }
+            },
+            "options": {
+                "timestamps": true,
+                "indexes": [
+                    { "unique": true, "fields": ["messageId", "userId"] },
+                    { "fields": ["chatId", "userId", "readAt"] }
+                ]
+            }
+        },
+        {
+            "name": "MessengerAttachments",
+            "tableName": "messenger_attachments",
+            "fields": {
+                "messageId": {
+                    "type": "STRING",
+                    "allowNull": false,
+                    "references": { "model": "messenger_messages", "key": "UID" },
+                    "onUpdate": "CASCADE",
+                    "onDelete": "CASCADE",
+                    "caption": { "i18n": "msg_att_message_field" }
+                },
+                "userId": {
+                    "type": "STRING",
+                    "allowNull": false,
+                    "references": { "model": "users", "key": "UID" },
+                    "onUpdate": "CASCADE",
+                    "onDelete": "CASCADE",
+                    "caption": { "i18n": "msg_att_owner_field" }
+                },
+                "name": {
+                    "type": "STRING",
+                    "allowNull": false,
+                    "caption": { "i18n": "msg_att_name_field" }
+                },
+                "mimeType": {
+                    "type": "STRING",
+                    "allowNull": false,
+                    "caption": { "i18n": "msg_att_mime_field" }
+                },
+                "size": {
+                    "type": "INTEGER",
+                    "allowNull": false,
+                    "defaultValue": 0,
+                    "caption": { "i18n": "msg_att_size_field" }
+                },
+                "isImage": {
+                    "type": "BOOLEAN",
+                    "allowNull": false,
+                    "defaultValue": false,
+                    "caption": { "i18n": "msg_att_is_image_field" }
+                },
+                "data": {
+                    "type": "BLOB",
+                    "allowNull": false,
+                    "caption": { "i18n": "msg_att_data_field" }
+                },
+                "thumb": {
+                    "type": "BLOB",
+                    "allowNull": true,
+                    "caption": { "i18n": "msg_att_thumb_field" }
+                }
+            },
+            "options": {
+                "timestamps": true,
+                "indexes": [
+                    { "fields": ["messageId"] }
                 ]
             }
         }
     ],
     "associations": [
         {
-            "source": "Messenger_Chats",
-            "target": "Messenger_ChatMembers",
+            "source": "MessengerChats",
+            "target": "MessengerChatMembers",
             "type": "hasMany",
-            "options": {
-                "foreignKey": "chatId",
-                "as": "members"
-            }
+            "options": { "foreignKey": "chatId", "as": "members" }
         },
         {
-            "source": "Messenger_ChatMembers",
-            "target": "Messenger_Chats",
+            "source": "MessengerChatMembers",
+            "target": "MessengerChats",
             "type": "belongsTo",
-            "options": {
-                "foreignKey": "chatId",
-                "as": "chat"
-            }
+            "options": { "foreignKey": "chatId", "as": "chat" }
         },
         {
-            "source": "Messenger_Chats",
-            "target": "Messenger_Messages",
+            "source": "MessengerChats",
+            "target": "MessengerMessages",
             "type": "hasMany",
-            "options": {
-                "foreignKey": "chatId",
-                "as": "messages"
-            }
+            "options": { "foreignKey": "chatId", "as": "messages" }
         },
         {
-            "source": "Messenger_Messages",
-            "target": "Messenger_Chats",
+            "source": "MessengerMessages",
+            "target": "MessengerChats",
             "type": "belongsTo",
-            "options": {
-                "foreignKey": "chatId",
-                "as": "chat"
-            }
+            "options": { "foreignKey": "chatId", "as": "chat" }
         },
         {
-            "source": "Messenger_ChatMembers",
+            "source": "MessengerMessages",
+            "target": "MessengerAttachments",
+            "type": "hasMany",
+            "options": { "foreignKey": "messageId", "as": "attachments" }
+        },
+        {
+            "source": "MessengerAttachments",
+            "target": "MessengerMessages",
+            "type": "belongsTo",
+            "options": { "foreignKey": "messageId", "as": "message" }
+        },
+        {
+            "source": "MessengerMessages",
+            "target": "MessengerMessageReads",
+            "type": "hasMany",
+            "options": { "foreignKey": "messageId", "as": "receipts" }
+        },
+        {
+            "source": "MessengerChatMembers",
             "target": "Users",
             "type": "belongsTo",
-            "options": {
-                "foreignKey": "userId",
-                "as": "user"
-            }
+            "options": { "foreignKey": "userId", "as": "user" }
         },
         {
-            "source": "Messenger_Messages",
+            "source": "MessengerMessages",
             "target": "Users",
             "type": "belongsTo",
-            "options": {
-                "foreignKey": "userId",
-                "as": "author"
-            }
+            "options": { "foreignKey": "userId", "as": "author" }
         }
     ]
 }

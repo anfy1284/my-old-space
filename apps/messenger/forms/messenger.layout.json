@@ -1,0 +1,31 @@
+[
+    {
+        "type": "group",
+        "name": "grpMessenger",
+        "orientation": "horizontal",
+        "noBorder": true,
+        "fill": true,
+        "caption": "",
+        "layout": [
+            {
+                "type": "itemList",
+                "name": "chatList",
+                "properties": {
+                    "emptyText": { "i18n": "msg_no_chats" }
+                }
+            },
+            {
+                "type": "messageFeed",
+                "name": "feed",
+                "properties": {
+                    "serverScript": "__SERVER_SCRIPT__",
+                    "loadFn": "loadMessages",
+                    "sendFn": "sendMessage",
+                    "readFn": "markRead",
+                    "attachmentUrl": "/app/messenger/attachment",
+                    "pageSize": 50
+                }
+            }
+        ]
+    }
+]

@@ -42,6 +42,39 @@ function broadcastSessionEvent(messageObj) {
     return sent;
 }
 
+/**
+ * Отправить событие ВСЕМ живым потокам ОДНОГО пользователя (`/app/events`).
+ *
+ * Зачем отдельно от `broadcastSessionEvent`: тот шлёт веером всем сессиям, и это
+ * верно для событий, которые касаются всех (ход длинной операции, изменение общей
+ * таблицы). Уведомление адресное: его текст — часть переписки, и уехать в чужое
+ * окно оно не должно ни при каких условиях. Фильтровать на клиенте нельзя —
+ * данные до клиента уже доехали.
+ *
+ * У одного пользователя может быть несколько сессий (два браузера, телефон) —
+ * поэтому обходим ВСЕ потоки и сверяем `userId`, а не ищем «его сессию».
+ *
+ * @param {string} userId — users.UID получателя
+ * @param {object} messageObj — тело события (уедет как JSON в `data:`)
+ * @returns {number} сколько потоков получило событие
+ */
+function sendSessionEventToUser(userId, messageObj) {
+    if (!userId || !global._sessionSseClients) return 0;
+    const message = JSON.stringify(messageObj);
+    let sent = 0;
+    for (const [sid, set] of global._sessionSseClients.entries()) {
+        const dead = [];
+        set.forEach(client => {
+            if (client.userId !== userId) return;
+            try { client.res.write(`data: ${message}\n\n`); sent++; }
+            catch (e) { dead.push(client); }
+        });
+        dead.forEach(c => set.delete(c));
+        if (set.size === 0) global._sessionSseClients.delete(sid);
+    }
+    return sent;
+}
+
 function normalizeColumnsFromFields(fields, rows) {
     if (!fields) {
         // Infer fields from first row keys
@@ -495,4 +528,4 @@ function registerDynamicTableMethods(appName, config = {}) {
     };
 }
 
-module.exports = { registerDynamicTableMethods, broadcastSessionEvent };
+module.exports = { registerDynamicTableMethods, broadcastSessionEvent, sendSessionEventToUser };

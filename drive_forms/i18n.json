@@ -100,5 +100,108 @@
         "ru": "Готово",
         "de": "Fertig",
         "pl": "Gotowe"
+    },
+
+    "msgfeed_load_older": {
+        "en": "Older messages",
+        "ru": "Сообщения раньше",
+        "de": "Ältere Nachrichten",
+        "pl": "Starsze wiadomości"
+    },
+    "msgfeed_pick_chat": {
+        "en": "Select a conversation",
+        "ru": "Выберите разговор",
+        "de": "Unterhaltung auswählen",
+        "pl": "Wybierz rozmowę"
+    },
+    "msgfeed_no_messages": {
+        "en": "No messages yet — write the first one",
+        "ru": "Сообщений пока нет — напишите первым",
+        "de": "Noch keine Nachrichten — schreiben Sie die erste",
+        "pl": "Brak wiadomości — napisz pierwszą"
+    },
+    "msgfeed_load_error": {
+        "en": "Could not load messages",
+        "ru": "Не удалось загрузить сообщения",
+        "de": "Nachrichten konnten nicht geladen werden",
+        "pl": "Nie udało się wczytać wiadomości"
+    },
+    "msgfeed_input_placeholder": {
+        "en": "Write a message. Enter — send, Shift+Enter — new line",
+        "ru": "Напишите сообщение. Enter — отправить, Shift+Enter — новая строка",
+        "de": "Nachricht schreiben. Enter — senden, Shift+Enter — neue Zeile",
+        "pl": "Napisz wiadomość. Enter — wyślij, Shift+Enter — nowy wiersz"
+    },
+    "msgfeed_emoji": {
+        "en": "Emoji",
+        "ru": "Смайлики",
+        "de": "Emojis",
+        "pl": "Emotikony"
+    },
+    "msgfeed_attach": {
+        "en": "Attach a file",
+        "ru": "Прикрепить файл",
+        "de": "Datei anhängen",
+        "pl": "Załącz plik"
+    },
+    "msgfeed_send": {
+        "en": "Send",
+        "ru": "Отправить",
+        "de": "Senden",
+        "pl": "Wyślij"
+    },
+    "msgfeed_send_error": {
+        "en": "Message was not sent:",
+        "ru": "Сообщение не отправлено:",
+        "de": "Nachricht wurde nicht gesendet:",
+        "pl": "Wiadomość nie została wysłana:"
+    },
+    "msgfeed_state_sending": {
+        "en": "Sending",
+        "ru": "Отправляется",
+        "de": "Wird gesendet",
+        "pl": "Wysyłanie"
+    },
+    "msgfeed_state_sent": {
+        "en": "Sent",
+        "ru": "Отправлено",
+        "de": "Gesendet",
+        "pl": "Wysłano"
+    },
+    "msgfeed_state_delivered": {
+        "en": "Delivered",
+        "ru": "Доставлено",
+        "de": "Zugestellt",
+        "pl": "Dostarczono"
+    },
+    "msgfeed_state_read": {
+        "en": "Read",
+        "ru": "Прочитано",
+        "de": "Gelesen",
+        "pl": "Przeczytano"
+    },
+    "msgfeed_today": {
+        "en": "Today",
+        "ru": "Сегодня",
+        "de": "Heute",
+        "pl": "Dzisiaj"
+    },
+    "msgfeed_yesterday": {
+        "en": "Yesterday",
+        "ru": "Вчера",
+        "de": "Gestern",
+        "pl": "Wczoraj"
+    },
+    "msgfeed_file_too_big": {
+        "en": "File is too large. Limit:",
+        "ru": "Файл слишком большой. Предел:",
+        "de": "Datei ist zu groß. Grenze:",
+        "pl": "Plik jest za duży. Limit:"
+    },
+    "msgfeed_remove_file": {
+        "en": "Remove attachment",
+        "ru": "Убрать вложение",
+        "de": "Anhang entfernen",
+        "pl": "Usuń załącznik"
     }
 }

@@ -868,6 +868,28 @@ if (typeof window !== 'undefined') {
             },
 
             /**
+             * Пустая дата — та же конвенция, что на сервере
+             * (`drive_root/db/emptyValues.js`).
+             *
+             * Зачем в ядре. В этой системе незаполненная дата хранится НЕ как
+             * NULL, а как заведомо ранняя дата `0001-01-01` (правило «у каждого
+             * типа своё пустое», как в 1С): фреймворк сам проставляет её
+             * умолчанием каждому необязательному полю-дате. Клиент, проверяющий
+             * заполненность через `if (value)`, всегда получает «дата есть» — и
+             * рисует пользователю `00:53` там, где сообщений не было вовсе.
+             * Правило проверки обязано быть одно на обе стороны, иначе такие
+             * расхождения будут появляться в каждой новой форме.
+             */
+            isEmptyDate(v) {
+                if (v === null || v === undefined || v === '') return true;
+                const d = (v instanceof Date) ? v : new Date(v);
+                if (isNaN(d.getTime())) return true;
+                // Всё, что раньше 1971 года, в прикладных данных этой системы —
+                // не дата, а «не заполнено».
+                return d.getUTCFullYear() <= 1970;
+            },
+
+            /**
              * Иконки — выбор файла под нужный размер: сначала папка этого
              * размера, при отсутствии файла — master (см. комментарий к
              * resolveIcon в начале файла). Публикуется, потому что вставляют
@@ -884,6 +906,34 @@ if (typeof window !== 'undefined') {
                 img:     (ref, px, opts) => createIconImg(ref, px, opts),
                 seriesSizes: () => ICON_SERIES_SIZES.slice()
             },
+
+            /**
+             * Показать пуш-уведомление. Точка входа ядра; сам стек уведомлений
+             * рисует приложение `notifications` (оно подставляет себя в
+             * `MySpace.notifications` при загрузке).
+             *
+             *   MySpace.notify({ title, text, icon,
+             *                    appName: 'messenger',
+             *                    onClick: { fn: 'openChat', fnParams: { chatId } } })
+             *
+             * `onClick` — ИМЯ функции приложения (и её параметры), а не замыкание:
+             * уведомление живёт в базе и должно оставаться кликабельным после
+             * перезагрузки страницы. Живую функцию тоже принимаем — для
+             * сиюминутных уведомлений, которые никуда не сохраняются.
+             *
+             * Метод в ядре, а не только в приложении, чтобы прикладной код звал
+             * одно и то же имя независимо от того, поднято приложение или нет:
+             * без него уведомление молча теряется, а не роняет форму.
+             */
+            notify(params) {
+                const app = this.notifications;
+                if (app && typeof app.show === 'function') return app.show(params);
+                console.warn('[MySpace.notify] приложение notifications не загружено', params);
+                return null;
+            },
+
+            /** Свойства приложения из его манифеста (config.json). */
+            appConfig(name) { return (window.MySpaceAppConfig || {})[name] || null; },
 
             register(name, descriptor) {
                 apps[name] = descriptor;
@@ -1021,7 +1071,17 @@ if (typeof window !== 'undefined') {
                 return out;
             },
 
-            close(id) { const inst = instances[id]; if (inst) { try { inst.destroy && inst.destroy(); } catch (e) {} delete instances[id]; } }
+            // Программное закрытие сильнее свойства `preventClose`: оно защищает
+            // от КРЕСТИКА и Escape, то есть от пользователя, а не от кода. Код,
+            // которому надо снести окно, зовёт MySpace.close(id) и получает
+            // закрытие, а не сворачивание.
+            close(id) {
+                const inst = instances[id];
+                if (!inst) return;
+                try { const f = inst.form || inst; if (f) f._forceClose = true; } catch (e) {}
+                try { inst.destroy && inst.destroy(); } catch (e) {}
+                delete instances[id];
+            }
         };
     })();
 }
@@ -1057,6 +1117,28 @@ class Form extends UIObject {
         this.restoreHeight = 0;
         this.proportionalLayout = false;
         this.layoutTarget = null;
+        // Свойства окна, приходящие из манифеста приложения (config.json →
+        // window.MySpaceAppConfig). По умолчанию выключены: обычное окно
+        // показывается в панели задач и закрывается крестиком.
+        this.preventClose = false;      // крестик и Escape сворачивают, а не закрывают
+        this.hideFromTaskbar = false;   // кнопки окна в панели задач нет
+        this._forceClose = false;       // программное закрытие в обход preventClose
+    }
+
+    /**
+     * Перенести на окно свойства приложения из его манифеста (`config.json`).
+     *
+     * Вызывается КОНСТРУКТОРОМ DataForm — то есть до `Draw()` и до события
+     * `form-created`. Это существенно: панель задач заводит кнопку именно по
+     * `form-created`, и узнать про `hideFromTaskbar` после отрисовки было бы
+     * поздно — кнопка успела бы мигнуть.
+     */
+    applyAppConfig(appName) {
+        if (!appName || typeof window === 'undefined') return;
+        const cfg = (window.MySpaceAppConfig || {})[appName];
+        if (!cfg) return;
+        if (cfg.preventClose !== undefined) this.preventClose = !!cfg.preventClose;
+        if (cfg.hideFromTaskbar !== undefined) this.hideFromTaskbar = !!cfg.hideFromTaskbar;
     }
 
     activate() {
@@ -1875,7 +1957,22 @@ class Form extends UIObject {
         return this.element;
     }
 
-    close() {
+    /**
+     * @param {{force?: boolean}} [options] — `force: true` закрывает окно даже у
+     *        приложения с `preventClose` (выход из системы, MySpace.close).
+     */
+    close(options) {
+        // «Закрыть нельзя» — свойство приложения, а не выдумка конкретной формы:
+        // фоновому приложению (мессенджер) закрытие означало бы молчащие
+        // уведомления. Крестик и Escape приходят сюда же, поэтому проверка стоит
+        // здесь одна на всех, а не в обработчике кнопки.
+        // isModal в условии — защита от неснимаемого окна: minimize() модальную
+        // форму намеренно не сворачивает, и без этой оговорки модальное окно
+        // приложения с `preventClose` осталось бы на экране навсегда.
+        if (this.preventClose && !this.isModal && !this._forceClose && !(options && options.force)) {
+            this.minimize();
+            return;
+        }
         try { if (typeof this.destroy === 'function') this.destroy(); } catch (e) {}
         if (this.modalOverlay) {
             this.modalOverlay.remove();
@@ -2522,6 +2619,9 @@ class DataForm extends Form {
     constructor(appName) {
         super();
         this.appName = appName || null;
+        // Свойства окна из манифеста приложения — до Draw() и до form-created,
+        // иначе панель задач успеет завести кнопку скрытому окну.
+        this.applyAppConfig(this.appName);
         this.controlsMap = {};
         this._dataMap = {};
         this._datasetId = null;
@@ -3468,6 +3568,13 @@ class DataForm extends Form {
                 if (item.noBorder) grp.noBorder = true;
                 if (item.boldCaption) grp.boldCaption = true;
                 grp.Draw(contentArea);
+                // `fill: true` — группа занимает всё свободное место окна и
+                // растягивает содержимое по высоте. Нужно формам, которые живут
+                // «во весь экран» (переписка, шахматка): без этого лента
+                // сжимается по содержимому, а прокрутке не от чего оттолкнуться.
+                // Отдельное осмысленное свойство, а не произвольный CSS-класс из
+                // лейаута: у последнего нет границ применения.
+                if (item.fill === true && grp.element) grp.element.classList.add('ui-group-fill');
                 if (grp.element && item.layout && Array.isArray(item.layout)) {
                     if (item.alignFields) {
                         await this._renderAlignedFields(grp.element, item.layout);
@@ -3897,6 +4004,26 @@ class DataForm extends Form {
                     } catch (e) {}
                 } catch (e) {
                     console.error('Error creating calendar control', e);
+                }
+                break;
+            }
+            case 'itemList': {
+                try {
+                    const list = new ItemList(contentArea, Object.assign({}, properties || {}, { appForm: this }));
+                    list.Draw(contentArea);
+                    if (item.name) this.controlsMap[item.name] = list;
+                } catch (e) {
+                    console.error('Error creating itemList control', e);
+                }
+                break;
+            }
+            case 'messageFeed': {
+                try {
+                    const feed = new MessageFeed(contentArea, Object.assign({}, properties || {}, { appForm: this }));
+                    feed.Draw(contentArea);
+                    if (item.name) this.controlsMap[item.name] = feed;
+                } catch (e) {
+                    console.error('Error creating messageFeed control', e);
                 }
                 break;
             }
@@ -12820,6 +12947,878 @@ class Calendar extends UIObject {
         try { if (this.element && typeof this.element.remove === 'function') this.element.remove(); } catch (e) {}
         this.element = null; this._toolbarEl = null; this._scrollEl = null;
         this._overlayEl = null; this._canvasEl = null; this._hotelSelect = null;
+    }
+}
+
+/**
+ * ItemList — список строк «значок · заголовок · пояснение · счётчик»:
+ * элемент лейаута `itemList`.
+ *
+ * Заведён как отдельный контрол, потому что таблица здесь не подходит: строка
+ * списка чатов — это не запись с колонками, а карточка из заголовка, превью,
+ * времени и счётчика непрочитанного, где выделение жирным само по себе несёт
+ * смысл. Такой же список нужен любому «списку разговоров/задач/уведомлений»,
+ * поэтому контрол общий, а не встроен в мессенджер.
+ *
+ * Контрол ПАССИВНЫЙ: данные ему отдаёт приложение (`setItems`), а он сообщает о
+ * выборе (`onSelect`). Своей загрузки у него нет намеренно — источник данных у
+ * каждого списка свой, и зашивать сюда один способ значит закрыть остальные.
+ *
+ * Элемент списка:
+ *   { id, title, subtitle, right, badge, dot: true|false|null, unread: bool }
+ *   dot === null — точки присутствия нет вовсе (не переписка вдвоём).
+ */
+class ItemList extends UIObject {
+    constructor(parentElement = null, properties = {}) {
+        super();
+        this.parentElement = parentElement;
+        this.properties = properties || {};
+        this.items = [];
+        this.activeId = null;
+        this.onSelect = null;
+        this._rows = {};
+    }
+
+    Draw(container) {
+        const host = container || this.parentElement;
+        if (!host) return null;
+        this.element = document.createElement('div');
+        this.element.className = 'ui-chatlist';
+        this.element._uiObject = this;
+        host.appendChild(this.element);
+        return this.element;
+    }
+
+    setItems(items) {
+        this.items = Array.isArray(items) ? items : [];
+        this._rows = {};
+        if (!this.element) return;
+        this.element.innerHTML = '';
+
+        if (!this.items.length) {
+            const empty = document.createElement('div');
+            empty.className = 'ui-msgfeed-empty';
+            empty.textContent = this.properties.emptyText || '';
+            this.element.appendChild(empty);
+            return;
+        }
+
+        this.items.forEach(item => this.element.appendChild(this._renderRow(item)));
+        this.setActive(this.activeId);
+    }
+
+    _renderRow(item) {
+        const row = document.createElement('div');
+        row.className = 'ui-chatlist-item' + (item.unread ? ' ui-chatlist-unread' : '');
+
+        if (item.dot !== null && item.dot !== undefined) {
+            const dot = document.createElement('span');
+            dot.className = 'ui-chatlist-dot' + (item.dot ? ' ui-chatlist-online' : '');
+            dot.title = item.dotTitle || '';
+            row.appendChild(dot);
+        }
+
+        const body = document.createElement('div');
+        body.className = 'ui-chatlist-body';
+        const title = document.createElement('div');
+        title.className = 'ui-chatlist-name';
+        title.textContent = item.title || '';
+        body.appendChild(title);
+        if (item.subtitle) {
+            const sub = document.createElement('div');
+            sub.className = 'ui-chatlist-preview';
+            sub.textContent = item.subtitle;
+            body.appendChild(sub);
+        }
+        row.appendChild(body);
+
+        const side = document.createElement('div');
+        side.className = 'ui-chatlist-side';
+        if (item.right) {
+            const right = document.createElement('span');
+            right.className = 'ui-chatlist-time';
+            right.textContent = item.right;
+            side.appendChild(right);
+        }
+        if (item.badge) {
+            const badge = document.createElement('span');
+            badge.className = 'ui-chatlist-badge';
+            badge.textContent = (item.badge > 99) ? '99+' : String(item.badge);
+            side.appendChild(badge);
+        }
+        row.appendChild(side);
+
+        row.onclick = () => {
+            this.setActive(item.id);
+            if (typeof this.onSelect === 'function') { try { this.onSelect(item); } catch (e) { console.error(e); } }
+        };
+
+        this._rows[item.id] = row;
+        return row;
+    }
+
+    setActive(id) {
+        this.activeId = id || null;
+        for (const key in this._rows) {
+            this._rows[key].classList.toggle('ui-chatlist-active', key === this.activeId);
+        }
+    }
+
+    getActive() {
+        return this.items.find(i => i.id === this.activeId) || null;
+    }
+
+    destroy() {
+        try { if (this.element && this.element.remove) this.element.remove(); } catch (e) {}
+        this.element = null; this._rows = {}; this.items = [];
+    }
+}
+
+/**
+ * MessageFeed — лента переписки: элемент лейаута `messageFeed`.
+ *
+ * Заводится как первоклассный элемент формы (как `calendar`), а не собирается
+ * руками в приложении: ручная вёрстка DOM в прикладном коде — тот самый
+ * анти-паттерн, ради ухода от которого приложения и переписываются. Приложение
+ * объявляет элемент в лейауте и даёт имена серверных методов; всё остальное —
+ * прокрутка, подгрузка истории, миниатюры, статусы — делает контрол.
+ *
+ * Свойства (`properties` элемента лейаута):
+ *   serverScript   — имя серверного скрипта приложения
+ *   loadFn         — метод истории: { chatId, before, limit } → { messages, hasMore }
+ *   sendFn         — метод отправки: { chatId, content, clientMsgId, attachments }
+ *   readFn         — метод отметки о прочтении: { chatId, messageIds }
+ *   attachmentUrl  — адрес выдачи вложения (?uid=…&thumb=1 для миниатюры)
+ *   currentUserId  — чьи сообщения считать своими
+ *   pageSize       — сколько сообщений тянуть за раз (умолчание 50)
+ *
+ * События наружу: onSent(message), onNeedOlder() — необязательные.
+ *
+ * Устройство ленты следует общепринятому для переписки:
+ *   • свои сообщения справа, чужие слева, в групповом чате — имя автора;
+ *   • разделители дат;
+ *   • последняя страница истории, старое подгружается при прокрутке вверх;
+ *   • автопрокрутка вниз ТОЛЬКО когда пользователь и так внизу — иначе
+ *     показывается кнопка «вниз» со счётчиком, чтобы не вырывать человека из
+ *     чтения истории;
+ *   • отправка оптимистичная: сообщение видно сразу, `clientMsgId` служит
+ *     ключом идемпотентности и связывает временную строку с подтверждённой.
+ */
+class MessageFeed extends UIObject {
+    constructor(parentElement = null, properties = {}) {
+        super();
+        const p = properties || {};
+        this.parentElement = parentElement;
+        this.appForm = p.appForm || null;
+        this.serverScript = p.serverScript || null;
+        this.loadFn = p.loadFn || 'loadMessages';
+        this.sendFn = p.sendFn || 'sendMessage';
+        this.readFn = p.readFn || 'markRead';
+        this.attachmentUrl = p.attachmentUrl || '';
+        this.pageSize = p.pageSize || 50;
+        this.currentUserId = p.currentUserId || null;
+        this.maxAttachmentBytes = p.maxAttachmentBytes || (10 * 1024 * 1024);
+
+        // Состояние
+        this.chatId = null;
+        this.isGroup = false;
+        this.messages = [];      // в порядке показа: старые сверху
+        this._index = {};        // ключ (UID или clientMsgId) → { data, element }
+        this._hasMore = false;
+        this._loading = false;
+        this._pendingNew = 0;    // сколько новых пришло, пока пользователь читал историю
+        this._pendingFiles = []; // выбранные, но ещё не отправленные вложения
+        this._emojiPopup = null;
+        this._emojiKeyHandler = null;
+        this._seq = 0;
+    }
+
+    // ── Отрисовка каркаса ────────────────────────────────────────────────────
+    Draw(container) {
+        const host = container || this.parentElement;
+        if (!host) return null;
+
+        this.element = document.createElement('div');
+        this.element.className = 'ui-msgfeed';
+        this.element._uiObject = this;
+
+        this._scrollEl = document.createElement('div');
+        this._scrollEl.className = 'ui-msgfeed-scroll';
+        this.element.appendChild(this._scrollEl);
+
+        // Кнопка подгрузки истории живёт первой строкой ленты — там, где
+        // пользователь её ищет, дойдя до начала.
+        //
+        // Контейнер передаётся В КОНСТРУКТОР, а не только в Draw: Button без
+        // parentElement переходит на `position: absolute` (см. Button.Draw), и
+        // все кнопки ленты сваливались в левый верхний угол поверх переписки.
+        this._olderBtn = new Button(this._scrollEl, {
+            showIcon: true, showText: true, caption: __t('msgfeed_load_older'),
+            icon: '/apps/general_icons/resources/public/16x16/up.png'
+        });
+        this._olderBtn.Draw(this._scrollEl);
+        const olderEl = this._olderBtn.getElement();
+        if (olderEl) olderEl.classList.add('ui-msgfeed-older');
+        this._olderBtn.onClick = () => this.loadOlder();
+        this._setOlderVisible(false);
+
+        this._emptyEl = document.createElement('div');
+        this._emptyEl.className = 'ui-msgfeed-empty';
+        this._scrollEl.appendChild(this._emptyEl);
+
+        // Кнопка «вниз» со счётчиком новых.
+        this._jumpEl = document.createElement('div');
+        this._jumpEl.className = 'ui-msgfeed-jump';
+        this._jumpEl.onclick = () => this.scrollToBottom(true);
+        this.element.appendChild(this._jumpEl);
+        this._updateJump();
+
+        this._buildComposer();
+
+        this._scrollEl.addEventListener('scroll', () => this._onScroll());
+
+        host.appendChild(this.element);
+        this._renderEmpty(__t('msgfeed_pick_chat'));
+        this.setEnabled(false);
+        return this.element;
+    }
+
+    _buildComposer() {
+        const composer = document.createElement('div');
+        composer.className = 'ui-msgfeed-composer';
+
+        // Выбранные вложения показываем ДО отправки — иначе человек не знает,
+        // что именно уйдёт, и не может передумать.
+        this._pendingEl = document.createElement('div');
+        this._pendingEl.className = 'ui-msgfeed-pending';
+        composer.appendChild(this._pendingEl);
+
+        const row = document.createElement('div');
+        row.className = 'ui-msgfeed-inputrow';
+        composer.appendChild(row);
+
+        this._input = document.createElement('textarea');
+        this._input.className = 'ui-msgfeed-input';
+        this._input.rows = 2;
+        this._input.placeholder = __t('msgfeed_input_placeholder');
+        row.appendChild(this._input);
+
+        // Enter отправляет, Shift+Enter переносит строку — привычное поведение
+        // переписки; без него длинное сообщение не набрать.
+        this._input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                this.send();
+            }
+        });
+
+        const actions = document.createElement('div');
+        actions.className = 'ui-msgfeed-actions';
+        row.appendChild(actions);
+
+        // Смайлики и скрепка — кнопки только со значком (квадратные): подписи
+        // рядом с полем ввода съедали бы место, а смысл значка очевиден. Поэтому
+        // им обязателен tooltip — иначе значок остаётся загадкой.
+        this._emojiBtn = new Button(actions, {
+            showIcon: true, showText: false, height: 24,
+            icon: '/apps/general_icons/resources/public/16x16/emoji.png',
+            tooltip: __t('msgfeed_emoji')
+        });
+        this._emojiBtn.Draw(actions);
+        this._emojiBtn.onClick = (e) => { if (e) e.stopPropagation(); this._toggleEmoji(); };
+
+        this._attachBtn = new Button(actions, {
+            showIcon: true, showText: false, height: 24,
+            icon: '/apps/general_icons/resources/public/16x16/attach.png',
+            tooltip: __t('msgfeed_attach')
+        });
+        this._attachBtn.Draw(actions);
+        this._attachBtn.onClick = () => { if (this._fileInput) this._fileInput.click(); };
+
+        this._sendBtn = new Button(actions, {
+            showIcon: true, showText: true, caption: __t('msgfeed_send'),
+            icon: '/apps/general_icons/resources/public/16x16/send.png'
+        });
+        this._sendBtn.Draw(actions);
+        this._sendBtn.onClick = () => this.send();
+
+        this._fileInput = document.createElement('input');
+        this._fileInput.type = 'file';
+        this._fileInput.multiple = true;
+        this._fileInput.className = 'ui-msgfeed-file';
+        this._fileInput.addEventListener('change', () => this._takeFiles(this._fileInput.files));
+        composer.appendChild(this._fileInput);
+
+        this.element.appendChild(composer);
+        this._composerEl = composer;
+    }
+
+    // ── Управление состоянием ────────────────────────────────────────────────
+    setCurrentUser(userId) { this.currentUserId = userId || null; }
+
+    setEnabled(on) {
+        if (this._input) this._input.disabled = !on;
+        const toggle = (btn) => { const el = btn && btn.getElement && btn.getElement(); if (el) el.disabled = !on; };
+        toggle(this._sendBtn); toggle(this._attachBtn); toggle(this._emojiBtn);
+    }
+
+    /** Открыть чат: очистить ленту и загрузить последнюю страницу истории. */
+    async setChat(params) {
+        const p = params || {};
+        this.chatId = p.chatId || null;
+        this.isGroup = !!p.isGroup;
+        this.messages = [];
+        this._index = {};
+        this._hasMore = false;
+        this._pendingNew = 0;
+        this._pendingFiles = [];
+        this._renderPending();
+        this._clearItems();
+        this._updateJump();
+
+        if (!this.chatId) {
+            this.setEnabled(false);
+            this._renderEmpty(__t('msgfeed_pick_chat'));
+            return;
+        }
+        this.setEnabled(true);
+        await this._load({ before: null, prepend: false });
+        this.scrollToBottom(false);
+        // Отметку о прочтении здесь НЕ ставим намеренно: её ставит приложение
+        // и ЖДЁТ ответа, прежде чем обновлять счётчики. Пока она стояла тут
+        // «вдогонку», список чатов успевал обновиться по данным, посланным до
+        // неё, и счётчик непрочитанного возвращался на только что открытый чат.
+        if (this._input) this._input.focus();
+    }
+
+    async loadOlder() {
+        if (this._loading || !this._hasMore || !this.messages.length) return;
+        const oldest = this.messages[0];
+        const keepHeight = this._scrollEl.scrollHeight;
+        const keepTop = this._scrollEl.scrollTop;
+        await this._load({ before: oldest.UID, prepend: true });
+        // Сохраняем положение чтения: после вставки сверху лента «прыгнула» бы.
+        this._scrollEl.scrollTop = keepTop + (this._scrollEl.scrollHeight - keepHeight);
+    }
+
+    async _load(opts) {
+        if (!this.serverScript || !this.chatId) return;
+        this._loading = true;
+        this._setOlderVisible(false);
+        let payload = null;
+        try {
+            payload = await window.callServer(this.serverScript, this.loadFn, {
+                chatId: this.chatId,
+                before: opts.before || null,
+                limit: this.pageSize
+            });
+        } catch (e) {
+            console.error('[MessageFeed] загрузка истории:', e && e.message);
+        }
+        this._loading = false;
+        if (!payload || payload.error) {
+            this._renderEmpty(__t('msgfeed_load_error'));
+            return;
+        }
+
+        const list = payload.messages || [];
+        this._hasMore = !!payload.hasMore;
+        this._setOlderVisible(this._hasMore);
+
+        if (opts.prepend) {
+            for (let i = list.length - 1; i >= 0; i--) this._insert(list[i], true);
+        } else {
+            list.forEach(m => this._insert(m, false));
+        }
+        this._renderEmpty(this.messages.length ? '' : __t('msgfeed_no_messages'));
+    }
+
+    // ── Вставка и отрисовка сообщений ────────────────────────────────────────
+    _key(msg) { return msg.UID || msg.clientMsgId || null; }
+
+    /**
+     * Добавить сообщение в ленту. Повторы отсекаются по ключу: одно и то же
+     * сообщение приходит и подтверждением отправки, и событием с сервера.
+     * Подтверждение ЗАМЕЩАЕТ оптимистичную строку — по clientMsgId.
+     */
+    _insert(msg, atTop) {
+        if (!msg) return null;
+        const byClient = msg.clientMsgId ? this._index[msg.clientMsgId] : null;
+        if (byClient) {
+            // Пришло подтверждение своей же отправки — обновляем строку на месте.
+            const idx = this.messages.indexOf(byClient.data);
+            if (idx !== -1) this.messages[idx] = msg;
+            delete this._index[msg.clientMsgId];
+            const el = this._renderMessage(msg, byClient.element);
+            this._index[this._key(msg)] = { data: msg, element: el };
+            return el;
+        }
+        const key = this._key(msg);
+        if (key && this._index[key]) return this._index[key].element;
+
+        const el = this._renderMessage(msg, null);
+        if (atTop) {
+            this.messages.unshift(msg);
+            const first = this._scrollEl.querySelector('.ui-msg, .ui-msg-daysep');
+            if (first) this._scrollEl.insertBefore(el, first);
+            else this._scrollEl.appendChild(el);
+        } else {
+            this.messages.push(msg);
+            this._scrollEl.appendChild(el);
+        }
+        if (key) this._index[key] = { data: msg, element: el };
+        this._syncDaySeparators();
+        return el;
+    }
+
+    /**
+     * Новое сообщение из потока событий.
+     *
+     * Прокрутку вниз делаем только если пользователь и так внизу — иначе он
+     * читает историю, и рывок ленты его оттуда выбросит. Отметку о прочтении
+     * здесь НЕ ставим: видно ли окно, знает приложение, а не контрол (окно
+     * может быть свёрнуто в трей). Вызывающий сам зовёт markVisibleRead().
+     */
+    appendMessage(msg) {
+        if (!msg || msg.chatId !== this.chatId) return;
+        const wasBottom = this.isAtBottom();
+        this._insert(msg, false);
+        this._renderEmpty('');
+        if (wasBottom) {
+            this.scrollToBottom(false);
+        } else {
+            this._pendingNew++;
+            this._updateJump();
+        }
+    }
+
+    /** Обновить галочки доставки/прочтения. receipts: [{ messageId, delivered, read }] */
+    applyReceipts(receipts) {
+        (receipts || []).forEach(r => {
+            const entry = this._index[r.messageId];
+            if (!entry) return;
+            entry.data.deliveredCount = r.delivered;
+            entry.data.readCount = r.read;
+            this._renderMessage(entry.data, entry.element);
+        });
+    }
+
+    _renderMessage(msg, existing) {
+        const own = !!(this.currentUserId && msg.authorId === this.currentUserId);
+        const el = existing || document.createElement('div');
+        el.className = 'ui-msg' + (own ? ' ui-msg-own' : '');
+        el.dataset.day = this._dayKey(msg.createdAt);
+        el.innerHTML = '';
+
+        const bubble = document.createElement('div');
+        bubble.className = 'ui-msg-bubble';
+        el.appendChild(bubble);
+
+        // Имя автора — только в групповом чате и только у чужих сообщений:
+        // в переписке вдвоём подпись под каждым сообщением лишь мешает.
+        if (this.isGroup && !own) {
+            const author = document.createElement('div');
+            author.className = 'ui-msg-author';
+            author.textContent = msg.authorName || '';
+            bubble.appendChild(author);
+        }
+
+        if (Array.isArray(msg.attachments) && msg.attachments.length) {
+            bubble.appendChild(this._renderAttachments(msg));
+        }
+
+        if (msg.content) {
+            const text = document.createElement('div');
+            text.className = 'ui-msg-text';
+            text.textContent = msg.content;
+            bubble.appendChild(text);
+        }
+
+        const meta = document.createElement('div');
+        meta.className = 'ui-msg-meta';
+        const time = document.createElement('span');
+        time.className = 'ui-msg-time';
+        time.textContent = this._hhmm(msg.createdAt);
+        meta.appendChild(time);
+        if (own) meta.appendChild(this._renderTicks(msg));
+        bubble.appendChild(meta);
+
+        return el;
+    }
+
+    /**
+     * Галочки своего сообщения: отправляется → отправлено → доставлено всем →
+     * прочитано всеми. Состояния разные, и склеивать их нельзя: «доставлено» и
+     * «прочитано» — разные обещания перед отправителем.
+     */
+    _renderTicks(msg) {
+        const span = document.createElement('span');
+        span.className = 'ui-msg-ticks';
+        const recipients = (typeof msg.recipientCount === 'number') ? msg.recipientCount : 0;
+        if (msg.pending) {
+            span.textContent = '⋯';
+            span.title = __t('msgfeed_state_sending');
+        } else if (recipients > 0 && msg.readCount >= recipients) {
+            span.textContent = '✓✓';
+            span.classList.add('ui-msg-ticks-read');
+            span.title = __t('msgfeed_state_read');
+        } else if (recipients > 0 && msg.deliveredCount >= recipients) {
+            span.textContent = '✓✓';
+            span.title = __t('msgfeed_state_delivered');
+        } else {
+            span.textContent = '✓';
+            span.title = __t('msgfeed_state_sent');
+        }
+        return span;
+    }
+
+    _renderAttachments(msg) {
+        const box = document.createElement('div');
+        box.className = 'ui-msg-attachments';
+        msg.attachments.forEach(att => {
+            if (att.isImage) box.appendChild(this._renderImage(att));
+            else box.appendChild(this._renderFile(att));
+        });
+        return box;
+    }
+
+    /**
+     * Фотография показывается миниатюрой; щелчок разворачивает её прямо в ленте
+     * и следующий щелчок сворачивает обратно. Отдельного окна просмотра нет
+     * намеренно: в переписке смотрят «на ходу», и модальное окно каждый раз
+     * выбрасывало бы человека из разговора.
+     */
+    _renderImage(att) {
+        const img = document.createElement('img');
+        img.className = 'ui-msg-thumb';
+        img.alt = att.name || '';
+        img.title = att.name || '';
+        img.src = this._attUrl(att.UID, true);
+        img.onclick = () => {
+            const full = img.classList.toggle('ui-msg-thumb-full');
+            img.src = this._attUrl(att.UID, !full);
+        };
+        return img;
+    }
+
+    _renderFile(att) {
+        const row = document.createElement('div');
+        row.className = 'ui-msg-file';
+        row.appendChild(MySpace.icon.img('/apps/general_icons/resources/public/16x16/attach.png', 16));
+        const name = document.createElement('span');
+        name.className = 'ui-msg-file-name';
+        name.textContent = att.name || '';
+        row.appendChild(name);
+        const size = document.createElement('span');
+        size.className = 'ui-msg-file-size';
+        size.textContent = this._humanSize(att.size);
+        row.appendChild(size);
+        row.onclick = () => MySpace.downloadFile(this._attUrl(att.UID, false), att.name);
+        return row;
+    }
+
+    _attUrl(uid, thumb) {
+        const base = this.attachmentUrl || '';
+        if (!base) return '';
+        return base + (base.indexOf('?') === -1 ? '?' : '&') + 'uid=' + encodeURIComponent(uid) + (thumb ? '&thumb=1' : '');
+    }
+
+    // ── Разделители дат ──────────────────────────────────────────────────────
+    // Пересобираются целиком: сообщения приходят и сверху (история), и снизу
+    // (новые), и точечная вставка разделителя рано или поздно разойдётся с лентой.
+    _syncDaySeparators() {
+        this._scrollEl.querySelectorAll('.ui-msg-daysep').forEach(n => n.remove());
+        let prevDay = null;
+        this.messages.forEach(msg => {
+            const key = this._key(msg);
+            const entry = key ? this._index[key] : null;
+            if (!entry || !entry.element) return;
+            const day = this._dayKey(msg.createdAt);
+            if (day !== prevDay) {
+                const sep = document.createElement('div');
+                sep.className = 'ui-msg-daysep';
+                const label = document.createElement('span');
+                label.textContent = this._dayLabel(msg.createdAt);
+                sep.appendChild(label);
+                this._scrollEl.insertBefore(sep, entry.element);
+                prevDay = day;
+            }
+        });
+    }
+
+    _dayKey(value) {
+        const d = value ? new Date(value) : new Date();
+        if (isNaN(d.getTime())) return '';
+        return d.getFullYear() + '-' + (d.getMonth() + 1) + '-' + d.getDate();
+    }
+
+    _dayLabel(value) {
+        const d = value ? new Date(value) : new Date();
+        if (isNaN(d.getTime())) return '';
+        const today = new Date();
+        const yesterday = new Date(); yesterday.setDate(today.getDate() - 1);
+        if (this._dayKey(d) === this._dayKey(today)) return __t('msgfeed_today');
+        if (this._dayKey(d) === this._dayKey(yesterday)) return __t('msgfeed_yesterday');
+        try { return d.toLocaleDateString(); } catch (e) { return this._dayKey(d); }
+    }
+
+    _hhmm(value) {
+        // Незаполненная дата в этой системе — не NULL, а `0001-01-01`
+        // (см. MySpace.isEmptyDate): без этой проверки пустое время печатается
+        // как осмысленное.
+        if (MySpace.isEmptyDate(value)) return '';
+        const d = new Date(value);
+        const p = n => String(n).padStart(2, '0');
+        return p(d.getHours()) + ':' + p(d.getMinutes());
+    }
+
+    _humanSize(bytes) {
+        const b = Number(bytes) || 0;
+        if (b < 1024) return b + ' B';
+        if (b < 1024 * 1024) return Math.round(b / 1024) + ' KB';
+        return (Math.round(b / (1024 * 102.4)) / 10) + ' MB';
+    }
+
+    // ── Прокрутка ────────────────────────────────────────────────────────────
+    isAtBottom() {
+        if (!this._scrollEl) return true;
+        return (this._scrollEl.scrollHeight - this._scrollEl.scrollTop - this._scrollEl.clientHeight) < 40;
+    }
+
+    scrollToBottom(markRead) {
+        if (!this._scrollEl) return;
+        this._scrollEl.scrollTop = this._scrollEl.scrollHeight;
+        this._pendingNew = 0;
+        this._updateJump();
+        if (markRead) this._reportRead();
+    }
+
+    _onScroll() {
+        if (this._scrollEl.scrollTop < 40 && this._hasMore && !this._loading) this.loadOlder();
+        if (this.isAtBottom() && this._pendingNew) { this._pendingNew = 0; this._updateJump(); this._reportRead(); }
+    }
+
+    _updateJump() {
+        if (!this._jumpEl) return;
+        if (!this._pendingNew) { this._jumpEl.style.display = 'none'; return; }
+        this._jumpEl.style.display = 'block';
+        this._jumpEl.textContent = '▼ ' + this._pendingNew;
+    }
+
+    _setOlderVisible(on) {
+        const el = this._olderBtn && this._olderBtn.getElement();
+        // visibility, а не display: кнопка стоит первой строкой ленты, и её
+        // исчезновение из потока дёргало бы прокрутку истории.
+        if (el) el.style.visibility = on ? 'visible' : 'hidden';
+    }
+
+    _clearItems() {
+        this._scrollEl.querySelectorAll('.ui-msg, .ui-msg-daysep').forEach(n => n.remove());
+    }
+
+    _renderEmpty(text) {
+        if (!this._emptyEl) return;
+        this._emptyEl.textContent = text || '';
+        this._emptyEl.style.display = text ? 'block' : 'none';
+    }
+
+    /**
+     * Отметить чужие сообщения ленты прочитанными.
+     *
+     * Публичный метод: открытый на экране чат — это и есть «прочитано», и решать
+     * это должно приложение, которое знает, видно ли окно. Возвращает промис,
+     * чтобы вызывающий мог обновить счётчики ПОСЛЕ отметки — иначе список чатов
+     * успевает мигнуть единицей непрочитанного.
+     *
+     * @returns {Promise}
+     */
+    markVisibleRead() {
+        if (!this.serverScript || !this.chatId) return Promise.resolve();
+        const ids = this.messages
+            .filter(m => m.UID && m.authorId !== this.currentUserId && !m.readByMe)
+            .map(m => { m.readByMe = true; return m.UID; });
+        if (!ids.length) return Promise.resolve();
+        return window.callServer(this.serverScript, this.readFn, { chatId: this.chatId, messageIds: ids })
+            .catch(e => console.error('[MessageFeed] отметка прочтения:', e && e.message));
+    }
+
+    /** Прежнее внутреннее имя — прокрутка и открытие чата зовут его же. */
+    _reportRead() { return this.markVisibleRead(); }
+
+    // ── Вложения до отправки ─────────────────────────────────────────────────
+    _takeFiles(fileList) {
+        const files = Array.from(fileList || []);
+        this._fileInput.value = '';
+        files.forEach(f => {
+            if (f.size > this.maxAttachmentBytes) {
+                showAlert(__t('msgfeed_file_too_big') + ' ' + this._humanSize(this.maxAttachmentBytes));
+                return;
+            }
+            this._pendingFiles.push(f);
+        });
+        this._renderPending();
+    }
+
+    _renderPending() {
+        if (!this._pendingEl) return;
+        this._pendingEl.innerHTML = '';
+        this._pendingEl.style.display = this._pendingFiles.length ? 'flex' : 'none';
+        this._pendingFiles.forEach((f, i) => {
+            const chip = document.createElement('div');
+            chip.className = 'ui-msgfeed-chip';
+            chip.appendChild(MySpace.icon.img('/apps/general_icons/resources/public/16x16/attach.png', 16));
+            const name = document.createElement('span');
+            name.textContent = f.name;
+            chip.appendChild(name);
+            const drop = document.createElement('span');
+            drop.className = 'ui-msgfeed-chip-drop';
+            drop.textContent = '✕';
+            drop.title = __t('msgfeed_remove_file');
+            drop.onclick = () => { this._pendingFiles.splice(i, 1); this._renderPending(); };
+            chip.appendChild(drop);
+            this._pendingEl.appendChild(chip);
+        });
+    }
+
+    _readAsBase64(file) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => {
+                const res = String(reader.result || '');
+                const comma = res.indexOf(',');
+                resolve(comma === -1 ? res : res.slice(comma + 1));
+            };
+            reader.onerror = () => reject(new Error('read error'));
+            reader.readAsDataURL(file);
+        });
+    }
+
+    // ── Отправка ─────────────────────────────────────────────────────────────
+    async send() {
+        if (!this.chatId || !this.serverScript) return;
+        const content = (this._input.value || '').trim();
+        if (!content && !this._pendingFiles.length) return;
+
+        // Ключ идемпотентности: по нему сервер отсекает повтор при ретрае, а
+        // клиент находит свою временную строку, когда придёт подтверждение.
+        const clientMsgId = 'c' + Date.now().toString(36) + '-' + (++this._seq);
+
+        const files = this._pendingFiles.slice();
+        this._input.value = '';
+        this._pendingFiles = [];
+        this._renderPending();
+
+        // Оптимистичная строка: сообщение видно сразу, до ответа сервера.
+        const optimistic = {
+            UID: null,
+            clientMsgId: clientMsgId,
+            chatId: this.chatId,
+            authorId: this.currentUserId,
+            content: content,
+            createdAt: new Date().toISOString(),
+            pending: true,
+            attachments: files.map(f => ({ UID: null, name: f.name, size: f.size, isImage: /^image\//.test(f.type) }))
+        };
+        this._insert(optimistic, false);
+        this._renderEmpty('');
+        this.scrollToBottom(false);
+
+        let payload = [];
+        try {
+            for (const f of files) {
+                payload.push({ name: f.name, mimeType: f.type || 'application/octet-stream', size: f.size, data: await this._readAsBase64(f) });
+            }
+        } catch (e) {
+            console.error('[MessageFeed] чтение файла:', e && e.message);
+        }
+
+        try {
+            const res = await window.callServer(this.serverScript, this.sendFn, {
+                chatId: this.chatId, content: content, clientMsgId: clientMsgId, attachments: payload
+            });
+            if (res && res.error) {
+                showAlert(__t('msgfeed_send_error') + ' ' + res.error);
+                this._markFailed(clientMsgId);
+                return;
+            }
+            if (res && res.message) {
+                this._insert(res.message, false);
+                if (typeof this.onSent === 'function') { try { this.onSent(res.message); } catch (e) {} }
+            }
+        } catch (e) {
+            showAlert(__t('msgfeed_send_error') + ' ' + (e && e.message || ''));
+            this._markFailed(clientMsgId);
+        }
+        this.scrollToBottom(false);
+    }
+
+    _markFailed(clientMsgId) {
+        const entry = this._index[clientMsgId];
+        if (!entry || !entry.element) return;
+        entry.data.pending = false;
+        entry.element.classList.add('ui-msg-failed');
+        entry.element.title = __t('msgfeed_send_error');
+    }
+
+    // ── Смайлики ─────────────────────────────────────────────────────────────
+    // Юникод, а не картинки: он есть в любом шрифте, переживает копирование в
+    // почту и не требует своего хранилища. Набор — небольшой и осмысленный;
+    // «все эмодзи мира» списком делают выбор дольше, чем набор слова.
+    _toggleEmoji() {
+        if (this._emojiPopup) { this._closeEmoji(); return; }
+        const EMOJI = ['🙂','😀','😄','😉','😊','😍','😘','😎','🤔','😐','😕','☹️','😢','😭','😡','😱',
+                       '👍','👎','👌','🙏','👏','💪','🤝','✌️','👋','🎉','🔥','⭐','❤️','💔','✅','❌',
+                       '📅','📞','✉️','📎','💰','🏨','🛏️','🔑','🧾','⏰','⚠️','❗','❓','💡','🚗','🍽️'];
+
+        const pop = document.createElement('div');
+        pop.className = 'ui-msgfeed-emoji';
+        EMOJI.forEach(ch => {
+            const cell = document.createElement('span');
+            cell.className = 'ui-msgfeed-emoji-cell';
+            cell.textContent = ch;
+            cell.onclick = (e) => { e.stopPropagation(); this._insertEmoji(ch); };
+            pop.appendChild(cell);
+        });
+        this.element.appendChild(pop);
+        this._emojiPopup = pop;
+
+        // Клавиатура в capture-фазе: Escape должен закрыть подсказку, а не форму.
+        this._emojiKeyHandler = (e) => {
+            if (e.key !== 'Escape') return;
+            e.stopPropagation();
+            this._closeEmoji();
+        };
+        document.addEventListener('keydown', this._emojiKeyHandler, true);
+        this._emojiOutside = () => this._closeEmoji();
+        setTimeout(() => document.addEventListener('click', this._emojiOutside), 0);
+    }
+
+    _closeEmoji() {
+        if (this._emojiPopup) { this._emojiPopup.remove(); this._emojiPopup = null; }
+        if (this._emojiKeyHandler) { document.removeEventListener('keydown', this._emojiKeyHandler, true); this._emojiKeyHandler = null; }
+        if (this._emojiOutside) { document.removeEventListener('click', this._emojiOutside); this._emojiOutside = null; }
+    }
+
+    _insertEmoji(ch) {
+        const el = this._input;
+        if (!el) return;
+        const start = el.selectionStart || 0;
+        const end = el.selectionEnd || 0;
+        const val = el.value || '';
+        el.value = val.slice(0, start) + ch + val.slice(end);
+        el.selectionStart = el.selectionEnd = start + ch.length;
+        el.focus();
+    }
+
+    destroy() {
+        this._closeEmoji();
+        try { if (this._olderBtn && this._olderBtn.destroy) this._olderBtn.destroy(); } catch (e) {}
+        try { if (this._sendBtn && this._sendBtn.destroy) this._sendBtn.destroy(); } catch (e) {}
+        try { if (this._attachBtn && this._attachBtn.destroy) this._attachBtn.destroy(); } catch (e) {}
+        try { if (this._emojiBtn && this._emojiBtn.destroy) this._emojiBtn.destroy(); } catch (e) {}
+        try { if (this.element && this.element.remove) this.element.remove(); } catch (e) {}
+        this.element = null; this._scrollEl = null; this._input = null;
+        this._index = {}; this.messages = [];
     }
 }
 

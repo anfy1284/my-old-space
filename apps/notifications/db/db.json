@@ -1,0 +1,65 @@
+{
+    "models": [
+        {
+            "name": "Notifications",
+            "tableName": "notifications",
+            "fields": {
+                "userId": {
+                    "type": "STRING",
+                    "allowNull": false,
+                    "references": {
+                        "model": "users",
+                        "key": "UID"
+                    },
+                    "onUpdate": "CASCADE",
+                    "onDelete": "CASCADE",
+                    "caption": { "i18n": "notif_user_field" }
+                },
+                "appName": {
+                    "type": "STRING",
+                    "allowNull": false,
+                    "caption": { "i18n": "notif_app_field" }
+                },
+                "title": {
+                    "type": "STRING",
+                    "allowNull": true,
+                    "caption": { "i18n": "notif_title_field" }
+                },
+                "text": {
+                    "type": "TEXT",
+                    "allowNull": false,
+                    "caption": { "i18n": "notif_text_field" }
+                },
+                "icon": {
+                    "type": "STRING",
+                    "allowNull": true,
+                    "caption": { "i18n": "notif_icon_field" }
+                },
+                "handlerFn": {
+                    "type": "STRING",
+                    "allowNull": true,
+                    "caption": { "i18n": "notif_handler_field" }
+                },
+                "handlerParams": {
+                    "type": "JSON",
+                    "allowNull": true,
+                    "defaultValue": null,
+                    "caption": { "i18n": "notif_handler_params_field" }
+                },
+                "isRead": {
+                    "type": "BOOLEAN",
+                    "allowNull": false,
+                    "defaultValue": false,
+                    "caption": { "i18n": "notif_is_read_field" }
+                }
+            },
+            "options": {
+                "timestamps": true,
+                "indexes": [
+                    { "fields": ["userId", "createdAt"] }
+                ]
+            }
+        }
+    ],
+    "associations": []
+}

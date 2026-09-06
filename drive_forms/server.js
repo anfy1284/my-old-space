@@ -4,8 +4,30 @@ const globalRoot = require('../drive_root/globalServerContext');
 const { t } = require('../drive_root/i18n');
 const httpCache = require('../drive_root/httpCache');
 const log = require('../drive_root/log');
+const presence = require('../drive_root/presence');
 const fs = require('fs');
 const path = require('path');
+
+/**
+ * Разослать смену присутствия ВСЕМ живым потокам.
+ *
+ * Веером, а не адресно: «кто в сети» — сведения общие для всех сотрудников
+ * (список пользователей, переписка), и получатель заранее не известен. В событии
+ * только идентификатор и флаг — ничего личного за пределами самого факта.
+ */
+function broadcastPresence(userId, online) {
+	try {
+		const { broadcastSessionEvent } = require('./dynamicTableRegistry');
+		broadcastSessionEvent({
+			type: 'presence',
+			userId: userId,
+			online: !!online,
+			lastSeenAt: online ? null : new Date().toISOString()
+		});
+	} catch (e) {
+		log.debug('[drive_forms/events] presence broadcast:', e && e.message);
+	}
+}
 
 // Load app config (public files whitelist)
 let appConfig = { publicFiles: [] };
@@ -187,8 +209,18 @@ async function handleRequest(req, res, appDir, appAlias) {
 				if (!global._sessionSseClients.has(sessionID)) global._sessionSseClients.set(sessionID, new Set());
 				const set = global._sessionSseClients.get(sessionID);
 				const clientId = Math.random().toString(36).substr(2, 9);
-				const clientInfo = { res, clientId };
+				// userId держим рядом с потоком, чтобы событие можно было отправить
+				// КОНКРЕТНОМУ пользователю (уведомление о сообщении в мессенджере),
+				// а не веером всем сессиям. Без него единственной рассылкой остаётся
+				// broadcast, и чужое уведомление приезжает в чужое окно.
+				const clientInfo = { res, clientId, userId: user.UID };
+				const wasOnline = presence.isOnline(user.UID);
 				set.add(clientInfo);
+				// Присутствие: поток открыт — пользователь в системе. Событие шлём
+				// только на СМЕНУ состояния, а не на каждую вкладку: вторая вкладка
+				// того же человека статуса не меняет.
+				presence.touch(user.UID);
+				if (!wasOnline) broadcastPresence(user.UID, true);
 				log.debug(`[drive_forms/events] session SSE connected session=${sessionID} user=${user.UID} clientId=${clientId} total=${set.size}`);
 				res.write(`data: ${JSON.stringify({ type: 'connected', clientId })}\n\n`);
 
@@ -197,6 +229,14 @@ async function handleRequest(req, res, appDir, appAlias) {
 						set.delete(clientInfo);
 						log.debug(`[drive_forms/events] session SSE disconnected session=${sessionID} clientId=${clientId} remaining=${set.size}`);
 						if (set.size === 0) global._sessionSseClients.delete(sessionID);
+						// Последняя вкладка закрыта — фиксируем время «был в сети»
+						// и сообщаем остальным. Отметка ставится именно здесь:
+						// момент известен точно, а писать её на каждый запрос —
+						// запись в базу на каждое движение пользователя.
+						if (!presence.isOnline(clientInfo.userId)) {
+							presence.touch(clientInfo.userId);
+							broadcastPresence(clientInfo.userId, false);
+						}
 					} catch (e) { console.error('[drive_forms/events] error on close handler:', e); }
 				});
 			}).catch(e => {

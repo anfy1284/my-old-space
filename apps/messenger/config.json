@@ -5,11 +5,12 @@
     "system": ["mySpace"],
     "access": ["admin", "public", "user"],
     "dependencies": {},
-    "mainMenuCommands": [
-        {"id": "main", "items": [
-            { "caption": "apps", "roles": ["admin"], "items": [
-                { "caption": "Messenger", "action": "open", "icon": "/apps/general_icons/resources/public/16x16/email.png"}
-            ]}
-        ]}
-    ]
+
+    "//": "Мессенджер — фоновое приложение: пункта в меню у него нет, точка входа — значок в трее.",
+    "tray": {
+        "icon": "/apps/general_icons/resources/public/16x16/email.png",
+        "tooltip": { "i18n": "messenger_app_caption" }
+    },
+    "hideFromTaskbar": true,
+    "preventClose": true
 }

@@ -2,8 +2,9 @@
 const Taskbar = {
     container: null,
     buttonsContainer: null,
+    trayContainer: null,
     height: 28,
-    
+
     init: function() {
         // Create container
         this.container = document.createElement('div');
@@ -34,7 +35,27 @@ const Taskbar = {
         this.buttonsContainer.style.gap = '2px';
         this.buttonsContainer.style.height = '100%';
         this.container.appendChild(this.buttonsContainer);
-        
+
+        // Область трея — правый край панели задач. Саму панель рисует этот
+        // модуль, значки в ней — приложение `tray`: панель задач ничего не знает
+        // про то, у каких приложений есть значок, а трей ничего не знает про
+        // геометрию панели. Контракт между ними — единственный метод
+        // getTrayContainer().
+        this.trayContainer = document.createElement('div');
+        this.trayContainer.style.display = 'flex';
+        this.trayContainer.style.alignItems = 'center';
+        this.trayContainer.style.gap = '2px';
+        this.trayContainer.style.height = '100%';
+        this.trayContainer.style.flexShrink = '0';
+        this.trayContainer.style.padding = '0 2px';
+        // Утопленная рамка Win95 — как у области уведомлений в оригинале.
+        this.trayContainer.style.borderTop = '1px solid #808080';
+        this.trayContainer.style.borderLeft = '1px solid #808080';
+        this.trayContainer.style.borderRight = '1px solid #ffffff';
+        this.trayContainer.style.borderBottom = '1px solid #ffffff';
+        this.trayContainer.style.boxSizing = 'border-box';
+        this.container.appendChild(this.trayContainer);
+
         // Listeners
         window.addEventListener('form-created', (e) => this.addForm(e.detail.form));
         window.addEventListener('form-destroyed', (e) => this.removeForm(e.detail.form));
@@ -49,9 +70,18 @@ const Taskbar = {
         }
     },
     
+    // Контейнер трея для приложения `tray`. Возвращает null, если панель ещё
+    // не отрисована — вызывающий обязан это проверить.
+    getTrayContainer: function() {
+        return this.trayContainer;
+    },
+
     addForm: function(form) {
         if (form._taskbarBtn) return;
-        
+        // Свойство приложения `hideFromTaskbar` (config.json): фоновому окну
+        // кнопка в панели задач не нужна — его показывает и прячет значок в трее.
+        if (form.hideFromTaskbar) return;
+
         const btn = document.createElement('div');
         btn.style.height = '100%';
         btn.style.minWidth = '120px';
@@ -166,7 +196,13 @@ const Taskbar = {
     }
 };
 
+// Панель задач публикуется, чтобы приложение `tray` могло получить свой
+// контейнер. Единственная точка связи между ними.
+window.MySpaceTaskbar = Taskbar;
+
 window.addEventListener('load', () => {
     Taskbar.init();
+    // Трей мог загрузиться раньше панели: сообщаем, что контейнер готов.
+    window.dispatchEvent(new CustomEvent('taskbar-ready', { detail: { taskbar: Taskbar } }));
 });
 })();

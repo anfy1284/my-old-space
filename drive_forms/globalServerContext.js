@@ -22,6 +22,7 @@ const _LOADAPPS_CACHE_ON = process.env.LOADAPPS_CACHE_DISABLE !== '1';
 // процессе и переживают даже перезапуск сервера. Подписка — рядом с кэшами.
 require('../drive_root/dbLifecycle').onDatabaseReset('drive_forms/globalServerContext', async () => {
     _loadAppsCache.clear();
+    _appConfigCache.clear();
     _languageFieldUID = undefined;
     const ms = require('../drive_root/memory_store');
     for (const ns of ['session_context', 'session_users', 'session_meta', 'user_roles', 'datasets']) {
@@ -79,6 +80,69 @@ function buildIconIndexCode(appsList) {
     log.debug(`[iconIndex] коллекций: ${Object.keys(index).length}, файлов: ${total}`);
     _iconIndexCode = 'window.MySpaceIconIndex = ' + JSON.stringify(index) + ';\n\n';
     return _iconIndexCode;
+}
+
+// ── Свойства приложений на клиенте (window.MySpaceAppConfig) ─────────
+// `config.json` — манифест приложения: там уже живут `access`, `autoStart`,
+// `mainMenuCommands`. Свойства, которые меняют поведение ОКНА (значок в трее,
+// «не показывать в панели задач», «нельзя закрыть»), объявляются там же — одной
+// строкой, рядом с остальными свойствами приложения.
+//
+// Клиенту сам файл не отдаётся: статика раздаётся только из `resources/public`,
+// а качать по одному config.json на приложение — это N запросов до отрисовки
+// панели задач. Поэтому нужные поля уезжают ОДНОЙ строкой бандла, тем же приёмом,
+// что и индекс иконок (`buildIconIndexCode`).
+//
+// Состав ограничен белым списком CLIENT_CONFIG_KEYS осознанно: `config.json`
+// содержит и то, что клиенту знать незачем (пути, `access`, серверные настройки
+// хранилища), а «отдадим весь файл» однажды вынесет наружу лишнее.
+const CLIENT_CONFIG_KEYS = ['tray', 'hideFromTaskbar', 'preventClose', 'allowMultipleInstances'];
+const _appConfigCache = new Map(); // `${role}|${language}` → код строки бандла
+
+function _translateConfigCaptions(value, language) {
+  if (!value || typeof value !== 'object') return value;
+  if (Array.isArray(value)) return value.map(v => _translateConfigCaptions(v, language));
+  if (typeof value.i18n === 'string') {
+    try { return require('../drive_root/i18n').t(value.i18n, language); }
+    catch (e) { return value.i18n; }
+  }
+  const out = {};
+  for (const k of Object.keys(value)) out[k] = _translateConfigCaptions(value[k], language);
+  return out;
+}
+
+function buildAppConfigCode(appsList, effectiveRole, language) {
+  const cacheKey = `${effectiveRole}|${language || ''}`;
+  const cached = _appConfigCache.get(cacheKey);
+  if (cached !== undefined) return cached;
+
+  const out = {};
+  for (const app of appsList) {
+    try {
+      const baseDir = app.__appsBaseDir || path.resolve(__dirname, '..');
+      const appsBasePath = app.__appsPath || 'apps';
+      const cleanAppPath = (app.path || `/${app.name}`).replace(/^[/\\]+/, '');
+      const configPath = path.resolve(baseDir, appsBasePath, cleanAppPath, 'config.json');
+      if (!fs.existsSync(configPath)) continue;
+      const cfg = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+      // Приложение, недоступное роли, не должно светить ни значком в трее, ни
+      // свойствами окна: для этой роли его попросту нет.
+      if (!Array.isArray(cfg.access) || !cfg.access.includes(effectiveRole)) continue;
+
+      const picked = {};
+      for (const key of CLIENT_CONFIG_KEYS) {
+        if (cfg[key] === undefined) continue;
+        picked[key] = _translateConfigCaptions(cfg[key], language);
+      }
+      if (Object.keys(picked).length) out[app.name] = picked;
+    } catch (e) {
+      log.debug('[appConfig] пропуск приложения', app && app.name, e.message);
+    }
+  }
+
+  const code = 'window.MySpaceAppConfig = ' + JSON.stringify(out) + ';\n\n';
+  _appConfigCache.set(cacheKey, code);
+  return code;
 }
 
 async function loadApps(user, sessionID) {
@@ -145,6 +209,10 @@ async function loadApps(user, sessionID) {
   }
 
   log.debug('[loadApps] effectiveRole:', effectiveRole);
+
+  // Свойства приложений — сразу после индекса иконок и ДО кода приложений:
+  // конструктор формы читает их при создании окна (см. DataForm в UI_classes.js).
+  allCode += buildAppConfigCode(appsList, effectiveRole, language);
 
   for (const app of appsList) {
     const baseDir = app.__appsBaseDir || path.resolve(__dirname, '..');

@@ -1,0 +1,62 @@
+{
+    "notif_clear_all": {
+        "en": "Clear all messages",
+        "ru": "Очистить все сообщения",
+        "de": "Alle Meldungen löschen",
+        "pl": "Wyczyść wszystkie wiadomości"
+    },
+    "notif_handler_cleanup": {
+        "en": "Clean up old notifications",
+        "ru": "Очистка старых уведомлений",
+        "de": "Alte Benachrichtigungen aufräumen",
+        "pl": "Czyszczenie starych powiadomień"
+    },
+    "notif_user_field": {
+        "en": "Recipient",
+        "ru": "Получатель",
+        "de": "Empfänger",
+        "pl": "Odbiorca"
+    },
+    "notif_app_field": {
+        "en": "Application",
+        "ru": "Приложение",
+        "de": "Anwendung",
+        "pl": "Aplikacja"
+    },
+    "notif_title_field": {
+        "en": "Title",
+        "ru": "Заголовок",
+        "de": "Titel",
+        "pl": "Tytuł"
+    },
+    "notif_text_field": {
+        "en": "Text",
+        "ru": "Текст",
+        "de": "Text",
+        "pl": "Tekst"
+    },
+    "notif_icon_field": {
+        "en": "Icon",
+        "ru": "Иконка",
+        "de": "Symbol",
+        "pl": "Ikona"
+    },
+    "notif_handler_field": {
+        "en": "Click handler",
+        "ru": "Обработчик клика",
+        "de": "Klick-Handler",
+        "pl": "Obsługa kliknięcia"
+    },
+    "notif_handler_params_field": {
+        "en": "Handler parameters",
+        "ru": "Параметры обработчика",
+        "de": "Handler-Parameter",
+        "pl": "Parametry obsługi"
+    },
+    "notif_is_read_field": {
+        "en": "Read",
+        "ru": "Прочитано",
+        "de": "Gelesen",
+        "pl": "Przeczytane"
+    }
+}

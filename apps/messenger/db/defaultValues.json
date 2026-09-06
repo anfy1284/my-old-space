@@ -1,11 +1,17 @@
 {
-    "Messenger_Chats": [
+    "messenger_chats": [
         {
+            "UID": "000000000-messenger_chats-0001",
             "userId": "000000000-organizations-0001",
-            "name": "Local chat",
-            "description": "Локальный чат",
-            "isActive": true,
-            "UID": "000000000-messenger_chats-0001"
+            "name": "Common chat",
+            "kind": "group",
+            "description": "Chat for all users of the installation",
+            "isActive": true
         }
+    ],
+    "translations": [
+        { "UID": "tr-msgchat-ru-0001", "recordId": "000000000-messenger_chats-0001", "tableName": "messenger_chats", "fieldName": "name", "language": "ru", "value": "Общий чат" },
+        { "UID": "tr-msgchat-de-0001", "recordId": "000000000-messenger_chats-0001", "tableName": "messenger_chats", "fieldName": "name", "language": "de", "value": "Allgemeiner Chat" },
+        { "UID": "tr-msgchat-pl-0001", "recordId": "000000000-messenger_chats-0001", "tableName": "messenger_chats", "fieldName": "name", "language": "pl", "value": "Czat ogólny" }
     ]
 }
