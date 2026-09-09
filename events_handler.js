@@ -16,6 +16,7 @@ const { injectEntityDates } = require('./drive_root/db/entityDate');
 const { injectEntityNames } = require('./drive_root/db/entityName');
 const { injectEmptyDefaults } = require('./drive_root/db/emptyValues');
 const { injectIndexNames } = require('./drive_root/db/indexNames');
+const { injectTargetSections } = require('./drive_root/db/difference');
 
 module.exports = {
     /**
@@ -49,5 +50,12 @@ module.exports = {
         // и `sync()` на каждом старте пытается создать индекс заново (drive_root/db/indexNames.js).
         const ix = injectIndexNames(mergedModelsDef);
         if (ix) console.log(`[my-old-space:events_handler] explicit names assigned to ${ix} index(es).`);
+
+        // Зеркальная табличная часть «как должно быть» у документов, объявивших
+        // коррекцию (entityConfig.correction.difference). Приложение объявляет ОДНУ
+        // строковую часть — вторая не несёт собственного смысла, это та же структура
+        // в роли желаемого состояния, и создаёт её ядро (drive_root/db/difference.js).
+        const ts = injectTargetSections(mergedModelsDef);
+        if (ts) console.log(`[my-old-space:events_handler] ${ts} mirror tabular section(s) synthesized for correction documents.`);
     }
 };

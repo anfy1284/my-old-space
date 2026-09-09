@@ -130,10 +130,9 @@ module.exports = async function (modelsDB) {
         const clientSource = fs
             .readFileSync(path.join(__dirname, 'forms/messenger.client.js'), 'utf8')
             .replace(/__SERVER_SCRIPT__/g, SERVER_SCRIPT_NAME);
-        // ВРЕМЕННО 'admin' (см. config.json): мессенджер выключен для обычных
-        // пользователей до готовности. Роль здесь и в config.access должны
-        // совпадать — иначе приложения на экране нет, а RPC остаётся вызываемым.
-        const clientUID = await loadScript(clientSource, 'admin');
+        // Роль здесь, в loadServerScript и в config.access должны совпадать:
+        // иначе приложения на экране нет, а его RPC остаётся вызываемым по имени.
+        const clientUID = await loadScript(clientSource, 'user');
         notificationHandlers.register('messenger', clientUID);
 
         // Лейаут читаем ТЕКСТОМ: в свойствах ленты стоит тот же плейсхолдер
@@ -174,7 +173,7 @@ module.exports = async function (modelsDB) {
             };
         }
 
-        loadServerScript(SERVER_SCRIPT_NAME, Object.assign({}, serverFns, { getFormSpec }), 'admin');
+        loadServerScript(SERVER_SCRIPT_NAME, Object.assign({}, serverFns, { getFormSpec }), 'user');
 
         // Новый пользователь — сразу с чатами: иначе он есть в системе, но
         // написать ему некуда.

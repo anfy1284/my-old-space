@@ -166,6 +166,13 @@ function translateLayoutCaptions(nodes, tFn) {
         if (node.tooltip && typeof node.tooltip === 'object' && node.tooltip.i18n) {
             node.tooltip = tFn(node.tooltip.i18n);
         }
+        // confirm — вопрос перед выполнением команды (кнопка с `command`). Тоже
+        // пользовательская строка элемента: перевести её на клиенте нельзя —
+        // `__t()` там не функция, а маркер, заменяемый при выдаче файла, и с
+        // переменной он не работает (см. fileStore.applyTranslations).
+        if (node.confirm && typeof node.confirm === 'object' && node.confirm.i18n) {
+            node.confirm = tFn(node.confirm.i18n);
+        }
         if (Array.isArray(node.layout))       translateLayoutCaptions(node.layout, tFn);
         if (Array.isArray(node.columns))       translateLayoutCaptions(node.columns, tFn);
         if (Array.isArray(node.options))       translateLayoutCaptions(node.options, tFn);

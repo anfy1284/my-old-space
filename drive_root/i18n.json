@@ -125,18 +125,6 @@
         "de": "Datei nicht gefunden oder kein Zugriff",
         "pl": "Nie znaleziono pliku lub brak dostępu"
     },
-    "runScript: function \"": {
-        "en": "runScript: function \"",
-        "ru": "runScript: функция \"",
-        "de": "runScript: Funktion \"",
-        "pl": "runScript: funkcja \""
-    },
-    "\" not found in script": {
-        "en": "\" not found in script",
-        "ru": "\" не найдена в скрипте",
-        "de": "\" nicht im Skript gefunden",
-        "pl": "\" nie została znaleziona w skrypcie"
-    },
     "Script execution error: ": {
         "en": "Script execution error: ",
         "ru": "Ошибка выполнения скрипта: ",
@@ -1066,5 +1054,77 @@
         "ru": "Не удалось создать сторно-документ.",
         "de": "Der Stornobeleg konnte nicht erstellt werden.",
         "pl": "Nie udało się utworzyć dokumentu storno."
+    },
+    "correction_refuse_not_declared": {
+        "en": "Correction is not declared for this document",
+        "ru": "Для этого документа коррекция не объявлена",
+        "de": "Für diesen Beleg ist keine Korrektur vorgesehen",
+        "pl": "Dla tego dokumentu korekta nie jest przewidziana"
+    },
+    "correction_refuse_of_counter": {
+        "en": "A storno or correction document cannot itself be corrected — correct the original invoice",
+        "ru": "Сторно или коррекцию корректировать нельзя — корректируйте исходный счёт",
+        "de": "Ein Storno- oder Korrekturbeleg kann nicht korrigiert werden — korrigieren Sie die ursprüngliche Rechnung",
+        "pl": "Dokumentu storno lub korekty nie można korygować — popraw pierwotny rachunek"
+    },
+    "correction_refuse_not_issued": {
+        "en": "Only an issued invoice can be corrected",
+        "ru": "Корректировать можно только выставленный счёт",
+        "de": "Nur eine ausgestellte Rechnung kann korrigiert werden",
+        "pl": "Korygować można tylko wystawiony rachunek"
+    },
+    "correction_refuse_stornoed": {
+        "en": "The invoice is cancelled by a storno — there is nothing left to correct",
+        "ru": "Счёт сторнирован — корректировать нечего",
+        "de": "Die Rechnung wurde storniert — es gibt nichts mehr zu korrigieren",
+        "pl": "Rachunek został stornowany — nie ma czego korygować"
+    },
+    "correction_created": {
+        "en": "Correction document created:",
+        "ru": "Документ коррекции создан:",
+        "de": "Korrekturbeleg erstellt:",
+        "pl": "Utworzono dokument korygujący:"
+    },
+    "storno_document_confirm": {
+        "en": "Create a storno document?",
+        "ru": "Оформить сторно?",
+        "de": "Storno erstellen?",
+        "pl": "Utworzyć storno?"
+    },
+    "correct_document_confirm": {
+        "en": "Create a correction document?",
+        "ru": "Оформить коррекцию?",
+        "de": "Korrektur erstellen?",
+        "pl": "Utworzyć korektę?"
+    },
+    "Please save the record first": {
+        "en": "Please save the record first",
+        "ru": "Сначала сохраните запись",
+        "de": "Bitte speichern Sie den Datensatz zuerst",
+        "pl": "Najpierw zapisz rekord"
+    },
+    "Error: ": {
+        "en": "Error: ",
+        "ru": "Ошибка: ",
+        "de": "Fehler: ",
+        "pl": "Błąd: "
+    },
+    "Please wait…": {
+        "en": "Please wait…",
+        "ru": "Подождите…",
+        "de": "Bitte warten…",
+        "pl": "Proszę czekać…"
+    },
+    "Execute the command?": {
+        "en": "Execute the command?",
+        "ru": "Выполнить команду?",
+        "de": "Befehl ausführen?",
+        "pl": "Wykonać polecenie?"
+    },
+    "runScript: function not found in script: ": {
+        "en": "runScript: function not found in script: ",
+        "ru": "runScript: функция не найдена в скрипте: ",
+        "de": "runScript: Funktion im Skript nicht gefunden: ",
+        "pl": "runScript: nie znaleziono funkcji w skrypcie: "
     }
 }

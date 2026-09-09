@@ -1,5 +1,17 @@
 
 module.exports = async function(modelsDB) {
+    // Команды документа «Сторнировать»/«Скорректировать» — механизм ядра, а не
+    // приложения: они одинаковы для любого документа, объявившего встречный
+    // документ. Кнопка формы зовёт их декларацией `command` в лейауте, без
+    // клиентского кода (drive_root/db/documentCommands.js).
+    try {
+        const { loadServerScript } = require('../../');
+        require('../../drive_root/db/documentCommands').register(loadServerScript);
+        console.log('[uniForm/init] document commands registered (storno / correct)');
+    } catch (e) {
+        console.error('[uniForm/init] document commands registration failed:', e && e.message || e);
+    }
+
     try {
         const path = require('path');
         const mainMenu = require(path.resolve(__dirname, '../main_menu/server.js'));

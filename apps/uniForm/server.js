@@ -194,6 +194,13 @@ async function translateLayoutI18n(items, sessionID) {
             try { item.tooltip = await tForSession(item.tooltip.i18n, sessionID); }
             catch(e) { item.tooltip = item.tooltip.i18n; }
         }
+        // confirm — вопрос перед выполнением команды (кнопка с `command`).
+        // Переводится ЗДЕСЬ, а не на клиенте: `__t()` в статических файлах —
+        // маркер, заменяемый при выдаче, и с переменной он не работает.
+        if (item.confirm && typeof item.confirm === 'object' && item.confirm.i18n) {
+            try { item.confirm = await tForSession(item.confirm.i18n, sessionID); }
+            catch(e) { item.confirm = item.confirm.i18n; }
+        }
         // Translate options captions (emunList etc.)
         if (Array.isArray(item.options)) {
             for (const opt of item.options) {
@@ -536,6 +543,22 @@ async function applyChanges(payload, sessionID) {
         }
 
         const parentUID = recordId;
+
+        // Документ-коррекция: собственная строковая часть — это РАЗНИЦА между
+        // «как должно быть» (что правит пользователь) и уже выставленным.
+        // Считает ядро, ДО прикладного onBeforeSave: приложение дальше работает
+        // с готовыми строками, как с любыми другими (drive_root/db/difference.js).
+        try {
+            const difference = require('../../drive_root/db/difference');
+            await difference.recalcOnSave({
+                globalCtx: require('../../drive_root/globalServerContext'),
+                table: tableName, changes,
+                tabularSections: tabularSectionsData, parentUID, sessionID
+            });
+        } catch (e) {
+            console.error('[uniForm] difference recalc:', e && e.message || e);
+            throw e;   // молча выставить коррекцию с неверной разницей нельзя
+        }
 
         await dispatchServerEvent('onBeforeSave', {
             tableName,

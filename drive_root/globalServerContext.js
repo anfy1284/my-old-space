@@ -285,6 +285,12 @@ function collectAllModelDefs() {
         // пересоздаёт индекс (drive_root/db/indexNames.js).
         const { injectIndexNames } = require('./db/indexNames');
         injectIndexNames(defs);
+
+        // Зеркальная ТЧ «как должно быть» у документов с объявленной коррекцией:
+        // модель обязана знать о ней и в рантайме, иначе форма коррекции не найдёт
+        // части, которую правит пользователь (drive_root/db/difference.js).
+        const { injectTargetSections } = require('./db/difference');
+        injectTargetSections(defs);
     } catch (e) {
         console.error('[globalModels] entity number/date/name injection failed:', e && e.message || e);
     }

@@ -2655,12 +2655,16 @@ class DataForm extends Form {
         if (val && this._suppressModified) return;
         const wasModified = this._modified;
         this._modified = !!val;
-        if (this._modified && !wasModified) {
-            if (!this._originalTitle) this._originalTitle = super.getTitle() || '';
-            super.setTitle(this._originalTitle + ' *');
-        } else if (!this._modified && wasModified) {
-            if (this._originalTitle) super.setTitle(this._originalTitle);
-        }
+        // Заголовок приводится в соответствие ВСЕГДА, а не только на переходе
+        // флага. Прежняя пара условий восстанавливала заголовок лишь при
+        // true→false и лишь при непустом `_originalTitle`: звёздочка, попавшая
+        // в заголовок другим путём (перерисовка, прямое присваивание
+        // `_modified` в обход этого метода, окно без базового заголовка),
+        // оставалась висеть на уже записанной в базу форме.
+        const shown = super.getTitle() || '';
+        if (!this._originalTitle) this._originalTitle = shown.replace(/ \*$/, '');
+        const want = this._modified ? (this._originalTitle + ' *') : this._originalTitle;
+        if (want !== shown) super.setTitle(want);
         // Общее событие формы «при изменении»: дёргаем клиентский обработчик
         // events.onChange (form-level) при любом изменении данных формы. Дебаунс
         // схлопывает серию изменений; _suppressFormChange защищает от рекурсии
@@ -2722,22 +2726,39 @@ class DataForm extends Form {
     setControlValue(name, value, display) {
         const c = this.getControl(name);
         if (!c || typeof c.setValue !== 'function') return false;
-        try { c.setValue(value, display); } catch (e) { return false; }
+        // ПРОГРАММНАЯ запись — не правка пользователя, и форму она грязной не
+        // делает. Без этого команда, дописывающая в форму результат сервера
+        // («Выставить» кладёт status/issuedAt), помечала запись изменённой:
+        // `DateInput.setValue` доводит значение до элемента и рассылает
+        // событие `input`, а на нём висит dirty-трекинг формы. Пользователь
+        // видел звёздочку «есть несохранённое» на документе, только что
+        // записанном в базу.
+        // Подавление держится на ВСЁМ теле метода, а не только на самом
+        // `setValue`: запирание формы (`applyRecordLock`) тоже трогает контролы
+        // и через них рассылает события ввода.
+        const prevSuppress = this._suppressModified;
+        this._suppressModified = true;
         try {
-            if (this._dataMap) {
-                if (!this._dataMap[name]) this._dataMap[name] = { name, value };
-                else this._dataMap[name].value = value;
-            }
-        } catch (e) {}
-        // Состояние документа сменилось прямо в открытом окне (команда «Выставить»
-        // пишет его по ответу RPC) — форма обязана запереться сразу, а не при
-        // следующем открытии: иначе пользователь продолжает править документ,
-        // который база уже не примет.
-        try {
-            if (this._lock && name === this._lock.field) this.applyRecordLock(value);
-        } catch (e) {}
-        try { this.refreshEnabledWhen(); } catch (e) {}
-        return true;
+            try { c.setValue(value, display); }
+            catch (e) { return false; }
+            try {
+                if (this._dataMap) {
+                    if (!this._dataMap[name]) this._dataMap[name] = { name, value };
+                    else this._dataMap[name].value = value;
+                }
+            } catch (e) {}
+            // Состояние документа сменилось прямо в открытом окне (команда «Выставить»
+            // пишет его по ответу RPC) — форма обязана запереться сразу, а не при
+            // следующем открытии: иначе пользователь продолжает править документ,
+            // который база уже не примет.
+            try {
+                if (this._lock && name === this._lock.field) this.applyRecordLock(value);
+            } catch (e) {}
+            try { this.refreshEnabledWhen(); } catch (e) {}
+            return true;
+        } finally {
+            this._suppressModified = prevSuppress;
+        }
     }
 
     // ── Замок проведённого документа (drive_root/db/immutable.js) ─────────────────
@@ -2828,6 +2849,26 @@ class DataForm extends Form {
         this._enabledWhen.push({ control: controlName, decl });
     }
 
+    // ── Декларативная ВИДИМОСТЬ вкладки: `visibleWhen` в лейауте ───────────────────
+    //
+    // Отличие от `enabledWhen` — в том, о чём говорит элемент. Выключенная кнопка
+    // сообщает «действие есть, но сейчас неприменимо», и прятать её нельзя.
+    // Вкладка же может быть НЕ О ЭТОМ документе вовсе: «как должно быть» есть у
+    // коррекции счёта и не существует у обычного счёта. Пустая вкладка на всех
+    // остальных документах — не подсказка, а мусор, и пользователь ищет в ней
+    // данные, которых там не бывает.
+    //
+    //   "tabs": [ { "caption": …, "visibleWhen": { "field": "correctionKind",
+    //                                              "in": ["correction"] }, "layout": [ … ] } ]
+    //
+    // Условие — то же самое, что у `enabledWhen` (`_evalEnabledWhen`): второго
+    // языка условий в форме заводить незачем.
+    _declareVisibleWhen(tabsCtrl, tabIndex, decl) {
+        if (!tabsCtrl || !decl || typeof decl !== 'object') return;
+        if (!this._visibleWhen) this._visibleWhen = [];
+        this._visibleWhen.push({ tabs: tabsCtrl, index: tabIndex, decl });
+    }
+
     _evalEnabledWhen(decl) {
         // Условие по значению поля записи (состояние документа).
         if (decl.field) {
@@ -2857,11 +2898,96 @@ class DataForm extends Form {
         return true;
     }
 
+    // ── Команда документа: `"command": "storno" | "correct"` на кнопке ────────────
+    //
+    // Встречный документ (сторно, коррекция) устроен одинаково для любого документа,
+    // объявившего его в `entityConfig`. Значит, и команда одинакова: подтвердить,
+    // сохранить несохранённое, позвать ядровой серверный скрипт `document.actions`,
+    // показать результат. Приложению остаётся кнопка в лейауте — ни строчки
+    // клиентского кода (сервер: drive_root/db/documentCommands.js).
+    async runDocumentCommand(command, confirmText) {
+        const uidEntry = this._dataMap && this._dataMap['UID'];
+        const uid = uidEntry && uidEntry.value;
+        const table = this.dbTable || '';
+        if (!uid || !table) {
+            if (typeof showAlert === 'function') showAlert(__t('Please save the record first'));
+            return;
+        }
+
+        // Текст подтверждения приходит УЖЕ ПЕРЕВЕДЁННЫМ: `confirm` на кнопке —
+        // такая же строка элемента, как caption, и переводится сервером при
+        // отдаче лейаута. Перевести его здесь нельзя: `__t()` в статическом
+        // файле — не функция, а маркер, который заменяется при выдаче файла
+        // регуляркой по ЛИТЕРАЛУ; с переменной он доживает до браузера и падает
+        // с «__t is not defined».
+        if (typeof showConfirm === 'function') {
+            const ok = await showConfirm(confirmText || __t('Execute the command?'));
+            if (!ok) return;
+        }
+
+        // Несохранённые правки записываются ДО команды: сервер работает с базой,
+        // а не с тем, что на экране.
+        if (this.needsSave()) {
+            await this.doAction('save');
+            if (this.needsSave()) return; // ошибка уже показана
+        }
+
+        const busy = (window.MySpace && window.MySpace.showBusy) ? window.MySpace.showBusy(__t('Please wait…')) : null;
+        let res;
+        try {
+            res = await window.callServer('document.actions', command, { table, uid });
+        } finally {
+            if (busy != null && window.MySpace && window.MySpace.hideBusy) window.MySpace.hideBusy(busy);
+        }
+        if (!res || res.error) {
+            if (typeof showAlert === 'function') showAlert(__t('Error: ') + ((res && res.error) || ''));
+            return;
+        }
+
+        // Созданный документ ОТКРЫВАЕТСЯ — это и есть результат команды. Показывать
+        // вместо него сообщение «создан такой-то номер» значит заставить
+        // пользователя искать документ руками: ему нужны суммы, печать, номер на
+        // экране, а не факт создания. Сообщение остаётся ЗАПАСНЫМ путём — на случай,
+        // когда окно открыть нечем.
+        let opened = false;
+        if (res.openDocument && res.documentUID && window.MySpace && typeof window.MySpace.open === 'function') {
+            try {
+                await window.MySpace.open('uniForm', {
+                    mode: 'record', tableName: res.table || table, recordID: res.documentUID
+                });
+                opened = true;
+            } catch (e) {
+                opened = false;
+                // Молчать нельзя: пользователь увидит сообщение вместо документа и
+                // не поймёт, почему. В консоли должна остаться причина.
+                console.error('[runDocumentCommand] не удалось открыть документ',
+                    { table: res.table || table, recordID: res.documentUID }, e);
+            }
+        }
+        if (!opened && res.message && typeof showAlert === 'function') {
+            showAlert(res.message + ' ' + (res.number || ''));
+        }
+        // Состояние исходного документа сервер уже сменил — показываем это сразу,
+        // не дожидаясь повторного открытия окна.
+        if (res.sourceState && res.stateField) {
+            try { this.setControlValue(res.stateField, res.sourceState); } catch (e) {}
+        }
+        if (res.html && window.MySpace && typeof window.MySpace.open === 'function') {
+            await window.MySpace.open('printPreview', { html: res.html, autoPrint: true });
+        }
+    }
+
     /** Пересчитать доступность всех элементов с `enabledWhen`. Зовётся ядром, не приложением. */
     refreshEnabledWhen() {
-        if (!this._enabledWhen || !this._enabledWhen.length) return;
-        for (const d of this._enabledWhen) {
-            try { this.setControlEnabled(d.control, this._evalEnabledWhen(d.decl)); } catch (e) {}
+        if (this._enabledWhen && this._enabledWhen.length) {
+            for (const d of this._enabledWhen) {
+                try { this.setControlEnabled(d.control, this._evalEnabledWhen(d.decl)); } catch (e) {}
+            }
+        }
+        if (this._visibleWhen && this._visibleWhen.length) {
+            for (const d of this._visibleWhen) {
+                try { d.tabs.setTabVisible(d.index, this._evalEnabledWhen(d.decl)); } catch (e) {}
+            }
         }
     }
 
@@ -2960,9 +3086,10 @@ class DataForm extends Form {
         // re-render to a layout without a default button (e.g. login → change password)
         // must not keep Enter bound to the previous, now-detached button.
         if (isRoot) this._defaultButton = null;
-        // Тот же довод для деклараций `enabledWhen`: они указывают на контролы, которых
-        // после ре-рендера уже нет.
+        // Тот же довод для деклараций `enabledWhen`/`visibleWhen`: они указывают на
+        // контролы и вкладки, которых после ре-рендера уже нет.
         if (isRoot) this._enabledWhen = null;
+        if (isRoot) this._visibleWhen = null;
         for (const item of items) {
             await this.renderItem(item, contentArea);
         }
@@ -3701,6 +3828,20 @@ class DataForm extends Form {
                     }
                     btn.Draw(cmdBarEl);
                     if (exBtn.name) this.controlsMap[exBtn.name] = btn;
+                    // Декларативная КОМАНДА ДОКУМЕНТА: `"command": "storno"` вместо
+                    // обработчика в клиентском скрипте приложения. Сторно и коррекция
+                    // одинаковы для любого документа, объявившего встречный документ,
+                    // и переписывать их подтверждение, вызов и разбор ответа в каждом
+                    // приложении незачем (drive_root/db/documentCommands.js).
+                    if (exBtn.command && !(exBtn.events && exBtn.events.onClick) && !exBtn.onClick) {
+                        const formCmd = this;
+                        const cmdName = exBtn.command;
+                        // Сервер уже перевёл `confirm` (translateLayoutI18n). Если
+                        // почему-то не перевёл — показываем ключ, а не «[object Object]».
+                        const cmdConfirm = (exBtn.confirm && typeof exBtn.confirm === 'object')
+                            ? (exBtn.confirm.i18n || null) : (exBtn.confirm || null);
+                        btn.onClick = () => { formCmd.runDocumentCommand(cmdName, cmdConfirm); };
+                    }
                     // Подключаем события (events.onClick, top-level onXxx) через стандартный механизм
                     try {
                         if (exBtn.name && this.controlsMap[exBtn.name]) {
@@ -3975,6 +4116,14 @@ class DataForm extends Form {
                     try { if (typeof tabsCtrl.setCaption === 'function') tabsCtrl.setCaption(caption); } catch (e) {}
                     try { if (typeof tabsCtrl.Draw === 'function') tabsCtrl.Draw(contentArea); } catch (e) {}
                     if (item.name) this.controlsMap[item.name] = tabsCtrl;
+                    // Вкладка, объявившая `visibleWhen`, показывается по состоянию
+                    // записи (см. _declareVisibleWhen): пустая вкладка «как должно
+                    // быть» на обычном счёте — мусор, а не подсказка.
+                    try {
+                        (item.tabs || []).forEach((t, i) => {
+                            if (t && t.visibleWhen) this._declareVisibleWhen(tabsCtrl, i, t.visibleWhen);
+                        });
+                    } catch (e) {}
                     // Wait for tab panes (and the tables/selectors inside them) to finish
                     // rendering before the root render loop completes — otherwise the
                     // setTimeout(_activateFirstRows) scheduled at the end of the root
@@ -4384,7 +4533,11 @@ class DataForm extends Form {
                 if (mod && typeof mod[fn] === 'function') {
                     await mod[fn](resolveParams(fnParams));
                 } else {
-                    if (typeof showAlert === 'function') showAlert(__t('runScript: function "') + fn + __t('" not found in script'));
+                    // Кавычки в тексте маркера быть НЕ ДОЛЖНО: замена __t() идёт
+                    // регуляркой, тело которой не допускает ни ' ни " — такой вызов
+                    // не подменяется и доживает до браузера, где __t не существует.
+                    // Ошибка вылезала бы ровно там, где и так что-то сломалось.
+                    if (typeof showAlert === 'function') showAlert(__t('runScript: function not found in script: ') + fn);
                 }
             } catch (e) {
                 if (typeof showAlert === 'function') showAlert(__t('Script execution error: ') + e.message);
@@ -6606,7 +6759,16 @@ class TextBox extends FormInput {
                     // focus behavior remains consistent and focus handlers run.
                     try { if (this.element && typeof this.element.focus === 'function') this.element.focus(); } catch (_) {}
 
-                    if (this.isDate) {
+                    // Подсветка секции даты — это ПРИГЛАШЕНИЕ ПРАВИТЬ. У поля только
+                    // на чтение (ячейка списка, запертый документ) править нечего, и
+                    // выделять там день или год — обман: пользователь жмёт цифры, а
+                    // поле молчит.
+                    //
+                    // Всплытие клика в таком поле гасить тоже нельзя: в списке по клику
+                    // строка становится текущей, и без этого клика таблица о выборе не
+                    // узнаёт — следом двойной клик открывать нечего. Гасим только там,
+                    // где поле действительно редактируется и клик принадлежит дате.
+                    if (this.isDate && !this.readOnly && !this.locked) {
                         // Read the caret position deferred — the browser sets it from the
                         // click only after this handler returns, so select the section in a
                         // microtask (otherwise every click resolves to the first section).
@@ -6786,7 +6948,10 @@ class TextBox extends FormInput {
             // focus/blur border changes moved to container; skip on-element border edits
             this.element.addEventListener('focus', (e) => {
                 try {
-                    if (this.isDate) {
+                    // То же, что и в обработчике клика: у поля только на чтение ни
+                    // маски, ни подсветки секции быть не должно — печатать в него
+                    // всё равно нельзя.
+                    if (this.isDate && !this.readOnly && !this.locked) {
                         // Arm overwrite so the first typed digit replaces the section.
                         this._sectionFresh = true;
                         // Пустое поле вне фокуса показывается пустым (см.
@@ -7125,6 +7290,11 @@ class TextBox extends FormInput {
     // would always resolve to the first section).
     _syncDateSectionFromCaret() {
         if (!this.element || document.activeElement !== this.element) return;
+        // Тот же гейт, что и у `_handleDateKeydown`: нередактируемую дату не
+        // подсвечиваем. Проверка стоит ЗДЕСЬ, в единственном месте, которое
+        // выделяет секцию, — чтобы её не пришлось повторять каждому будущему
+        // вызывающему.
+        if (this.readOnly || this.locked) return;
         const pos = this.element.selectionStart || 0;
         const secs = this._dateSecs();
         let sec = secs.length - 1;
@@ -13847,6 +14017,26 @@ class Tabs extends UIObject {
         } } catch (e) {}
     }
 
+    /**
+     * Показать/скрыть вкладку целиком (кнопку в шапке и её панель).
+     *
+     * Объявляется в лейауте через `visibleWhen` у самой вкладки — см.
+     * DataForm._declareVisibleWhen. Скрываем ТОЛЬКО кнопку: панель уже
+     * отрисована и остаётся в потоке невидимой, как у любой неактивной вкладки.
+     * Если скрывают активную вкладку, переходим на первую видимую — иначе
+     * пользователь остался бы на панели, до которой больше нет кнопки.
+     */
+    setTabVisible(idx, visible) {
+        const p = this._panes[idx];
+        if (!p) return;
+        p.hidden = !visible;
+        p.btn.style.display = visible ? '' : 'none';
+        if (visible) return;
+        if (!p.btn.classList.contains('active')) return;
+        const next = this._panes.findIndex(x => !x.hidden);
+        if (next >= 0) this._showTab(next);
+    }
+
     _showTab(idx) {
         this._panes.forEach((p, i) => {
             p.btn.classList.toggle('active', i === idx);
@@ -14413,7 +14603,20 @@ class DynamicTable extends Table {
     openRecord(globalIndex) {
         try {
             const row = this.dataCache[globalIndex];
-            if (!row || !row.loaded) return;
+            if (!row || !row.loaded) {
+                // Строка на экране есть, а в кэше её нет — рассинхрон отрисовки и
+                // данных. Молчать здесь нельзя: снаружи это выглядит как «двойной
+                // клик перестал открывать документы», без единого следа. Говорим в
+                // консоль и просим догрузить видимый диапазон, чтобы следующий клик
+                // сработал.
+                try {
+                    console.warn('[DynamicTable] строка', globalIndex,
+                        'отсутствует в кэше — открывать нечего; догружаю видимый диапазон',
+                        { totalRows: this.totalRows, cached: Object.keys(this.dataCache || {}).length });
+                } catch (e) {}
+                try { this._onScroll(); } catch (e) {}
+                return;
+            }
             if (Array.isArray(this.hiddenButtons) && this.hiddenButtons.includes('recordOpen')) return;
             const tableName = this.tableName || (this.appForm && (this.appForm.dbTable || this.dataKey)) || '';
             if (typeof window !== 'undefined' && window.MySpace && typeof window.MySpace.open === 'function') {
@@ -14438,6 +14641,21 @@ class DynamicTable extends Table {
                 })();
             }
         } catch (e) {}
+    }
+
+    /**
+     * Первая строка, которую пользователь СЕЙЧАС видит, — считается от фактической
+     * прокрутки, как в `_fillVisibleRows`/`_onScroll`.
+     *
+     * Поле `firstVisibleRow` для этого не годится: `_onScroll` кладёт в него
+     * «первую строку, которой не хватило в кэше» (`firstMissing`), то есть точку
+     * ДОГРУЗКИ, а не верх экрана. У списка из 43 строк после первичного заполнения
+     * там оставалось 41 — конец списка.
+     */
+    _firstRowInViewport() {
+        const st = this.bodyContainer ? (this.bodyContainer.scrollTop || 0) : 0;
+        const h = this.rowHeight || 1;
+        return Math.max(0, Math.floor(st / h) - (this.bufferRows || 0));
     }
 
     // Mark all allocated rows as unfilled (O(N) flag-only, no DOM writes).
@@ -14475,8 +14693,19 @@ class DynamicTable extends Table {
         this._resetFilledRows();
         try {
             this.calculateVisibleRows();
+            // Перечитываем ТО, ЧТО НА ЭКРАНЕ. Раньше сюда шло поле `firstVisibleRow`,
+            // а в нём лежит точка последней догрузки (см. `_firstRowInViewport`): у
+            // списка на 43 строки после открытия там оставалось 41, и обновление
+            // после закрытия карточки перечитывало ХВОСТ списка. Кэш накрывал строки
+            // 31–42, экран показывал 0–30 старой отрисовкой (её `_fillRow` не
+            // перерисовывает без кэша) — и двойной клик по любой видимой строке молча
+            // не открывал ничего: `openRecord` не находил строку в кэше.
+            this.firstVisibleRow = this._firstRowInViewport();
             await this.loadData(this.firstVisibleRow);
             try { this._restoreSelection(prevUID); } catch (e) {}
+            // Если видимый диапазон шире загруженной страницы — догрузить остаток.
+            // Это же вернёт таблицу в рабочее состояние, если страница пришла не та.
+            try { this._onScroll(); } catch (e) {}
             // Декларативный колбэк «данные перезагружены» (events.onDataRefreshed
             // на элементе лейаута, напр. relatedList): форма может перечитать
             // зависимое состояние (кнопки и т.п.) из уже загруженных данных,
