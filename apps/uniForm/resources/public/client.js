@@ -181,6 +181,9 @@ try {
 
                     appForm.dbTable    = openParams.dbTable || openParams.tableName || null;
                     appForm.selectMode = openParams.selectMode || false;
+                    // Режим — часть личности окна: список и карточка одной таблицы это
+                    // разные окна, и запомненные размеры у них тоже свои (см. stateKey).
+                    appForm._windowMode = openParams.mode || (openParams.recordID || openParams.recordId || openParams.id ? 'record' : 'list');
 
                     try {
                         appForm.appName = APP_NAME;

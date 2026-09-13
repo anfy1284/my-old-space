@@ -33,6 +33,7 @@
 
 const registry     = require('../../../drive_root/settings/registry');
 const settingsApi  = require('../../../drive_root/settings');
+const state        = require('../../../drive_root/settings/state');
 const globalRootCtx = require('../../../drive_root/globalServerContext');
 const dbGateway    = require('../../../drive_root/dbGateway');
 const log          = require('../../../drive_root/log');
@@ -41,6 +42,21 @@ const { tForSession, invalidateSessionContext } = require('../../../drive_forms/
 /** Виртуальные поля формы (не настройки, а выбор области действия). */
 const SCOPE_FIELD = '__scope';
 const AUTOFILL    = 'autofill';
+const STATE_TABLE = 'stateRows';
+
+/**
+ * Псевдо-уровень «Служебные данные» — только в форме, в реестре уровней ему не место:
+ * это не область действия настройки, а отдельный вид данных (состояние интерфейса).
+ * Единственное место, где что-то из настроек показано таблицей, — и показывается тут
+ * именно то, у чего нет ни типа, ни подписи, ни умолчания.
+ */
+const STATE_SCOPE = {
+    name: 'state', table: null, displayField: null, ownerless: true,
+    scopeTable: null, assignable: false, adminOnly: true,
+    caption: { i18n: 'settings_scope_state' },
+    icon: '/apps/general_icons/resources/public/16x16/database.png',
+    order: 95, declaredBy: 'core'
+};
 
 /** Поле-селектор записи для уровня: у каждого уровня свой, показывается один. */
 function recordField(scopeName) {
@@ -60,6 +76,7 @@ function fieldName(appName, key) {
 /** Уровни, доступные роли и имеющие хоть одну видимую настройку. */
 function visibleScopes(isAdmin) {
     const out = [];
+    if (isAdmin) out.push(STATE_SCOPE);
     for (const scope of registry.getScopes()) {
         if (scope.broken) continue;
         if (scope.adminOnly && !isAdmin) continue;
@@ -215,6 +232,40 @@ function buildLayout(isAdmin) {
         }
     }
 
+    // Служебные данные — админская вкладка: таблица «кто / приложение / ключ / значение»
+    // и кнопка «Очистить всё». Правки руками здесь нет намеренно: это состояние
+    // интерфейса, его чинят очисткой, а не редактированием значения по буквам.
+    if (isAdmin) {
+        tabs.push({
+            caption: STATE_SCOPE.caption,
+            icon: STATE_SCOPE.icon,
+            visibleWhen: { field: SCOPE_FIELD, in: ['state'] },
+            layout: [{
+                type: 'group', orientation: 'vertical', layout: [
+                    {
+                        type: 'button',
+                        name: 'btnClearState',
+                        caption: { i18n: 'settings_state_clear_all' },
+                        icon: '/apps/general_icons/resources/public/16x16/delete.png',
+                        events: { onClick: 'clearState' }
+                    },
+                    {
+                        type: 'table',
+                        name: STATE_TABLE,
+                        data: STATE_TABLE,
+                        properties: { readOnly: true, visibleRows: 12, hiddenButtons: ['listSettings', 'recordOpen', 'recordAdd', 'recordDelete'] },
+                        columns: [
+                            { caption: { i18n: 'settings_scope_user' },  data: 'userName', width: 160 },
+                            { caption: { i18n: 'settings_state_app' },   data: 'appName',  width: 140 },
+                            { caption: { i18n: 'settings_state_key' },   data: 'key',      width: 220 },
+                            { caption: { i18n: 'settings_state_value' }, data: 'value',    width: 260 }
+                        ]
+                    }
+                ]
+            }]
+        });
+    }
+
     // Автозаполнение — отдельный механизм (умолчания полей по таблицам), но живёт оно
     // у пользователя, поэтому и здесь на уровне пользователя. См. §9.3 ТЗ.
     tabs.push({
@@ -302,6 +353,7 @@ async function scopeRecords(scope, sessionID, where) {
 /** Проверка права работать с уровнем и записью. `null` — можно, строка — причина отказа. */
 async function denyReason(scope, recordId, ctx) {
     if (!scope) return 'unknown_scope';
+    if (scope.name === 'state') return isAdminCtx(ctx) ? null : 'not_admin';
     if (scope.adminOnly && !isAdminCtx(ctx)) return 'not_admin';
     if (scope.ownerless) return null;
     if (!recordId) return 'no_record';
@@ -479,6 +531,10 @@ module.exports = function factory(modelsDB, Utilities) {
         const autofillUser = (scope.name === 'user' && recordId) ? recordId : (user ? user.UID : null);
         data.push({ name: AUTOFILL, tableName: AUTOFILL, tabularSection: true, value: await loadAutofill(autofillUser, modelsDB) });
 
+        if (isAdmin) {
+            data.push({ name: STATE_TABLE, tableName: STATE_TABLE, tabularSection: true, value: await state.listAll() });
+        }
+
         return {
             data,
             caption: await tForSession('settings_app_caption', ctx.sessionID)
@@ -495,9 +551,13 @@ module.exports = function factory(modelsDB, Utilities) {
     async function loadForScope({ scope: scopeName, recordId }, ctx) {
         registry.ensureLoaded();
         const isAdmin = isAdminCtx(ctx);
-        const scope = registry.getScope(scopeName);
+        const scope = (scopeName === 'state') ? STATE_SCOPE : registry.getScope(scopeName);
         const reason = await denyReason(scope, recordId, ctx);
         if (reason) return { error: await tForSession('User not authorized', ctx.sessionID), reason };
+
+        if (scopeName === 'state') {
+            return { scope: scopeName, recordId: null, values: [], stateRows: await state.listAll() };
+        }
 
         const result = {
             scope: scopeName,
@@ -517,6 +577,7 @@ module.exports = function factory(modelsDB, Utilities) {
         delete plain.__tabularSections;
 
         const scopeName = plain[SCOPE_FIELD];
+        if (scopeName === 'state') return { ok: true };   // таблица только для чтения
         const scope = registry.getScope(scopeName);
         const recordId = scope && !scope.ownerless ? plain[recordField(scopeName)] : null;
 
@@ -577,7 +638,17 @@ module.exports = function factory(modelsDB, Utilities) {
         return { ok: true, languageChanged };
     }
 
-    return { onLoadData, loadForScope, onSave, formState };
+    /** Стереть всё состояние интерфейса (кнопка администратора). */
+    async function clearState(_params, ctx) {
+        if (!isAdminCtx(ctx)) {
+            log.warn('[settings/form] очистка состояния запрошена не администратором');
+            return { ok: false, error: await tForSession('User not authorized', ctx.sessionID) };
+        }
+        const removed = await state.clearAll();
+        return { ok: true, removed, stateRows: await state.listAll() };
+    }
+
+    return { onLoadData, loadForScope, onSave, formState, clearState };
 };
 
 module.exports.buildLayout = buildLayout;

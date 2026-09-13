@@ -39,6 +39,10 @@ const NAMESPACE = 'layouts';
 // no custom layout is registered for the given table.
 const _registeredPrefixes = new Set();
 
+// Какие роли зарегистрировали лейаут для этого префикса (приложение|режим|таблица).
+// Нужен для подбора лейаута администратору: см. getLayoutForUser, шаг 3.
+const _registeredRoles = new Map();
+
 // Table-level icon registry: tableName → iconPath.
 // Populated automatically by saveLayout when formIcon is provided.
 // Any app can query getTableIcon(tableName) without needing its own layout.
@@ -136,6 +140,11 @@ async function saveLayout({ appName, mode, tableName, roles, layout, extraButton
     }
     // Register prefix so hot-path can skip tables with no layouts at all
     _registeredPrefixes.add(makePrefix(appName, effectiveMode, tableName));
+    {
+        const prefix = makePrefix(appName, effectiveMode, tableName);
+        if (!_registeredRoles.has(prefix)) _registeredRoles.set(prefix, new Set());
+        for (const role of roleList) _registeredRoles.get(prefix).add(role);
+    }
     // 5.2 — лейаут пересохранён → переведённые клоны для его ключей устарели.
     // saveLayout вызывается на старте (и редко в рантайме), поэтому чистим целиком.
     _translatedCache.clear();
@@ -224,10 +233,42 @@ async function getLayoutForUser(appName, tableName, userRole, sessionID, mode) {
     if (!result) {
         const k = makeKey(appName, effectiveMode, tableName, '*');
         const fallback = memoryStore.getSync(NAMESPACE, k);
-        if (!fallback) return null;
-        result = fallback.layout !== undefined ? fallback : { layout: fallback, events: null, clientScript: null, formIcon: null, appCaption: null };
-        matchedKey = k;
+        if (fallback) {
+            result = fallback.layout !== undefined ? fallback : { layout: fallback, events: null, clientScript: null, formIcon: null, appCaption: null };
+            matchedKey = k;
+        }
     }
+
+    // 3. Администратор: любой зарегистрированный лейаут, если своего и общего нет.
+    //
+    // Права администратора уже сквозные везде: серверные скрипты и файлы отдаются ему
+    // без проверки роли (`hasRoleAccess`), RLS он обходит. Подбор лейаута был строже
+    // всего остального, и приложение, объявившее форму как `roles: 'user'` (а так
+    // объявлено большинство: имелось в виду «для всех», а не «для роли user»),
+    // администратору показывало generic-таблицу вместо своей формы — список броней без
+    // вкладки «Календарь», карточку брони без вкладок. Лечить это в каждом приложении
+    // значит ждать, пока каждое следующее наступит на те же грабли.
+    //
+    // Осознанно РАЗНЫЕ лейауты по ролям это не ломает: у администратора в таком случае
+    // есть собственная запись, и она находится точным совпадением на шаге 1.
+    if (!result && String(userRole) === 'admin') {
+        const roles = _registeredRoles.get(makePrefix(appName, effectiveMode, tableName));
+        if (roles && roles.size) {
+            // 'user' первым: это конвенция проекта для «формы для всех».
+            const candidates = roles.has('user') ? ['user', ...roles] : Array.from(roles);
+            for (const role of candidates) {
+                if (role === 'admin' || role === '*') continue;
+                const k = makeKey(appName, effectiveMode, tableName, role);
+                const stored = memoryStore.getSync(NAMESPACE, k);
+                if (!stored) continue;
+                result = stored.layout !== undefined ? stored : { layout: stored, events: null, clientScript: null, formIcon: null, appCaption: null };
+                matchedKey = k;
+                break;
+            }
+        }
+    }
+
+    if (!result) return null;
 
     // 3. Translate { i18n: 'key' } captions when sessionID is provided
     if (result && sessionID) {

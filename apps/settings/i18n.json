@@ -16,5 +16,47 @@
         "ru": "Область действия",
         "de": "Gilt für",
         "pl": "Zakres"
+    },
+    "settings_scope_state": {
+        "en": "Interface state",
+        "ru": "Служебные данные",
+        "de": "Oberflächenzustand",
+        "pl": "Stan interfejsu"
+    },
+    "settings_state_app": {
+        "en": "Application",
+        "ru": "Приложение",
+        "de": "Anwendung",
+        "pl": "Aplikacja"
+    },
+    "settings_state_key": {
+        "en": "Key",
+        "ru": "Ключ",
+        "de": "Schlüssel",
+        "pl": "Klucz"
+    },
+    "settings_state_value": {
+        "en": "Value",
+        "ru": "Значение",
+        "de": "Wert",
+        "pl": "Wartość"
+    },
+    "settings_state_clear_all": {
+        "en": "Clear all",
+        "ru": "Очистить всё",
+        "de": "Alles löschen",
+        "pl": "Wyczyść wszystko"
+    },
+    "settings_state_clear_confirm": {
+        "en": "Clear remembered interface state for all users?",
+        "ru": "Стереть запомненное состояние интерфейса у всех пользователей?",
+        "de": "Gespeicherten Oberflächenzustand aller Benutzer löschen?",
+        "pl": "Usunąć zapamiętany stan interfejsu wszystkich użytkowników?"
+    },
+    "settings_state_cleared": {
+        "en": "Rows removed:",
+        "ru": "Удалено строк:",
+        "de": "Zeilen gelöscht:",
+        "pl": "Usunięto wierszy:"
     }
 }

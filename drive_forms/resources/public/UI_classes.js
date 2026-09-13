@@ -890,6 +890,104 @@ if (typeof window !== 'undefined') {
             },
 
             /**
+             * Служебные настройки — то, что интерфейс помнит между сеансами:
+             * последний отбор в списке, размер окна, выбранный вид календаря,
+             * «эту подсказку больше не показывать».
+             *
+             *   MySpace.state.get('booking', 'calendarView')          → значение или null
+             *   MySpace.state.set('booking', 'calendarView', 'vert')  → запомнить
+             *   await MySpace.state.ready                             → снимок загружен
+             *
+             * Чтение синхронное: снимок состояния пользователя приезжает ОДНИМ
+             * запросом при загрузке страницы. Отдельным запросом, а не в бандле
+             * `/app/loadApps`, потому что бандл кэшируется по ключу «роль|язык» —
+             * персональное состояние утекло бы другому пользователю с той же
+             * ролью и языком.
+             *
+             * Запись оптимистичная: значение сразу в памяти, на сервер — пачкой с
+             * задержкой. Иначе перетаскивание окна било бы в базу на каждый пиксель.
+             * Незаписанное дописывается при уходе со страницы (`pagehide`,
+             * `keepalive`), иначе последнее действие пользователя терялось бы.
+             *
+             * Сюда НЕ кладут ничего, от чего зависят права, деньги или расчёты:
+             * ключи свободные, значение приходит с клиента и подделывается кем угодно.
+             */
+            state: (function () {
+                let data = {};                 // { приложение: { ключ: значение } }
+                let pending = {};              // накопленные правки до отправки
+                let timer = null;
+                const DELAY_MS = 1000;
+
+                function send() {
+                    timer = null;
+                    const changes = pending;
+                    pending = {};
+                    if (!Object.keys(changes).length) return Promise.resolve();
+                    return callServerMethod('settings', 'stateSave', { changes })
+                        .catch(e => console.warn('[MySpace.state] не сохранено:', e && e.message));
+                }
+
+                const api = {
+                    /** Снимок состояния загружен (промис; ждать только тем, кому нужно при старте). */
+                    ready: Promise.resolve(),
+
+                    /** Загрузить снимок. Зовётся ядром при старте; приложениям звать не нужно. */
+                    load() {
+                        api.ready = callServerMethod('settings', 'stateSnapshot', {})
+                            .then(snapshot => { data = (snapshot && typeof snapshot === 'object') ? snapshot : {}; return data; })
+                            .catch(e => { console.warn('[MySpace.state] снимок не загружен:', e && e.message); return {}; });
+                        return api.ready;
+                    },
+
+                    get(appName, key, fallback) {
+                        const app = data[appName];
+                        if (!app || !(key in app)) return (fallback === undefined) ? null : fallback;
+                        return app[key];
+                    },
+
+                    getAll(appName) {
+                        return Object.assign({}, data[appName] || {});
+                    },
+
+                    set(appName, key, value) {
+                        if (!appName || !key) return;
+                        if (!data[appName]) data[appName] = {};
+                        data[appName][key] = value;
+                        if (!pending[appName]) pending[appName] = {};
+                        pending[appName][key] = value;
+                        if (timer) clearTimeout(timer);
+                        timer = setTimeout(send, DELAY_MS);
+                    },
+
+                    /** Дописать накопленное немедленно (уход со страницы, важное действие). */
+                    flush() {
+                        if (timer) { clearTimeout(timer); timer = null; }
+                        return send();
+                    }
+                };
+
+                if (typeof window !== 'undefined' && window.addEventListener) {
+                    // pagehide, а не beforeunload: второй не срабатывает при закрытии
+                    // вкладки на мобильных и в части браузеров.
+                    window.addEventListener('pagehide', () => {
+                        if (!timer) return;
+                        clearTimeout(timer); timer = null;
+                        const changes = pending; pending = {};
+                        try {
+                            fetch('/app/call', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ app: 'settings', method: 'stateSave', params: { changes } }),
+                                keepalive: true
+                            });
+                        } catch (e) { /* уходим со страницы — жаловаться некому */ }
+                    });
+                }
+
+                return api;
+            })(),
+
+            /**
              * Иконки — выбор файла под нужный размер: сначала папка этого
              * размера, при отсутствии файла — master (см. комментарий к
              * resolveIcon в начале файла). Публикуется, потому что вставляют
@@ -1084,6 +1182,11 @@ if (typeof window !== 'undefined') {
             }
         };
     })();
+
+    // Снимок служебных настроек — сразу, одним запросом, не дожидаясь первого окна:
+    // приложения читают состояние синхронно (`MySpace.state.get`), а кому оно нужно
+    // на самом старте — ждёт `MySpace.state.ready`. На экране входа вернётся пусто.
+    try { window.MySpace.state.load(); } catch (e) { console.warn('[MySpace.state] старт:', e && e.message); }
 }
 
 class Form extends UIObject {
@@ -1676,7 +1779,9 @@ class Form extends UIObject {
                 });
 
                 document.addEventListener('mouseup', () => {
+                    if (!this.isDragging) return;
                     this.isDragging = false;
+                    this._rememberGeometry();
                 });
             }
 
@@ -1858,6 +1963,7 @@ class Form extends UIObject {
                         this.resizeDirection = null;
                         // Call onResize after resize completes
                         this.onResize();
+                        this._rememberGeometry();
                     }
                 });
             }
@@ -2047,6 +2153,66 @@ class Form extends UIObject {
     }
 
     // Переключатель развёрнуто/восстановлено. Кнопка в заголовке зовёт его же.
+    /**
+     * Запоминание положения и размера окна между сеансами.
+     *
+     * Работает только у окон, которым проставлен `stateKey` — то есть у тех, кого можно
+     * узнать в следующий раз (форма записи и список знают своё приложение и таблицу).
+     * Служебные и модальные окна ключа не имеют и ничего не помнят: у диалога «вы уверены?»
+     * запоминать нечего.
+     *
+     * Хранится в служебных настройках (`MySpace.state`, приложение `ui`): это состояние
+     * интерфейса, а не настройка — пользователь его не задаёт, а «наживает».
+     */
+    _rememberGeometry() {
+        if (!this.stateKey) return;
+        try {
+            window.MySpace.state.set('ui', 'window.' + this.stateKey, {
+                x: Math.round(this.x), y: Math.round(this.y),
+                w: Math.round(this.width), h: Math.round(this.height),
+                max: !!this.isMaximized
+            });
+        } catch (e) { /* состояние — не критичная вещь */ }
+    }
+
+    /**
+     * Вернуть запомненную геометрию. Возвращает true, если применена, — вызывающий по
+     * этому признаку понимает, что умолчание лейаута (`windowState`) применять уже не надо.
+     *
+     * Размер экрана мог измениться (другой монитор, другое разрешение), поэтому окно
+     * подрезается по видимой области: иначе оно открылось бы за краем экрана, и достать
+     * его пользователь бы не смог.
+     */
+    _restoreGeometry() {
+        if (!this.stateKey) return false;
+        let g = null;
+        try { g = window.MySpace.state.get('ui', 'window.' + this.stateKey); } catch (e) { return false; }
+        if (!g || typeof g !== 'object') return false;
+
+        if (g.max) {
+            if (!this.isMaximized) this.maximize();
+            return true;
+        }
+
+        const availH = window.innerHeight - Form.topOffset - Form.bottomOffset;
+        const w = Math.max(160, Math.min(Number(g.w) || 0, window.innerWidth));
+        const h = Math.max(80, Math.min(Number(g.h) || 0, availH));
+        if (!w || !h) return false;
+
+        const x = Math.max(0, Math.min(Number(g.x) || 0, window.innerWidth - w));
+        const y = Math.max(Form.topOffset, Math.min(Number(g.y) || 0, window.innerHeight - Form.bottomOffset - h));
+
+        this.setWidth(w);
+        this.setHeight(h);
+        this.setX(x);
+        this.setY(y);
+        if (this.element) {
+            this.element.style.left = x + 'px';
+            this.element.style.top = y + 'px';
+        }
+        return true;
+    }
+
     maximize() {
         if (this.isMaximized) {
             // Восстановить прежнюю геометрию. Если сохранённые значения невалидны
@@ -2082,6 +2248,8 @@ class Form extends UIObject {
             // Развёрнутое окно обязано следить за размером вьюпорта (см. _onWindowResize).
             this._ensureWindowResizeHandler();
         }
+        // Развернули или свернули — это тоже выбор пользователя, его помним.
+        this._rememberGeometry();
         // Иконка кнопки должна отражать текущее состояние (развернуть / восстановить).
         this._updateMaximizeIcon();
     }
@@ -3109,6 +3277,14 @@ class DataForm extends Form {
             // условия по состоянию записи («кнопка только у черновика») не связаны ни с
             // какой таблицей, и события таблиц их бы никогда не пересчитали.
             try { this.refreshEnabledWhen(); } catch (e) {}
+            // Последняя открытая вкладка — ПОСЛЕ пересчёта видимости: запомненная вкладка
+            // могла стать скрытой, и открывать её нельзя.
+            try {
+                for (const k in this.controlsMap) {
+                    const c = this.controlsMap[k];
+                    if (c && typeof c.restoreActiveTab === 'function') c.restoreActiveTab();
+                }
+            } catch (e) {}
             // Контролы, рождённые запертыми: досказать то, что видно только после
             // отрисовки, — подсказку «почему нельзя» и выключение неполей ввода.
             try {
@@ -4168,6 +4344,11 @@ class DataForm extends Form {
                             if (t && t.visibleWhen) this._declareVisibleWhen(tabsCtrl, i, t.visibleWhen);
                         });
                     } catch (e) {}
+                    // Ключ для запоминания активной вкладки: то же окно (stateKey формы)
+                    // плюс имя набора вкладок — на форме их может быть несколько.
+                    try {
+                        if (this.stateKey) tabsCtrl._stateKey = this.stateKey + '|' + (item.name || 'tabs');
+                    } catch (e) {}
                     // Wait for tab panes (and the tables/selectors inside them) to finish
                     // rendering before the root render loop completes — otherwise the
                     // setTimeout(_activateFirstRows) scheduled at the end of the root
@@ -4779,11 +4960,29 @@ class DataForm extends Form {
         try { for (const k in this.controlsMap) { if (Object.prototype.hasOwnProperty.call(this.controlsMap, k)) delete this.controlsMap[k]; } } catch (e) {}
 
         await this.loadLayout();
+
+        // Ключ окна для запоминания геометрии и активной вкладки: приложение + режим +
+        // таблица. Считается ДО отрисовки — вкладки строятся внутри renderLayout и берут
+        // его у формы. recordID в ключ не входит: пользователь двигает окно карточки,
+        // а не окно конкретной брони.
+        try {
+            const mode = this._windowMode || 'record';
+            const table = this.dbTable || this.tableName || '';
+            if (this.appName && table) this.stateKey = `${this.appName}|${mode}|${table}`;
+        } catch (e) {}
+
         await this.renderLayout();
+
+        // Запомненные положение и размер сильнее умолчания из лейаута: пользователь
+        // подвинул окно сам, и открыть его снова «как положено» значит стереть его выбор.
+        let geometryRestored = false;
+        try { geometryRestored = this._restoreGeometry(); } catch (e) {}
 
         // Apply windowState specified in layout metadata
         try {
-            if (this._windowState === 'maximized' && !this.isMaximized) {
+            if (geometryRestored) {
+                // ничего: геометрия уже своя
+            } else if (this._windowState === 'maximized' && !this.isMaximized) {
                 this.maximize();
             } else if (this._windowState === 'centered' && !this.isMaximized) {
                 // Auto-generated record form: centre on screen and size the window to its
@@ -8795,7 +8994,11 @@ class RadioButton extends UIObject {
     }
     updateVisual() {
         if (this.circleIcon) {
-            this.circleIcon.style.visibility = this.checked ? 'visible' : 'hidden';
+            // `display`, а НЕ `visibility`. Литеральный `visibility: visible` у потомка
+            // перебивает `visibility: hidden` предка, а именно им скрываются неактивные
+            // панели вкладок (Tabs._showTab): точка выбранной радио-кнопки проступала
+            // сквозь соседнюю вкладку — панель лежит absolute поверх активной.
+            this.circleIcon.style.display = this.checked ? '' : 'none';
         }
     }
     Draw(container) {
@@ -13224,6 +13427,10 @@ class Calendar extends UIObject {
 
     _toggleOrientation() {
         this.orientation = (this.orientation === 'vertical') ? 'horizontal' : 'vertical';
+        // Выбранный вид запоминается: пользователь переключил ось один раз и ждёт её
+        // при следующем открытии, а не значения из настроек. Настройка остаётся тем,
+        // с чего начинает тот, кто ни разу не переключал (drive_root/settings/state.js).
+        try { window.MySpace.state.set('booking', 'calendarOrientation', this.orientation); } catch (e) {}
         // Смена оси делает прежнюю позицию бессмысленной — центрируем на сегодня.
         this._forceToday = true;
         this._renderPreservingScroll();
@@ -14158,6 +14365,24 @@ class Tabs extends UIObject {
         if (next >= 0) this._showTab(next);
     }
 
+    /**
+     * Открыть вкладку, запомненную с прошлого раза.
+     *
+     * Зовётся после отрисовки и ПОСЛЕ пересчёта видимости (`visibleWhen`): вкладка могла
+     * стать невидимой (уровень настроек сменился, документ другого вида) — тогда остаёмся
+     * на первой видимой, а не показываем пустоту.
+     */
+    restoreActiveTab() {
+        if (!this._stateKey) return;
+        let idx = null;
+        try { idx = window.MySpace.state.get('ui', 'tab.' + this._stateKey); } catch (e) { return; }
+        idx = Number(idx);
+        if (!Number.isInteger(idx) || idx <= 0) return;          // 0 — и так первая
+        const pane = this._panes[idx];
+        if (!pane || pane.hidden) return;
+        try { this._showTab(idx); } catch (e) {}
+    }
+
     _showTab(idx) {
         this._panes.forEach((p, i) => {
             p.btn.classList.toggle('active', i === idx);
@@ -14211,7 +14436,14 @@ class Tabs extends UIObject {
                 try { btn.type = 'button'; } catch (e) {}
                 btn.textContent = t.caption || ('Tab ' + (idx + 1));
                 btn.tabIndex = -1;
-                btn.addEventListener('click', () => { try { this._showTab(idx); } catch (e) {} });
+                btn.addEventListener('click', () => {
+                    try { this._showTab(idx); } catch (e) {}
+                    // Запоминаем ТОЛЬКО клик: `_showTab` зовут и программно (скрытие
+                    // активной вкладки, восстановление), и это не выбор пользователя.
+                    try {
+                        if (this._stateKey) window.MySpace.state.set('ui', 'tab.' + this._stateKey, idx);
+                    } catch (e) {}
+                });
                 header.appendChild(btn);
 
                 const pane = document.createElement('div');

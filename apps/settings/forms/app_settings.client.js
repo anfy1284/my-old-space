@@ -84,6 +84,14 @@ async function reloadValues(form) {
     }
     applyValues(form, res.values);
 
+    // Служебные данные — админская таблица; приходит вместе с уровнем.
+    if (res.stateRows) {
+        var stateTable = form.getControl('stateRows');
+        if (stateTable && typeof stateTable.setRowsData === 'function') {
+            try { stateTable.setRowsData(res.stateRows); } catch (e) {}
+        }
+    }
+
     // Автозаполнение принадлежит пользователю — при смене пользователя таблица
     // обязана показать ЕГО строки, иначе администратор сохранит чужие.
     if (res.autofill) {
@@ -158,6 +166,23 @@ async function applySettings(ev, ctx) {
     showAlert(__t('Settings saved'));
 }
 
+/** Стереть всё запомненное состояние интерфейса (кнопка администратора). */
+async function clearState(ev, ctx) {
+    var form = ctx.form;
+    showConfirm(__t('settings_state_clear_confirm'), async function () {
+        var res = await callServer('__SERVER_SCRIPT__', 'clearState', {});
+        if (!res || res.error) {
+            showAlert(__t('Error: ') + ((res && res.error) || ''));
+            return;
+        }
+        var table = form.getControl('stateRows');
+        if (table && typeof table.setRowsData === 'function') {
+            try { table.setRowsData(res.stateRows || []); } catch (e) {}
+        }
+        showAlert(__t('settings_state_cleared') + ' ' + (res.removed || 0));
+    });
+}
+
 /** Форма смены пароля из приложения login. */
 function openChangePassword(ev, ctx) {
     if (window.MySpace && typeof window.MySpace.open === 'function') {
@@ -167,4 +192,4 @@ function openChangePassword(ev, ctx) {
     }
 }
 
-return { onFormReady, onScopeChanged, onRecordChanged, applySettings, openChangePassword };
+return { onFormReady, onScopeChanged, onRecordChanged, applySettings, openChangePassword, clearState };
