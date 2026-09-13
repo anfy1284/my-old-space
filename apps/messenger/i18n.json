@@ -41,6 +41,18 @@
         "de": "Nachricht ist leer",
         "pl": "Wiadomość jest pusta"
     },
+    "msg_translate_failed": {
+        "en": "Could not translate the message — it was not sent",
+        "ru": "Не удалось перевести сообщение — оно не отправлено",
+        "de": "Die Nachricht konnte nicht übersetzt werden — sie wurde nicht gesendet",
+        "pl": "Nie udało się przetłumaczyć wiadomości — nie została wysłana"
+    },
+    "msg_translate_no_language": {
+        "en": "Translation language is not selected",
+        "ru": "Язык перевода не выбран",
+        "de": "Übersetzungssprache ist nicht ausgewählt",
+        "pl": "Nie wybrano języka tłumaczenia"
+    },
     "msg_attachment_too_big": {
         "en": "Attachment is too large",
         "ru": "Вложение слишком большое",
@@ -238,6 +250,120 @@
         "ru": "Миниатюра",
         "de": "Vorschaubild",
         "pl": "Miniatura"
+    },
+    "set_messenger_use": {
+        "en": "Use messenger",
+        "ru": "Использовать мессенджер",
+        "de": "Messenger verwenden",
+        "pl": "Używaj komunikatora"
+    },
+    "set_messenger_use_hint": {
+        "en": "Off: no messenger icon in the tray, and the user is not shown to others as a contact",
+        "ru": "Выключено: значка мессенджера в трее нет, и в списках у других пользователей этого человека не видно",
+        "de": "Aus: kein Messenger-Symbol im Infobereich, und der Benutzer erscheint bei anderen nicht in der Kontaktliste",
+        "pl": "Wyłączone: brak ikony komunikatora w zasobniku, a użytkownik nie pojawia się na listach innych osób"
+    },
+    "set_messenger_group_translate": {
+        "en": "Translation",
+        "ru": "Перевод",
+        "de": "Übersetzung",
+        "pl": "Tłumaczenie"
+    },
+    "set_messenger_translate_incoming": {
+        "en": "Translate incoming messages",
+        "ru": "Переводить входящие сообщения",
+        "de": "Eingehende Nachrichten übersetzen",
+        "pl": "Tłumacz wiadomości przychodzące"
+    },
+    "set_messenger_translate_incoming_hint": {
+        "en": "A new message is translated into the language below on arrival. The original is kept and stays available",
+        "ru": "Новое сообщение при поступлении переводится на указанный ниже язык. Оригинал сохраняется и остаётся доступен",
+        "de": "Eine neue Nachricht wird beim Eingang in die unten angegebene Sprache übersetzt. Das Original bleibt erhalten und abrufbar",
+        "pl": "Nowa wiadomość jest po nadejściu tłumaczona na wskazany niżej język. Oryginał zostaje zachowany i pozostaje dostępny"
+    },
+    "set_messenger_translate_language": {
+        "en": "Translation language",
+        "ru": "Язык перевода",
+        "de": "Übersetzungssprache",
+        "pl": "Język tłumaczenia"
+    },
+    "set_messenger_translate_language_hint": {
+        "en": "The language this user reads in: incoming messages are translated into it",
+        "ru": "Язык, на котором читает этот пользователь: на него переводятся входящие сообщения",
+        "de": "Die Sprache, in der dieser Benutzer liest: in sie werden eingehende Nachrichten übersetzt",
+        "pl": "Język, w którym czyta ten użytkownik: na niego tłumaczone są wiadomości przychodzące"
+    },
+    "set_messenger_translate_outgoing": {
+        "en": "Translate outgoing messages",
+        "ru": "Переводить исходящие сообщения",
+        "de": "Ausgehende Nachrichten übersetzen",
+        "pl": "Tłumacz wiadomości wychodzące"
+    },
+    "set_messenger_translate_outgoing_hint": {
+        "en": "Lets the user send a message translated into the language chosen for the other party",
+        "ru": "Позволяет пользователю отправить сообщение переведённым на язык, выбранный для собеседника",
+        "de": "Erlaubt dem Benutzer, eine Nachricht übersetzt in die für den Gesprächspartner gewählte Sprache zu senden",
+        "pl": "Pozwala użytkownikowi wysłać wiadomość przetłumaczoną na język wybrany dla rozmówcy"
+    },
+    "sysset_messenger_translate_api_key": {
+        "en": "Translation API key",
+        "ru": "Ключ API переводчика",
+        "de": "API-Schlüssel für die Übersetzung",
+        "pl": "Klucz API tłumacza"
+    },
+    "sysset_messenger_translate_api_key_hint": {
+        "en": "Google AI (Gemini) key. The messenger has its own — it is not the AI assistant's key",
+        "ru": "Ключ Google AI (Gemini). У мессенджера он свой — это не ключ AI-ассистента",
+        "de": "Google-AI-(Gemini-)Schlüssel. Der Messenger hat einen eigenen — nicht den des KI-Assistenten",
+        "pl": "Klucz Google AI (Gemini). Komunikator ma własny — to nie jest klucz asystenta AI"
+    },
+    "sysset_messenger_translate_model": {
+        "en": "Translation model",
+        "ru": "Модель перевода",
+        "de": "Übersetzungsmodell",
+        "pl": "Model tłumaczenia"
+    },
+    "msg_member_outgoing_language_field": {
+        "en": "Outgoing language",
+        "ru": "Язык исходящих",
+        "de": "Sprache ausgehender Nachrichten",
+        "pl": "Język wiadomości wychodzących"
+    },
+    "msg_message_original_field": {
+        "en": "Original text",
+        "ru": "Оригинал текста",
+        "de": "Originaltext",
+        "pl": "Tekst oryginalny"
+    },
+    "msg_tr_message_field": {
+        "en": "Message",
+        "ru": "Сообщение",
+        "de": "Nachricht",
+        "pl": "Wiadomość"
+    },
+    "msg_tr_author_field": {
+        "en": "Author",
+        "ru": "Автор",
+        "de": "Autor",
+        "pl": "Autor"
+    },
+    "msg_tr_language_field": {
+        "en": "Language",
+        "ru": "Язык",
+        "de": "Sprache",
+        "pl": "Język"
+    },
+    "msg_tr_content_field": {
+        "en": "Translation",
+        "ru": "Перевод",
+        "de": "Übersetzung",
+        "pl": "Tłumaczenie"
+    },
+    "msg_tr_engine_field": {
+        "en": "Translated by",
+        "ru": "Чем переведено",
+        "de": "Übersetzt von",
+        "pl": "Przetłumaczone przez"
     },
     "sysset_messenger_max_attachment_mb": {
         "en": "Messenger: max attachment size, MB",

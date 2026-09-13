@@ -809,6 +809,12 @@
         "de": "Es gibt kein Rollback-Schema zum Umschalten",
         "pl": "Brak schematu wycofania do przełączenia"
     },
+    "user_presentation_field": {
+        "en": "Display name",
+        "ru": "Представление",
+        "de": "Anzeigename",
+        "pl": "Nazwa wyświetlana"
+    },
     "user_disabled_field": {
         "en": "Disabled",
         "ru": "Отключён",

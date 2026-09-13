@@ -28,7 +28,10 @@
 const { Op } = require('sequelize');
 const emptyValues = require('../../../drive_root/db/emptyValues');
 const globalRoot = require('../../../drive_root/globalServerContext');
+const appAvailability = require('../../../drive_root/appAvailability');
+const userPresentation = require('../../../drive_root/userPresentation');
 const presence = require('../../../drive_root/presence');
+const translator = require('../lib/translator');
 const log = require('../../../drive_root/log');
 const { sendSessionEventToUser } = require('../../../drive_forms/dynamicTableRegistry');
 const { tForSession } = require('../../../drive_forms/globalServerContext');
@@ -89,7 +92,62 @@ module.exports = function factory(modelsDB, Utilities) {
     const Messages = () => modelsDB.MessengerMessages;
     const Reads = () => modelsDB.MessengerMessageReads;
     const Attachments = () => modelsDB.MessengerAttachments;
+    const Translations = () => modelsDB.MessengerMessageTranslations;
+    const Languages = () => modelsDB.Languages;
     const Users = () => modelsDB.Users;
+
+    // ── Языки и настройки перевода ──────────────────────────────────────────
+    /**
+     * Справочник языков: UID → { UID, code, name }, плюс тот же объект по коду.
+     * Читается запросом, а не из кэша: языков единицы, а кэш настроек и справочников
+     * в этой системе уже стрелял (см. drive_root/settings/index.js).
+     */
+    async function languageIndex() {
+        const out = { byId: new Map(), byCode: new Map(), list: [] };
+        if (!Languages()) return out;
+        const rows = await Languages().findAll({ attributes: ['UID', 'code', 'name'], raw: true });
+        for (const r of rows) {
+            const item = { UID: r.UID, code: r.code, name: r.name };
+            out.byId.set(r.UID, item);
+            out.byCode.set(r.code, item);
+            out.list.push(item);
+        }
+        return out;
+    }
+
+    /**
+     * Настройки перевода пользователя: что ему включено и на какой язык он читает.
+     * @returns {Promise<{incoming: boolean, outgoing: boolean, language: Object|null}>}
+     */
+    async function translationPrefs(userId, langs) {
+        const settings = require('../../../drive_root/settings');
+        const empty = { incoming: false, outgoing: false, language: null };
+        if (!userId) return empty;
+        try {
+            const [incoming, outgoing, languageId] = await Promise.all([
+                settings.getUserSetting(userId, APP_NAME, 'translateIncoming'),
+                settings.getUserSetting(userId, APP_NAME, 'translateOutgoing'),
+                settings.getUserSetting(userId, APP_NAME, 'translateLanguage')
+            ]);
+            const index = langs || await languageIndex();
+            return {
+                incoming: !!incoming,
+                outgoing: !!outgoing,
+                language: languageId ? (index.byId.get(String(languageId)) || null) : null
+            };
+        } catch (e) {
+            log.error('[messenger] настройки перевода', userId, e && e.message);
+            return empty;
+        }
+    }
+
+    /**
+     * На какой язык читает получатель. Пусто — переводить незачем: либо перевод ему
+     * выключен, либо язык не выбран, и угадывать его за администратора нельзя.
+     */
+    function readingLanguageOf(prefs) {
+        return (prefs && prefs.incoming && prefs.language) ? prefs.language : null;
+    }
 
     async function currentUser(ctx) {
         if (ctx && ctx.user && ctx.user.UID) return ctx.user;
@@ -113,10 +171,77 @@ module.exports = function factory(modelsDB, Utilities) {
         return await Members().findAll({ where: { chatId: chatId, isActive: true }, raw: true });
     }
 
+    // ── Кого мессенджер не показывает ───────────────────────────────────────
+    /**
+     * Личный собеседник каждого чата: chatId → UID (null, если чат групповой).
+     *
+     * @param {Array} chats — записи чатов (нужен `kind`)
+     * @param {Array} allMembers — активные участники этих чатов
+     * @param {string} myId — чья точка зрения
+     * @returns {Map<string, string|null>}
+     */
+    function peerByChatFrom(chats, allMembers, myId) {
+        const byChat = new Map();
+        for (const m of allMembers) {
+            if (!byChat.has(m.chatId)) byChat.set(m.chatId, []);
+            byChat.get(m.chatId).push(m);
+        }
+        const out = new Map();
+        for (const c of chats) {
+            const others = (byChat.get(c.UID) || []).filter(m => m.userId !== myId);
+            const isGroup = c.kind === 'group' || others.length > 1;
+            out.set(c.UID, (!isGroup && others.length === 1) ? others[0].userId : null);
+        }
+        return out;
+    }
+
+    /**
+     * Чаты, которых пользователю видеть не должно: личная переписка с тем, у кого
+     * мессенджер выключен. Такой человек для мессенджера не существует — ни строкой
+     * в списке, ни цифрой на значке: счётчик непрочитанного, который нельзя обнулить,
+     * хуже отсутствующего.
+     *
+     * Общий чат остаётся у всех: выключенный участник в нём просто молчит.
+     *
+     * @param {Map<string, string|null>} peerByChat — результат peerByChatFrom
+     * @returns {Promise<Set<string>>} UID чатов, которые надо скрыть
+     */
+    async function hiddenChatIds(peerByChat) {
+        const peers = Array.from(peerByChat.values()).filter(Boolean);
+        const hidden = new Set();
+        if (!peers.length) return hidden;
+        const enabled = await appAvailability.enabledMapForUsers(peers, APP_NAME);
+        for (const [chatId, peer] of peerByChat) {
+            if (peer && enabled.get(peer) === false) hidden.add(chatId);
+        }
+        return hidden;
+    }
+
     // ── Формирование вида сообщения для клиента ─────────────────────────────
-    async function decorateMessages(rows, chatId, viewerId) {
+    /**
+     * @param {Array} rows — строки сообщений
+     * @param {string} chatId
+     * @param {string} viewerId — чьими глазами смотрим (галочки, «моё/чужое»)
+     * @param {string} [viewerLangCode] — язык чтения зрителя; с ним к сообщению
+     *        прикладывается ПЕРЕВОД. Оригинал при этом остаётся в `content` —
+     *        переключатель «оригиналы/переводы» работает без похода на сервер.
+     */
+    async function decorateMessages(rows, chatId, viewerId, viewerLangCode) {
         if (!rows.length) return [];
         const ids = rows.map(r => r.UID);
+
+        const translationByMsg = {};
+        if (viewerLangCode && Translations()) {
+            try {
+                const trs = await Translations().findAll({
+                    where: { messageId: ids, language: viewerLangCode },
+                    attributes: ['messageId', 'content'], raw: true
+                });
+                for (const t of trs) translationByMsg[t.messageId] = t.content || '';
+            } catch (e) {
+                log.error('[messenger] переводы не прочитаны:', e && e.message);
+            }
+        }
 
         const [atts, receipts, authors] = await Promise.all([
             Attachments().findAll({
@@ -129,7 +254,7 @@ module.exports = function factory(modelsDB, Utilities) {
             Reads().findAll({ where: { messageId: ids }, raw: true }),
             Users().findAll({
                 where: { UID: Array.from(new Set(rows.map(r => r.userId))) },
-                attributes: ['UID', 'name'],
+                attributes: userPresentation.ATTRIBUTES,
                 raw: true
             })
         ]);
@@ -140,8 +265,9 @@ module.exports = function factory(modelsDB, Utilities) {
         const recByMsg = {};
         receipts.forEach(r => { (recByMsg[r.messageId] = recByMsg[r.messageId] || []).push(r); });
 
+        // Подпись автора — представление, а не логин (drive_root/userPresentation.js).
         const nameById = {};
-        authors.forEach(u => { nameById[u.UID] = u.name; });
+        authors.forEach(u => { nameById[u.UID] = userPresentation.presentationOf(u); });
 
         const members = await chatMembers(chatId);
 
@@ -156,6 +282,13 @@ module.exports = function factory(modelsDB, Utilities) {
                 authorId: r.userId,
                 authorName: nameById[r.userId] || '',
                 content: r.content || '',
+                // Перевод — рядом с оригиналом, а не вместо него. Автор своих
+                // сообщений перевода не получает: он написал их сам.
+                translation: (r.userId !== viewerId && translationByMsg[r.UID]) ? translationByMsg[r.UID] : null,
+                // Набранный текст — ТОЛЬКО автору. Для получателя этого текста не
+                // существует: ему пришло обычное сообщение, и знать, что оно
+                // переведено, ему незачем.
+                original: (r.userId === viewerId && r.originalContent) ? r.originalContent : null,
                 clientMsgId: r.clientMsgId || null,
                 createdAt: r.createdAt,
                 attachments: (attByMsg[r.UID] || []).map(a => ({
@@ -230,22 +363,22 @@ module.exports = function factory(modelsDB, Utilities) {
         const membersByChat = {};
         allMembers.forEach(m => { (membersByChat[m.chatId] = membersByChat[m.chatId] || []).push(m); });
 
-        const peerIds = [];
-        for (const c of chats) {
-            const others = (membersByChat[c.UID] || []).filter(m => m.userId !== user.UID);
-            if (c.kind !== 'group' && others.length === 1) peerIds.push(others[0].userId);
-        }
-        const [peers, presenceMap] = await Promise.all([
-            peerIds.length ? Users().findAll({ where: { UID: peerIds }, attributes: ['UID', 'name'], raw: true }) : [],
-            presence.getPresence(peerIds)
+        const peerByChat = peerByChatFrom(chats, allMembers, user.UID);
+        const peerIds = Array.from(peerByChat.values()).filter(Boolean);
+
+        const [peers, presenceMap, hidden] = await Promise.all([
+            peerIds.length ? Users().findAll({ where: { UID: peerIds }, attributes: userPresentation.ATTRIBUTES, raw: true }) : [],
+            presence.getPresence(peerIds),
+            hiddenChatIds(peerByChat)
         ]);
         const peerName = {};
-        peers.forEach(u => { peerName[u.UID] = u.name; });
+        peers.forEach(u => { peerName[u.UID] = userPresentation.presentationOf(u); });
 
         const out = chats.map(c => {
+            if (hidden.has(c.UID)) return null;
             const others = (membersByChat[c.UID] || []).filter(m => m.userId !== user.UID);
             const isGroup = c.kind === 'group' || others.length > 1;
-            const peer = (!isGroup && others.length === 1) ? others[0].userId : null;
+            const peer = peerByChat.get(c.UID) || null;
             const last = lastByChat[c.UID] || null;
             return {
                 chatId: c.UID,
@@ -258,7 +391,7 @@ module.exports = function factory(modelsDB, Utilities) {
                 lastMessageAt: last ? last.createdAt : c.lastMessageAt,
                 unread: unreadByChat[c.UID] || 0
             };
-        });
+        }).filter(Boolean);
 
         // Свежие разговоры сверху — чат без сообщений уходит вниз, а не наверх.
         out.sort((a, b) => {
@@ -306,7 +439,9 @@ module.exports = function factory(modelsDB, Utilities) {
         const hasMore = rows.length > limit;
         const page = rows.slice(0, limit).reverse();
 
-        const messages = await decorateMessages(page, chatId, access.user.UID);
+        const myPrefs = await translationPrefs(access.user.UID);
+        const myLang = readingLanguageOf(myPrefs);
+        const messages = await decorateMessages(page, chatId, access.user.UID, myLang && myLang.code);
 
         // Показанное считается доставленным: получатель эти сообщения получил,
         // даже если ещё не отметил прочтение прокруткой.
@@ -380,18 +515,107 @@ module.exports = function factory(modelsDB, Utilities) {
         }
     }
 
+    // ── Перевод входящих ────────────────────────────────────────────────────
+    /**
+     * Перевести новое сообщение на языки получателей и сохранить переводы.
+     *
+     * Ключ перевода — ЯЗЫК, а не человек: двум получателям, читающим по-немецки,
+     * нужен один перевод и один вызов модели. Оригинал (`messenger_messages.content`)
+     * не трогается никогда.
+     *
+     * Делается ДО рассылки, а не в фоне: иначе два подряд отправленных сообщения
+     * приходили бы получателю в порядке, в каком успели перевестись, — то есть
+     * иногда наоборот. Порядок реплик в переписке дороже секунды ожидания.
+     *
+     * @param {Object} messageRow — созданное сообщение (UID, userId, content)
+     * @param {Array} members — участники чата
+     * @param {string} [sentLangCode] — язык, на который текст уже переведён при отправке
+     * @returns {Promise<{byCode: Map<string,string>, langByUser: Map<string,Object>}>}
+     */
+    async function translateForRecipients(messageRow, members, sentLangCode) {
+        const byCode = new Map();
+        const langByUser = new Map();
+        const content = String(messageRow.content || '').trim();
+        if (!content) return { byCode, langByUser };
+
+        const langs = await languageIndex();
+        for (const m of members) {
+            if (!m.userId || m.userId === messageRow.userId) continue;
+            const prefs = await translationPrefs(m.userId, langs);
+            const lang = readingLanguageOf(prefs);
+            if (lang) langByUser.set(m.userId, lang);
+        }
+        if (!langByUser.size) return { byCode, langByUser };
+
+        const targets = new Map();
+        for (const lang of langByUser.values()) {
+            // Отправитель уже перевёл текст на этот язык — переводить его сам в себя
+            // значит потратить вызов модели и получить другую формулировку того же.
+            if (sentLangCode && lang.code === sentLangCode) continue;
+            targets.set(lang.code, lang);
+        }
+
+        for (const [code, lang] of targets) {
+            try {
+                const res = await translator.translate(content, lang);
+                if (!res.ok) { log.warn('[messenger] перевод на', code, 'не выполнен:', res.error); continue; }
+                byCode.set(code, res.text);
+                // Уникальный индекс (messageId, language) — повтор невозможен;
+                // findOrCreate защищает от гонки двух процессов.
+                await Translations().findOrCreate({
+                    where: { messageId: messageRow.UID, language: code },
+                    defaults: {
+                        messageId: messageRow.UID,
+                        userId: messageRow.userId,
+                        language: code,
+                        content: res.text,
+                        engine: res.engine || null
+                    }
+                });
+            } catch (e) {
+                log.error('[messenger] перевод на', code, e && e.message);
+            }
+        }
+        return { byCode, langByUser };
+    }
+
+    /**
+     * Перевод исходящего: текст, который реально уйдёт собеседнику.
+     *
+     * Отказ возвращается ошибкой, а не молчаливой отправкой оригинала: человек нажал
+     * «Отправить перевод» и обязан узнать, что перевода не получилось, — иначе
+     * собеседник получит текст на языке, которого не знает, и оба будут уверены,
+     * что всё в порядке.
+     *
+     * @returns {Promise<{ok: boolean, text?: string, error?: string}>}
+     */
+    async function translateOutgoing(content, languageUID) {
+        const langs = await languageIndex();
+        const lang = langs.byId.get(String(languageUID));
+        if (!lang) return { ok: false, error: 'msg_translate_no_language' };
+        const res = await translator.translate(content, lang);
+        if (!res.ok) return { ok: false, error: res.error };
+        return { ok: true, text: res.text, code: lang.code };
+    }
+
     // ── Отправка ────────────────────────────────────────────────────────────
     /**
      * Отправить сообщение. `clientMsgId` — ключ идемпотентности: повтор того же
      * запроса (ретрай при обрыве) не создаёт второе сообщение, а возвращает уже
      * записанное.
+     *
+     * `translateTo` — UID языка: текст переводится и уходит ПЕРЕВЕДЁННЫМ, как
+     * обычное сообщение. Получатель не видит никакой пометки о переводе: для него
+     * это просто письмо на его языке.
      */
     async function sendMessage(params, ctx) {
         const chatId = params && params.chatId;
         const access = await requireMember(ctx, chatId);
         if (!access) return { error: await tForSession('Access denied', ctx.sessionID) };
 
-        const content = String((params && params.content) || '').trim();
+        let content = String((params && params.content) || '').trim();
+        let sentLangCode = null;      // на каком языке текст ушёл (если переводили при отправке)
+        let originalContent = null;   // что автор набрал, если ушёл перевод
         const files = Array.isArray(params.attachments) ? params.attachments : [];
         if (!content && !files.length) return { error: await tForSession('msg_empty_message', ctx.sessionID) };
 
@@ -406,6 +630,22 @@ module.exports = function factory(modelsDB, Utilities) {
             }
         }
 
+        // Перевод исходящего — ДО записи: в базу ложится ровно то, что уйдёт человеку.
+        // Право на эту кнопку проверяется здесь, а не только тем, что она нарисована:
+        // кнопка на экране — не разрешение.
+        if (params && params.translateTo && content) {
+            const prefs = await translationPrefs(access.user.UID);
+            if (!prefs.outgoing) return { error: await tForSession('Access denied', ctx.sessionID) };
+            const out = await translateOutgoing(content, params.translateTo);
+            if (!out.ok) return { error: await tForSession('msg_translate_failed', ctx.sessionID) };
+            // Уходит перевод, но набранное сохраняется: свои сообщения автор обязан
+            // видеть на том языке, на котором их писал. Это ВТОРОЙ текст того же
+            // сообщения, а не второе сообщение: получателю уходит ровно одно.
+            originalContent = content;
+            content = out.text;
+            sentLangCode = out.code;
+        }
+
         const maxBytes = await maxAttachmentBytes();
         for (const f of files) {
             const size = Number(f.size) || 0;
@@ -416,6 +656,7 @@ module.exports = function factory(modelsDB, Utilities) {
             chatId: chatId,
             userId: access.user.UID,
             content: content,
+            originalContent: originalContent,
             clientMsgId: clientMsgId
         });
 
@@ -429,7 +670,10 @@ module.exports = function factory(modelsDB, Utilities) {
         const plain = created.get ? created.get({ plain: true }) : created;
         const [decorated] = await decorateMessages([plain], chatId, access.user.UID);
 
-        await fanOut(chatId, access.user, decorated);
+        const members = await chatMembers(chatId);
+        const translations = await translateForRecipients(plain, members, sentLangCode);
+
+        await fanOut(chatId, access.user, decorated, members, translations);
         return { success: true, message: decorated };
     }
 
@@ -439,25 +683,51 @@ module.exports = function factory(modelsDB, Utilities) {
      * он и так видит сообщение, а карточка в углу поверх открытой переписки —
      * шум, из-за которого уведомления перестают читать.
      */
-    async function fanOut(chatId, author, message) {
-        const members = await chatMembers(chatId);
+    async function fanOut(chatId, author, message, membersIn, translations) {
+        const members = membersIn || await chatMembers(chatId);
         const notifications = require('../../notifications/server');
+        const byCode = (translations && translations.byCode) || new Map();
+        const langByUser = (translations && translations.langByUser) || new Map();
+
+        // Кому мессенджер выключен — ни события в ленту, ни карточки в углу: у него
+        // нет окна, в которое это можно показать.
+        const enabled = await appAvailability.enabledMapForUsers(
+            members.map(m => m.userId), APP_NAME
+        );
 
         for (const m of members) {
             if (!m.userId || m.userId === author.UID) continue;
+            if (enabled.get(m.userId) === false) continue;
 
-            sendSessionEventToUser(m.userId, { type: 'messenger.message', chatId: chatId, message: message });
+            // Каждому — его перевод: «показать переводы» обязано работать и на
+            // сообщении, пришедшем в открытое окно, а не только после перезагрузки.
+            const lang = langByUser.get(m.userId);
+            const translated = lang ? (byCode.get(lang.code) || null) : null;
+            // `message` собрано глазами АВТОРА — в нём может лежать его набранный
+            // текст. Получателю он не принадлежит: копия всегда без `original`.
+            const forMember = Object.assign({}, message, { translation: translated, original: null });
+
+            sendSessionEventToUser(m.userId, { type: 'messenger.message', chatId: chatId, message: forMember });
 
             if (isLookingAt(m.userId, chatId) && presence.isOnline(m.userId)) continue;
 
-            const text = message.content
-                ? shorten(message.content, NOTIFY_LIMIT)
+            // Карточка в углу — на языке получателя, если перевод есть: анонс на
+            // незнакомом языке не анонс.
+            const body = translated || message.content;
+            const text = body
+                ? shorten(body, NOTIFY_LIMIT)
                 : shorten((message.attachments[0] && message.attachments[0].name) || '', NOTIFY_LIMIT);
             try {
                 await notifications.notify({
                     userId: m.userId,
                     appName: APP_NAME,
-                    title: author.name,
+                    // Подпись — та же строка, что стоит над сообщением в ленте
+                    // (`decorateMessages` читает представление из базы). Считать её
+                    // здесь второй раз нельзя: `author` приезжает из КЭША сессии
+                    // (`getUserBySessionID` хранит снимок в memory_store), и запись,
+                    // положенная туда до заполнения представления, показывала в
+                    // уведомлении логин, когда в ленте уже стояло имя.
+                    title: message.authorName || userPresentation.presentationOf(author),
                     text: text,
                     icon: MESSENGER_ICON,
                     onClick: { fn: 'openChat', fnParams: { chatId: chatId } }
@@ -541,7 +811,18 @@ module.exports = function factory(modelsDB, Utilities) {
     async function unreadTotalFor(userId) {
         const memberships = await Members().findAll({ where: { userId: userId, isActive: true }, attributes: ['chatId'], raw: true });
         if (!memberships.length) return 0;
-        const chatIds = memberships.map(m => m.chatId);
+        let chatIds = memberships.map(m => m.chatId);
+
+        // Скрытые чаты (собеседник не пользуется мессенджером) не считаются: иначе на
+        // значке висела бы цифра, которую нечем обнулить — чата в списке-то нет.
+        const [chatRows, allMembers] = await Promise.all([
+            Chats().findAll({ where: { UID: chatIds, isActive: true }, attributes: ['UID', 'kind'], raw: true }),
+            Members().findAll({ where: { chatId: chatIds, isActive: true }, attributes: ['chatId', 'userId'], raw: true })
+        ]);
+        const hidden = await hiddenChatIds(peerByChatFrom(chatRows, allMembers, userId));
+        chatIds = chatRows.map(c => c.UID).filter(id => !hidden.has(id));
+        if (!chatIds.length) return 0;
+
         const readIds = (await Reads().findAll({
             where: { userId: userId, chatId: chatIds, readAt: FILLED },
             attributes: ['messageId'], raw: true
@@ -572,9 +853,77 @@ module.exports = function factory(modelsDB, Utilities) {
         return { success: true };
     }
 
+    // ── Состав панелей композера ────────────────────────────────────────────
+    /**
+     * Что показывать над и рядом с полем ввода в ЭТОМ чате.
+     *
+     * Состав панелей решает СЕРВЕР, а не клиент: это права (настройки правит только
+     * администратор) и справочные данные (список языков). Клиент, который сам решает,
+     * рисовать ли кнопку «Отправить перевод», однажды нарисует её тому, кому нельзя.
+     *
+     * @returns {Promise<{translateIncoming: boolean, translateOutgoing: boolean,
+     *                    languages: Array, outgoingLanguageId: string|null,
+     *                    configured: boolean}>}
+     */
+    async function composerState(params, ctx) {
+        const chatId = params && params.chatId;
+        const user = await currentUser(ctx);
+        if (!user) return { translateIncoming: false, translateOutgoing: false, languages: [], outgoingLanguageId: null, configured: false };
+
+        const langs = await languageIndex();
+        const prefs = await translationPrefs(user.UID, langs);
+        const configured = await translator.isConfigured();
+
+        let outgoingLanguageId = null;
+        if (chatId && prefs.outgoing) {
+            const membership = await Members().findOne({
+                where: { chatId: chatId, userId: user.UID, isActive: true },
+                attributes: ['outgoingLanguageId'], raw: true
+            });
+            outgoingLanguageId = (membership && membership.outgoingLanguageId) || null;
+        }
+
+        return {
+            // Переключатель «оригиналы/переводы» нужен только тому, кому переводят.
+            translateIncoming: !!(prefs.incoming && prefs.language),
+            translateOutgoing: !!prefs.outgoing,
+            readingLanguage: prefs.language ? prefs.language.code : null,
+            languages: langs.list.map(l => ({ UID: l.UID, code: l.code, name: l.name })),
+            outgoingLanguageId: outgoingLanguageId,
+            // Переводить нечем — панели рисуем, но об этом надо сказать вслух,
+            // а не отправлять в пустоту.
+            configured: configured
+        };
+    }
+
+    /**
+     * Запомнить язык, на который переводим ЭТОМУ собеседнику.
+     *
+     * Хранится реквизитом участия в чате, а не в состоянии интерфейса: от него
+     * зависит, какой текст реально уйдёт человеку, а состояние интерфейса приходит
+     * с клиента и для такого не предназначено.
+     */
+    async function setOutgoingLanguage(params, ctx) {
+        const chatId = params && params.chatId;
+        const access = await requireMember(ctx, chatId);
+        if (!access) return { error: await tForSession('Access denied', ctx.sessionID) };
+
+        const languageId = (params && params.languageId) ? String(params.languageId) : null;
+        if (languageId) {
+            const langs = await languageIndex();
+            if (!langs.byId.has(languageId)) return { error: await tForSession('msg_translate_no_language', ctx.sessionID) };
+        }
+        await Members().update(
+            { outgoingLanguageId: languageId },
+            { where: { chatId: chatId, userId: access.user.UID } }
+        );
+        return { success: true, outgoingLanguageId: languageId };
+    }
+
     return {
         loadChats, loadMessages, sendMessage, markRead,
         getUnreadTotal, setActiveChat,
+        composerState, setOutgoingLanguage,
         // Не RPC, а внутренний метод для бинарного маршрута (server.js).
         readAttachment,
         maxAttachmentBytes

@@ -23,6 +23,296 @@ function isEmptyDateValue(v) {
 }
 
 // ─────────────────────────────────────────────────────────────────────
+// Представление записи: чем показать выбранную строку справочника.
+//
+// Зеркало серверного `pickDisplayValue` (drive_root/globalServerContext.js):
+// поле представления, а если оно не заполнено — имя, номер, код, UID. Правило
+// обязано быть ОДНИМ на обе стороны. Пример расхождения: у пользователей поле
+// представления — `presentation` (а `name` — это логин, его подменять нельзя).
+// Пока клиент считал «не заполнено» только `undefined`, запись с пустым
+// представлением приезжала как `null`, и после выбора в поле оставалась пустота,
+// хотя в самом списке выбора (его собирает сервер) логин был виден.
+const RECORD_DISPLAY_FALLBACK_FIELDS = ['name', 'number', 'code'];
+
+function pickRecordDisplay(record, displayField) {
+    if (!record) return '';
+    const isBlank = v => v === null || v === undefined || String(v).trim() === '';
+    const field = displayField || 'name';
+    if (!isBlank(record[field])) return record[field];
+    for (const f of RECORD_DISPLAY_FALLBACK_FIELDS) {
+        if (!isBlank(record[f])) return record[f];
+    }
+    return record.UID !== undefined && record.UID !== null ? String(record.UID) : '';
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Снимок интерфейса: сериализация дерева узлов и его отрисовка в картинку.
+// Публикуется как MySpace.snapshot — там же описано, почему это два метода,
+// а не один, и чего этот способ не умеет.
+
+/**
+ * Файл (тот же origin) → data-URI. Пусто, если не прочитался.
+ *
+ * Кэш на снимок обязателен: один и тот же значок стоит в панели задач, в меню и на
+ * десятке кнопок, и без него мы бы загружали и кодировали его десятки раз.
+ */
+async function inlineResource(url, cache) {
+    if (cache && cache.has(url)) return cache.get(url);
+    const task = inlineResourceUncached(url);
+    if (cache) cache.set(url, task);
+    return task;
+}
+
+async function inlineResourceUncached(url) {
+    try {
+        const resp = await fetch(url, { credentials: 'same-origin' });
+        if (!resp.ok) return '';
+        const blob = await resp.blob();
+        return await new Promise((resolve) => {
+            const fr = new FileReader();
+            fr.onload = () => resolve(String(fr.result || ''));
+            fr.onerror = () => resolve('');
+            fr.readAsDataURL(blob);
+        });
+    } catch (e) {
+        return '';
+    }
+}
+
+/**
+ * Текст всех таблиц стилей страницы.
+ *
+ * Встраивать стили ОБЯЗАТЕЛЬНО: копия дерева узлов попадёт внутрь картинки, где
+ * никаких внешних файлов уже не будет, и без стилей интерфейс превратился бы в
+ * столбик чёрного текста на белом. Правила читаются из `document.styleSheets`
+ * (свой origin — доступны); если браузер их закрыл, файл догружается запросом.
+ */
+async function collectStyleText() {
+    const parts = [];
+    for (const sheet of Array.from(document.styleSheets || [])) {
+        let rules = null;
+        try { rules = sheet.cssRules; } catch (e) { rules = null; }
+        if (rules) {
+            parts.push(Array.from(rules).map(r => r.cssText).join('\n'));
+        } else if (sheet.href) {
+            try {
+                const resp = await fetch(sheet.href, { credentials: 'same-origin' });
+                if (resp.ok) parts.push(await resp.text());
+            } catch (e) { /* недоступна — обойдёмся без неё */ }
+        }
+    }
+    return parts.join('\n');
+}
+
+/** Значения полей ввода живут в свойствах, а не в разметке — переносим в атрибуты. */
+function freezeFieldValue(src, dst) {
+    const tag = (src.tagName || '').toLowerCase();
+    if (tag === 'input') {
+        if (src.type === 'checkbox' || src.type === 'radio') {
+            if (src.checked) dst.setAttribute('checked', 'checked');
+            else dst.removeAttribute('checked');
+        } else {
+            dst.setAttribute('value', src.value != null ? src.value : '');
+        }
+    } else if (tag === 'textarea') {
+        dst.textContent = src.value != null ? src.value : '';
+    } else if (tag === 'select') {
+        const opts = dst.querySelectorAll('option');
+        Array.from(src.options || []).forEach((o, i) => {
+            if (!opts[i]) return;
+            if (o.selected) opts[i].setAttribute('selected', 'selected');
+            else opts[i].removeAttribute('selected');
+        });
+    }
+}
+
+/**
+ * Копия интерфейса, отвязанная от страницы и от сервера.
+ *
+ * @param {Element} [root] — что снимаем (по умолчанию весь документ)
+ * @param {{exclude?: Element|Element[], css?: string}} [opts] — `exclude`: узлы, которых
+ *        на снимке быть не должно (окно, из которого снимок и запрошен: показывать
+ *        собеседнику само окно переписки незачем, а сворачивать его ради этого —
+ *        мигание на ровном месте)
+ * @returns {Promise<{html: string, css: string, width: number, height: number}>}
+ */
+async function serializeInterface(root, opts) {
+    const o = opts || {};
+    const host = root || document.body;
+    const rect = host.getBoundingClientRect();
+    const width = Math.max(1, Math.ceil(rect.width || window.innerWidth));
+    const height = Math.max(1, Math.ceil(rect.height || window.innerHeight));
+
+    const clone = host.cloneNode(true);
+
+    // Обходим оригинал и копию ПАРАМИ: у копии нет ни значений полей, ни
+    // содержимого canvas — всё это живёт в свойствах, а не в разметке.
+    const srcNodes = host.querySelectorAll('*');
+    const dstNodes = clone.querySelectorAll('*');
+
+    // Исключённые убираем ПЕРВЫМИ: иначе мы бы ещё и встраивали ресурсы того,
+    // чего на снимке не будет.
+    const excluded = (Array.isArray(o.exclude) ? o.exclude : (o.exclude ? [o.exclude] : [])).filter(Boolean);
+    if (excluded.length) {
+        for (let i = 0; i < srcNodes.length; i++) {
+            if (excluded.indexOf(srcNodes[i]) < 0) continue;
+            const dst = dstNodes[i];
+            if (dst && dst.parentNode) dst.parentNode.removeChild(dst);
+        }
+    }
+
+    const pending = [];
+    const resourceCache = new Map();
+    for (let i = 0; i < srcNodes.length; i++) {
+        const src = srcNodes[i];
+        const dst = dstNodes[i];
+        if (!dst) break;
+        // Узел вырезан вместе с исключённым поддеревом — обрабатывать нечего.
+        if (excluded.length && !clone.contains(dst)) continue;
+        const tag = (src.tagName || '').toLowerCase();
+
+        if (tag === 'img') {
+            const url = src.currentSrc || src.src;
+            if (url && !/^data:/.test(url)) {
+                pending.push(inlineResource(url, resourceCache).then(data => {
+                    if (data) dst.setAttribute('src', data);
+                    // srcset внутри картинки не нужен и только сбивает выбор файла.
+                    dst.removeAttribute('srcset');
+                }));
+            }
+        } else if (tag === 'canvas') {
+            // Нарисованное на холсте в разметку не попадает вовсе — подменяем
+            // картинкой, иначе календарь и шахматка окажутся пустыми прямоугольниками.
+            try {
+                const img = document.createElement('img');
+                img.setAttribute('src', src.toDataURL('image/png'));
+                img.setAttribute('width', String(src.width));
+                img.setAttribute('height', String(src.height));
+                img.setAttribute('style', src.getAttribute('style') || '');
+                if (dst.parentNode) dst.parentNode.replaceChild(img, dst);
+            } catch (e) { /* «запачканный» холст не отдаёт данные — оставляем как есть */ }
+        } else if (tag === 'input' || tag === 'textarea' || tag === 'select') {
+            freezeFieldValue(src, dst);
+        }
+    }
+    await Promise.all(pending);
+
+    const css = (o.css !== undefined) ? o.css : await collectStyleText();
+
+    // Скрипты в снимок не идут: внутри картинки они не выполняются, а разметку
+    // раздувают и ломают (их содержимое — не XML).
+    for (const s of Array.from(clone.querySelectorAll('script'))) {
+        if (s.parentNode) s.parentNode.removeChild(s);
+    }
+
+    // Содержимое кладётся в <div>, а не отдаётся элементом as is: снимают обычно
+    // <body>, а <body> внутри <foreignObject> — не то дерево, которое браузер
+    // согласится нарисовать.
+    const box = document.createElement('div');
+    box.setAttribute('style', 'width:' + width + 'px;height:' + height + 'px;overflow:hidden');
+    while (clone.firstChild) box.appendChild(clone.firstChild);
+
+    // XMLSerializer, а не innerHTML: содержимое картинки — это XML, и незакрытый
+    // <br> или <img> сделал бы её нечитаемой целиком.
+    const html = new XMLSerializer().serializeToString(box);
+    return { html, css, width, height };
+}
+
+/**
+ * Разобрать собранную разметку и вернуть текст ошибки XML (или пусто).
+ *
+ * Картинка, которая не разобралась, не загружается МОЛЧА: `img.onerror` не
+ * рассказывает ни строки, ни причины. Поэтому разбираем сами и пишем в журнал,
+ * что именно не понравилось, — иначе искать нечего.
+ */
+function xmlErrorOf(markup) {
+    try {
+        const doc = new DOMParser().parseFromString(markup, 'image/svg+xml');
+        const err = doc.querySelector('parsererror');
+        return err ? (err.textContent || 'XML parse error').trim().slice(0, 500) : '';
+    } catch (e) {
+        return (e && e.message) || 'XML parse error';
+    }
+}
+
+/**
+ * Отрисовать интерфейс в картинку.
+ *
+ * @param {{root?: Element, exclude?: Element|Element[], scale?: number,
+ *          background?: string, type?: string}} [opts] — `scale`: плотность снимка
+ *          (1–4). По умолчанию плотность экрана, но не ниже 2. Файл растёт как
+ *          квадрат плотности, поэтому выше 2 стоит поднимать осознанно.
+ * @returns {Promise<Blob>} PNG
+ */
+async function captureInterface(opts) {
+    const o = opts || {};
+    const snap = await serializeInterface(o.root, o);
+    // Плотность снимка. По умолчанию — плотность экрана, но не ниже двух: снимок
+    // разглядывают развёрнутым на весь экран, то есть С УВЕЛИЧЕНИЕМ, и картинка
+    // «пиксель в пиксель» выглядит мыльной ровно поэтому.
+    //
+    // Масштаб задаётся РАЗМЕРОМ САМОЙ КАРТИНКИ (`width`/`height` при логическом
+    // `viewBox`), а не растягиванием при отрисовке: браузер растрирует SVG в его
+    // собственном размере, и растянутый потом растр как раз и даёт мыло.
+    const scale = Math.max(1, Math.min(Number(o.scale) || Math.max(window.devicePixelRatio || 1, 2), 4));
+    const background = o.background || '#008080';
+    const outW = Math.round(snap.width * scale);
+    const outH = Math.round(snap.height * scale);
+
+    // Стили — в CDATA. Внутри XML содержимое <style> разбирается как разметка, и
+    // первый же `&` или `<` в правилах (а они там есть: `content`, экранированные
+    // символы, url со знаком вопроса) обрушил бы картинку целиком. Закрывающую
+    // последовательность в самом тексте разрываем — вложенных CDATA не бывает.
+    const cssSafe = String(snap.css || '').replace(/\]\]>/g, ']]]]><![CDATA[>');
+
+    const svg =
+        '<svg xmlns="http://www.w3.org/2000/svg" width="' + outW + '" height="' + outH +
+        '" viewBox="0 0 ' + snap.width + ' ' + snap.height + '">' +
+        '<foreignObject x="0" y="0" width="100%" height="100%">' +
+        '<div xmlns="http://www.w3.org/1999/xhtml" style="width:' + snap.width + 'px;height:' + snap.height +
+        'px;background:' + background + ';overflow:hidden">' +
+        '<style type="text/css"><![CDATA[\n' + cssSafe + '\n]]></style>' +
+        snap.html +
+        '</div></foreignObject></svg>';
+
+    const xmlError = xmlErrorOf(svg);
+    if (xmlError) {
+        console.error('[snapshot] разметка не разобралась как XML:', xmlError);
+        throw new Error('snapshot: разметка не разобралась как XML — см. журнал');
+    }
+
+    const url = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+
+    const img = await new Promise((resolve, reject) => {
+        const im = new Image();
+        im.onload = () => resolve(im);
+        im.onerror = () => {
+            // Разметка валидна, а картинка не загрузилась — почти всегда размер:
+            // сотня встроенных значков и полный текст стилей дают мегабайты.
+            console.error('[snapshot] картинка не загрузилась; длина разметки:', url.length);
+            reject(new Error('snapshot: разметку не удалось отрисовать (длина ' + url.length + ')'));
+        };
+        im.src = url;
+    });
+
+    const canvas = document.createElement('canvas');
+    canvas.width = outW;
+    canvas.height = outH;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = background;
+    ctx.fillRect(0, 0, outW, outH);
+    // Один к одному: картинка уже нужного размера, растягивать её нечем и незачем.
+    ctx.drawImage(img, 0, 0, outW, outH);
+
+    return await new Promise((resolve, reject) => {
+        canvas.toBlob(
+            (blob) => blob ? resolve(blob) : reject(new Error('snapshot: картинка не собралась')),
+            o.type || 'image/png'
+        );
+    });
+}
+
+// ─────────────────────────────────────────────────────────────────────
 // Иконки: выбор файла под нужный размер.
 //
 // Зачем в ядре. Иконку в интерфейс вставляли девять разных мест, и каждое
@@ -1006,6 +1296,36 @@ if (typeof window !== 'undefined') {
             },
 
             /**
+             * Снимок интерфейса.
+             *
+             *   await MySpace.snapshot.serialize()  → { html, css, width, height }
+             *   await MySpace.snapshot.capture()    → Blob (PNG)
+             *
+             * ── Почему это ДВА метода, а не один ────────────────────────────
+             * Снимка экрана средствами браузера мы не делаем намеренно: `getDisplayMedia`
+             * каждый сеанс спрашивает разрешение своим диалогом, а нас интересует только
+             * НАШЕ приложение, и оно целиком наше собственное дерево узлов. Поэтому
+             * страница не «фотографируется», а ПЕРЕРИСОВЫВАЕТСЯ.
+             *
+             * Ценное здесь — `serialize`: копия интерфейса, отвязанная и от живой
+             * страницы, и от сервера (стили, картинки, содержимое canvas и значения
+             * полей встроены внутрь). Ровно это понадобится удалённому помощнику, чтобы
+             * показать чужой экран у себя; растеризация (`capture`) — лишь один из её
+             * потребителей, и держать их одним куском значило бы, что второй потребитель
+             * начнёт с копирования кода.
+             *
+             * ── Чего этот способ не умеет ──────────────────────────────────
+             * Он рисует ДОКУМЕНТ, а не экран: чужих окон, курсора и системных диалогов
+             * на снимке не будет, а оформление возможно неточное — шрифт подставляется
+             * системный, а всё, что браузер рисует мимо DOM (нативные выпадающие
+             * списки), не воспроизводится.
+             */
+            snapshot: {
+                serialize: (root, opts) => serializeInterface(root, opts),
+                capture:   (opts) => captureInterface(opts)
+            },
+
+            /**
              * Показать пуш-уведомление. Точка входа ядра; сам стек уведомлений
              * рисует приложение `notifications` (оно подставляет себя в
              * `MySpace.notifications` при загрузке).
@@ -1033,6 +1353,53 @@ if (typeof window !== 'undefined') {
             /** Свойства приложения из его манифеста (config.json). */
             appConfig(name) { return (window.MySpaceAppConfig || {})[name] || null; },
 
+            /**
+             * Доступность приложения ЭТОМУ пользователю.
+             *
+             * Роль решает, есть ли приложение у всех с этой ролью (`config.json` →
+             * `access`), а здесь — персональный выключатель: приложение объявило
+             * `enabledBySetting`, и настройка у человека выключена. Тогда значка в трее
+             * нет и `MySpace.open` отказывает.
+             *
+             *   MySpace.appAvailability.isEnabled('messenger')   → true/false
+             *   await MySpace.appAvailability.ready              → список получен
+             *
+             * Отдельным запросом, а не в бандле `/app/loadApps`: бандл кэшируется по
+             * ключу «роль|язык», и персональное в нём досталось бы другому человеку с
+             * той же ролью (тот же запрет, что для `MySpace.state`).
+             *
+             * До ответа сервера приложение считается доступным: моргнуть значком и убрать
+             * его — мелкая неприятность, а спрятать у всех работающий мессенджер на
+             * каждой медленной загрузке — поломка.
+             */
+            appAvailability: (function () {
+                let disabled = null;   // Set<string> | null (список ещё не получен)
+
+                const api = {
+                    /** Список выключенных приложений получен (промис). */
+                    ready: Promise.resolve(),
+
+                    /** Запросить список. Зовётся ядром при старте; приложениям звать не нужно. */
+                    load() {
+                        api.ready = callServerMethod('settings', 'disabledApps', {})
+                            .then(list => { disabled = new Set(Array.isArray(list) ? list : []); return api; })
+                            .catch(e => {
+                                console.warn('[MySpace.appAvailability] список не получен:', e && e.message);
+                                disabled = new Set();
+                                return api;
+                            });
+                        return api.ready;
+                    },
+
+                    isEnabled(appName) { return !disabled || !disabled.has(appName); },
+
+                    /** Имена выключенных приложений (пусто, пока список не получен). */
+                    disabledList() { return disabled ? Array.from(disabled) : []; }
+                };
+
+                return api;
+            })(),
+
             register(name, descriptor) {
                 apps[name] = descriptor;
                 try { if (descriptor && typeof descriptor.init === 'function') descriptor.init(); } catch (e) { console.error('MySpace.register.init error', e); }
@@ -1041,6 +1408,13 @@ if (typeof window !== 'undefined') {
             async open(name, params, options) {
                 const desc = apps[name];
                 if (!desc) throw new Error('MySpace: app not registered: ' + name);
+
+                // Приложение, выключенное этому пользователю, не открывается ничем:
+                // ни значком в трее, ни пунктом меню, ни кликом по уведомлению. Иначе
+                // «выключено» означало бы только «значка не видно».
+                if (!this.appAvailability.isEnabled(name)) {
+                    throw new Error('MySpace: app disabled for this user: ' + name);
+                }
 
                 // Бегущий прогрессбар на время открытия окна — пользователь сразу
                 // получает отклик, пока createInstance тянет данные с сервера.
@@ -1187,6 +1561,9 @@ if (typeof window !== 'undefined') {
     // приложения читают состояние синхронно (`MySpace.state.get`), а кому оно нужно
     // на самом старте — ждёт `MySpace.state.ready`. На экране входа вернётся пусто.
     try { window.MySpace.state.load(); } catch (e) { console.warn('[MySpace.state] старт:', e && e.message); }
+    // Персональная доступность приложений — тем же приёмом и в то же время: трей
+    // ждёт этот список, прежде чем рисовать значки.
+    try { window.MySpace.appAvailability.load(); } catch (e) { console.warn('[MySpace.appAvailability] старт:', e && e.message); }
 }
 
 class Form extends UIObject {
@@ -2817,6 +3194,17 @@ class DataForm extends Form {
         }
     }
 
+    /**
+     * Есть ли на форме несохранённые правки.
+     *
+     * Именованный метод, а не чтение `_modified` из прикладного кода: флаг внутренний,
+     * его выставляют семь разных мест, и завязываться на имя поля снаружи — тот же
+     * лазанье в `controlsMap`, от которого ушли в `getControl`.
+     */
+    isModified() {
+        return !!this._modified;
+    }
+
     // Mark form as modified/unmodified and update title with "*"
     setModified(val) {
         // Не выставляем modified=true пока идёт программное обновление полей (refresh после сохранения)
@@ -3684,7 +4072,13 @@ class DataForm extends Form {
                         const formSelf = this;
                         const handler = (ev) => {
                             try {
-                                const newVal = (typeof ctrl.getText === 'function') ? ctrl.getText() : (ctrl.element ? ctrl.element.value : undefined);
+                                // В данные формы идёт ЗНАЧЕНИЕ, а не подпись: `getText()`
+                                // у списка отдаёт caption («Пользователь»), а значение —
+                                // код («user»). Расхождение всплывало там, где данные
+                                // читают напрямую: `visibleWhen` вкладки и подстановка
+                                // {data.поле} в параметры обработчика.
+                                const newVal = (typeof ctrl.getValue === 'function') ? ctrl.getValue()
+                                    : ((typeof ctrl.getText === 'function') ? ctrl.getText() : (ctrl.element ? ctrl.element.value : undefined));
                                 if (!formSelf._dataMap) formSelf._dataMap = {};
                                 if (!formSelf._dataMap[fieldKey]) formSelf._dataMap[fieldKey] = { name: fieldKey, value: newVal };
                                 else formSelf._dataMap[fieldKey].value = newVal;
@@ -3850,11 +4244,25 @@ class DataForm extends Form {
                 cb.setCaption(caption);
                 cb.Draw(contentArea);
                 try { if (item.data && cb.element) cb.element.dataset.field = item.data; } catch (e) {}
-                // Track checkbox changes for dirty flag
+                // Правка галочки — в данные формы И в флаг изменённости.
+                //
+                // Запись в `_dataMap` тут была пропущена: флажок оказался ЕДИНСТВЕННЫМ
+                // полем ввода, которое своё значение в данные формы не отдавало (сравни
+                // ветки 'textbox', 'color', 'recordSelector'). Из-за этого данные формы
+                // навсегда оставались такими, какими приехали при открытии: любая
+                // перерисовка по данным (а состав полей формы настроек перечитывается
+                // при смене пользователя) возвращала на экран ЧУЖУЮ галочку.
                 try {
                     if (item.data && cb.element) {
+                        const fieldKey = item.data;
                         const formSelf = this;
                         cb.element.addEventListener('change', () => {
+                            try {
+                                const nv = cb.getValue();
+                                if (!formSelf._dataMap) formSelf._dataMap = {};
+                                if (!formSelf._dataMap[fieldKey]) formSelf._dataMap[fieldKey] = { name: fieldKey, value: nv };
+                                else formSelf._dataMap[fieldKey].value = nv;
+                            } catch (_) {}
                             try { if (!item.suppressModified && typeof formSelf.setModified === 'function') formSelf.setModified(true); } catch (_) {}
                         });
                     }
@@ -4388,6 +4796,24 @@ class DataForm extends Form {
                     if (item.name) this.controlsMap[item.name] = list;
                 } catch (e) {
                     console.error('Error creating itemList control', e);
+                }
+                break;
+            }
+            case 'image': {
+                try {
+                    const pic = new Picture(contentArea, properties || {});
+                    let picSrc = item.value;
+                    if ((picSrc === null || picSrc === undefined) && item.data && this._dataMap
+                            && Object.prototype.hasOwnProperty.call(this._dataMap, item.data)) {
+                        const rec = this._dataMap[item.data];
+                        picSrc = (rec && rec.value !== undefined) ? rec.value : rec;
+                    }
+                    if (picSrc) pic.setSrc(picSrc);
+                    pic.Draw(contentArea);
+                    try { if (item.data && pic.element) pic.element.dataset.field = item.data; } catch (e) {}
+                    { const ctrlKey = item.name || item.data; if (ctrlKey) this.registerControl(ctrlKey, pic); }
+                } catch (e) {
+                    console.error('Error creating image control', e);
                 }
                 break;
             }
@@ -5046,9 +5472,48 @@ class Button extends UIObject {
         // действие. Недоступная кнопка видна, но не нажимается.
         this.enabled = (properties.enabled !== undefined) ? !!properties.enabled : true;
 
+        // ЗАЛИПШАЯ кнопка — включённый режим: она остаётся вдавленной и после того,
+        // как палец отпустили. Это состояние самой кнопки, а не украшение снаружи:
+        // рельеф рисуется ИНЛАЙНОВЫМИ стилями (см. _applyRelief), и класс в таблице
+        // стилей их не перебьёт, а отпускание мыши всё равно вернуло бы выпуклый вид.
+        this.pressed = (properties.pressed !== undefined) ? !!properties.pressed : false;
+
         this.tooltipTimeout = null;
         this.tooltipElement = null;
         this.parentElement = parentElement || null;
+    }
+
+    /**
+     * Рельеф кнопки: вдавленная или выпуклая. ЕДИНСТВЕННОЕ место, где живут эти
+     * четыре рамки — до этого они были переписаны в четырёх местах (отрисовка,
+     * перечитывание цветов, нажатие, отпускание) и разъезжались.
+     */
+    _applyRelief(sunken) {
+        if (!this.element) return;
+        const base = UIObject.getClientConfigValue('defaultColor', '#c0c0c0');
+        const light = UIObject.brightenColor(base, 60);
+        const dark = UIObject.brightenColor(base, -60);
+        const tl = sunken ? dark : light;
+        const br = sunken ? light : dark;
+        this.element.style.borderTop = `2px solid ${tl}`;
+        this.element.style.borderLeft = `2px solid ${tl}`;
+        this.element.style.borderRight = `2px solid ${br}`;
+        this.element.style.borderBottom = `2px solid ${br}`;
+    }
+
+    /**
+     * Залипание: кнопка остаётся вдавленной, пока режим включён.
+     * Отпускание мыши её больше не «отжимает» — см. обработчик mouseup.
+     */
+    setPressed(on) {
+        this.pressed = !!on;
+        if (this.element) this.element.classList.toggle('ui-button-sticky-on', this.pressed);
+        this._applyRelief(this.pressed);
+        return this;
+    }
+
+    isPressed() {
+        return !!this.pressed;
     }
 
     /** Включить/выключить кнопку (визуально + блокировка нажатия). */
@@ -5216,10 +5681,8 @@ class Button extends UIObject {
             const btnLight = UIObject.brightenColor(btnBase, 60);
             const btnDark = UIObject.brightenColor(btnBase, -60);
             this.element.style.backgroundColor = btnBase;
-            this.element.style.borderTop = `2px solid ${btnLight}`;
-            this.element.style.borderLeft = `2px solid ${btnLight}`;
-            this.element.style.borderRight = `2px solid ${btnDark}`;
-            this.element.style.borderBottom = `2px solid ${btnDark}`;
+            this._applyRelief(this.pressed);
+            if (this.pressed) this.element.classList.add('ui-button-sticky-on');
             this.element.style.fontFamily = 'MS Sans Serif, sans-serif';
             this.element.style.fontSize = '11px';
             this.element.style.cursor = 'default';
@@ -5234,30 +5697,22 @@ class Button extends UIObject {
                 try {
                     if (!this.element) return;
                     const base = UIObject.getClientConfigValue('defaultColor', btnBase);
-                    const light = UIObject.brightenColor(base, 60);
-                    const dark = UIObject.brightenColor(base, -60);
                     this.element.style.backgroundColor = base;
-                    this.element.style.borderTop = `2px solid ${light}`;
-                    this.element.style.borderLeft = `2px solid ${light}`;
-                    this.element.style.borderRight = `2px solid ${dark}`;
-                    this.element.style.borderBottom = `2px solid ${dark}`;
+                    // Рельеф — по состоянию, а не «всегда выпуклый»: иначе перечитывание
+                    // цветов отжимало бы залипшую кнопку.
+                    this._applyRelief(this.pressed);
                 } catch (e) {}
             });
 
             // Press effect
             this.element.addEventListener('mousedown', (e) => {
-                this.element.style.borderTop = '2px solid #808080';
-                this.element.style.borderLeft = '2px solid #808080';
-                this.element.style.borderRight = '2px solid #ffffff';
-                this.element.style.borderBottom = '2px solid #ffffff';
+                this._applyRelief(true);
                 this.onMouseDown(e);
 
                 // Handler for mouse up anywhere
                 const mouseUpHandler = (e) => {
-                    this.element.style.borderTop = '2px solid #ffffff';
-                    this.element.style.borderLeft = '2px solid #ffffff';
-                    this.element.style.borderRight = '2px solid #808080';
-                    this.element.style.borderBottom = '2px solid #808080';
+                    // Возвращаемся в СВОЁ состояние: залипшая кнопка остаётся вдавленной.
+                    this._applyRelief(this.pressed);
                     this.onMouseUp(e);
                     document.removeEventListener('mouseup', mouseUpHandler);
                 };
@@ -8015,8 +8470,7 @@ class TextBox extends FormInput {
 
             const setSelected = (rec) => {
                 try {
-                    const displayField = selMeta.displayField || 'name';
-                    const display = (rec && (rec[displayField] !== undefined)) ? rec[displayField] : (rec && rec.name) || (rec && rec.UID) || '';
+                    const display = pickRecordDisplay(rec, selMeta.displayField);
                     try { if (typeof this.setText === 'function') this.setText(String(display)); } catch (_) { try { if (this.element) this.element.value = display; } catch(_){} }
                     try { if (this.element) this.element.dispatchEvent(new Event('input', { bubbles: true })); } catch (_) {}
                 } catch (e) {}
@@ -8069,8 +8523,7 @@ class TextBox extends FormInput {
             const textBoxId = this.element ? this.element.id : 'unknown';
             console.log('[TextBox.handleSelection] Called for TextBox:', textBoxId, 'with record:', selectedRecord);
             const selMeta = this.selection || {};
-            const displayField = selMeta.displayField || 'name';
-            const display = (selectedRecord && (selectedRecord[displayField] !== undefined)) ? selectedRecord[displayField] : (selectedRecord && (selectedRecord.name || selectedRecord.UID)) || '';
+            const display = pickRecordDisplay(selectedRecord, selMeta.displayField);
 
             try {
                 // If it's a selection, prioritize storing the UID
@@ -9076,6 +9529,14 @@ class RadioButton extends UIObject {
  *
  * `getValue()` возвращает ЗНАЧЕНИЕ, а не подпись: старый класс отдавал текст кнопки,
  * и такое значение уехало бы в базу вместо кода варианта.
+ *
+ * ── Вид: кружки или ЗАЛИПАЮЩИЕ КНОПКИ ───────────────────────────────────────
+ * `"appearance": "buttons"` рисует те же варианты залипающими кнопками — выбранная
+ * остаётся вдавленной, как переключатель вида в панели инструментов Win95. Это тот
+ * же самый выбор одного из нескольких, а не другой контрол: заводить рядом второй
+ * класс значило бы иметь две реализации «выбрать ровно один вариант» и однажды их
+ * рассогласовать. В панели инструментов кружки неуместны — там кнопки, а смысл
+ * (взаимное исключение) обязан остаться прежним.
  */
 class RadioGroup extends UIObject {
     constructor(parentElement = null, properties = {}) {
@@ -9084,6 +9545,7 @@ class RadioGroup extends UIObject {
         this.items = [];
         this.value = null;
         this.readOnly = !!(properties && properties.readOnly);
+        this.appearance = (properties && properties.appearance === 'buttons') ? 'buttons' : 'radio';
         this.orientation = (properties && properties.orientation === 'horizontal') ? 'horizontal' : 'vertical';
         this.groupName = 'radiogroup_' + Math.random().toString(36).slice(2, 11);
         this.radios = [];
@@ -9092,11 +9554,16 @@ class RadioGroup extends UIObject {
         if (properties && properties.value !== undefined) this.value = properties.value;
     }
 
-    /** Варианты: [{ value, caption }] либо массив строк. */
+    /** Варианты: [{ value, caption, icon, tooltip }] либо массив строк. */
     setItems(items) {
         this.items = (items || []).map(it => (it && typeof it === 'object')
-            ? { value: it.value, caption: (it.caption !== undefined && it.caption !== null) ? String(it.caption) : String(it.value) }
-            : { value: it, caption: String(it) });
+            ? {
+                value: it.value,
+                caption: (it.caption !== undefined && it.caption !== null) ? String(it.caption) : String(it.value),
+                icon: it.icon || null,
+                tooltip: it.tooltip || null
+            }
+            : { value: it, caption: String(it), icon: null, tooltip: null });
         if (this.element) this._rebuild();
         return this;
     }
@@ -9141,19 +9608,66 @@ class RadioGroup extends UIObject {
     }
 
     _syncChecked() {
+        if (this.appearance === 'buttons') {
+            this.radios.forEach((btn, i) => {
+                const on = String(this.items[i] && this.items[i].value) === String(this.value);
+                if (btn && typeof btn.setPressed === 'function') btn.setPressed(on);
+            });
+            return;
+        }
         this.radios.forEach((r, i) => r.setChecked(String(this.items[i] && this.items[i].value) === String(this.value)));
     }
 
     _syncEnabled() {
         for (const r of this.radios) {
-            if (!r.element) continue;
-            r.element.style.opacity = this.readOnly ? '0.5' : '';
-            r.element.style.pointerEvents = this.readOnly ? 'none' : '';
+            const el = r && (r.element || (r.getElement && r.getElement()));
+            if (!el) continue;
+            el.style.opacity = this.readOnly ? '0.5' : '';
+            el.style.pointerEvents = this.readOnly ? 'none' : '';
         }
+    }
+
+    /** Выбрать вариант и оповестить подписчиков (общий путь для обоих видов). */
+    _pick(item) {
+        if (this.readOnly) return;
+        if (String(this.value) === String(item.value)) return;
+        this.value = item.value;
+        this._syncChecked();
+        // Служебный хук ядра (запись в _dataMap и признак «форма изменена») отдельно
+        // от `onChange`: `onChange` — это КЛИЕНТСКАЯ привязка из лейаута, форма
+        // присваивает её после отрисовки (_wireItemEvents) и затёрла бы обёртку.
+        if (typeof this._onValueChanged === 'function') {
+            try { this._onValueChanged(this.value, item.caption); } catch (e) { console.error('[RadioGroup] _onValueChanged', e); }
+        }
+        if (typeof this.onChange === 'function') {
+            try { this.onChange(this.value, item.caption); } catch (e) { console.error('[RadioGroup] onChange', e); }
+        }
+    }
+
+    /** Залипающие кнопки: тот же выбор, другой вид. */
+    _rebuildButtons() {
+        this.itemsBox.innerHTML = '';
+        this.radios = [];
+        for (const item of this.items) {
+            const btn = new Button(this.itemsBox, {
+                caption: item.caption,
+                icon: item.icon || undefined,
+                showIcon: !!item.icon,
+                showText: true,
+                tooltip: item.tooltip || item.caption,
+                height: 22
+            });
+            btn.Draw(this.itemsBox);
+            btn.onClick = () => this._pick(item);
+            this.radios.push(btn);
+        }
+        this._syncChecked();
+        this._syncEnabled();
     }
 
     _rebuild() {
         if (!this.itemsBox) return;
+        if (this.appearance === 'buttons') return this._rebuildButtons();
         this.itemsBox.innerHTML = '';
         this.radios = [];
         for (const item of this.items) {
@@ -9168,21 +9682,7 @@ class RadioGroup extends UIObject {
                 rb.element.style.position = 'static';
                 rb.element.style.marginRight = (this.orientation === 'horizontal') ? '12px' : '';
             }
-            rb.onClick = () => {
-                if (this.readOnly) return;
-                if (String(this.value) === String(item.value)) return;
-                this.value = item.value;
-                this._syncChecked();
-                // Служебный хук ядра (запись в _dataMap и признак «форма изменена») отдельно
-                // от `onChange`: `onChange` — это КЛИЕНТСКАЯ привязка из лейаута, форма
-                // присваивает её после отрисовки (_wireItemEvents) и затёрла бы обёртку.
-                if (typeof this._onValueChanged === 'function') {
-                    try { this._onValueChanged(this.value, item.caption); } catch (e) { console.error('[RadioGroup] _onValueChanged', e); }
-                }
-                if (typeof this.onChange === 'function') {
-                    try { this.onChange(this.value, item.caption); } catch (e) { console.error('[RadioGroup] onChange', e); }
-                }
-            };
+            rb.onClick = () => this._pick(item);
             this.radios.push(rb);
         }
         this._syncChecked();
@@ -9206,7 +9706,11 @@ class RadioGroup extends UIObject {
             this.itemsBox = document.createElement('div');
             this.itemsBox.style.display = 'flex';
             this.itemsBox.style.flexDirection = (this.orientation === 'horizontal') ? 'row' : 'column';
-            this.itemsBox.style.gap = (this.orientation === 'horizontal') ? '0' : '2px';
+            // Залипающие кнопки стоят встык, как сегменты одного переключателя:
+            // зазор между ними прочитался бы как «две независимые кнопки».
+            this.itemsBox.style.gap = (this.appearance === 'buttons')
+                ? '0'
+                : ((this.orientation === 'horizontal') ? '0' : '2px');
             this.element.appendChild(this.itemsBox);
 
             this._rebuild();
@@ -9869,6 +10373,13 @@ class CheckBox extends FormInput {
     }
 
     setChecked(value) {
+        // Мой элемент мог быть оторван от документа перерисовкой, а моё место на форме
+        // уже занимает другой, живой флажок (см. FormInput._liveTwin). Тогда запись
+        // «в себя» ушла бы в никуда, а на экране осталось бы прежнее состояние —
+        // ровно то, что видит пользователь как «галочка не обновилась».
+        const twin = (typeof this._liveTwin === 'function') ? this._liveTwin() : null;
+        if (twin && twin !== this && typeof twin.setChecked === 'function') { twin.setChecked(value); return; }
+
         this.checked = !!value;
         if (this.element) {
             const checkbox = this.element.querySelector('input[type="checkbox"]');
@@ -13602,6 +14113,78 @@ class ItemList extends UIObject {
  *   • отправка оптимистичная: сообщение видно сразу, `clientMsgId` служит
  *     ключом идемпотентности и связывает временную строку с подтверждённой.
  */
+/**
+ * Картинка — контрол лейаута (`"type": "image"`).
+ *
+ * Отдельный контрол, а не `<img>` руками в приложении: показать картинку на форме
+ * нужно не одному месту (просмотр вложения, предпросмотр логотипа, снимок экрана в
+ * заявке), и каждое место, рисующее её само, заводит свои правила вписывания и свой
+ * фон. `htmlViewer` для этого не годится — он поднимает iframe с отдельным
+ * документом ради одного изображения.
+ *
+ * Свойства: `src`, `fit` (`contain` — вписать целиком, по умолчанию; `cover` —
+ * заполнить с обрезкой; `none` — в натуральную величину), `background`, `alt`.
+ *
+ * Имя класса `Picture`, а не `Image`: `Image` — встроенный конструктор браузера,
+ * и им в этом же файле собирается снимок интерфейса.
+ */
+class Picture extends UIObject {
+    constructor(parentElement = null, properties = {}) {
+        super();
+        const p = properties || {};
+        this.parentElement = parentElement;
+        this.src = p.src || '';
+        this.fit = (p.fit === 'cover' || p.fit === 'none') ? p.fit : 'contain';
+        this.background = p.background || '#000000';
+        this.alt = p.alt || '';
+    }
+
+    setSrc(src) {
+        this.src = src || '';
+        if (this.imgElement) this.imgElement.src = this.src;
+        return this;
+    }
+
+    /** Единое имя для формы: лейаут кладёт значение так же, как в любое поле. */
+    setValue(src) { return this.setSrc(src); }
+    getValue() { return this.src; }
+
+    setAlt(text) {
+        this.alt = text || '';
+        if (this.imgElement) {
+            this.imgElement.alt = this.alt;
+            this.imgElement.title = this.alt;
+        }
+        return this;
+    }
+
+    Draw(container) {
+        if (!this.element) {
+            this.element = document.createElement('div');
+            this.element.className = 'ui-picture';
+            this.element.style.backgroundColor = this.background;
+
+            this.imgElement = document.createElement('img');
+            this.imgElement.className = 'ui-picture-img';
+            // `none` — натуральная величина: картинка может быть больше окна, и тогда
+            // её показывает прокрутка контейнера, а не обрезка по краю.
+            if (this.fit === 'none') {
+                this.imgElement.style.maxWidth = 'none';
+                this.imgElement.style.maxHeight = 'none';
+                this.element.style.overflow = 'auto';
+            } else {
+                this.imgElement.style.objectFit = this.fit;
+            }
+            this.imgElement.alt = this.alt;
+            this.imgElement.title = this.alt;
+            if (this.src) this.imgElement.src = this.src;
+            this.element.appendChild(this.imgElement);
+        }
+        if (container) container.appendChild(this.element);
+        return this.element;
+    }
+}
+
 class MessageFeed extends UIObject {
     constructor(parentElement = null, properties = {}) {
         super();
@@ -13612,6 +14195,10 @@ class MessageFeed extends UIObject {
         this.loadFn = p.loadFn || 'loadMessages';
         this.sendFn = p.sendFn || 'sendMessage';
         this.readFn = p.readFn || 'markRead';
+        // Состав панелей композера решает СЕРВЕР (права и справочник языков), клиент
+        // только рисует то, что ему разрешили. См. composerState в приложении.
+        this.stateFn = p.stateFn || 'composerState';
+        this.langFn = p.langFn || 'setOutgoingLanguage';
         this.attachmentUrl = p.attachmentUrl || '';
         this.pageSize = p.pageSize || 50;
         this.currentUserId = p.currentUserId || null;
@@ -13629,6 +14216,17 @@ class MessageFeed extends UIObject {
         this._emojiPopup = null;
         this._emojiKeyHandler = null;
         this._seq = 0;
+
+        // Перевод. Пока сервер не сказал иного — ничего не включено: панель,
+        // нарисованная «на всякий случай», обещает возможность, которой нет.
+        this._translate = { incoming: false, outgoing: false, languages: [], configured: false };
+        this._outgoingLanguageId = null;
+        // Показ ВХОДЯЩИХ: по умолчанию перевод — ради него настройку и включали.
+        this._showTranslations = true;
+        // Показ СВОИХ отправленных: по умолчанию то, что человек НАБРАЛ. Своё
+        // сообщение он узнаёт по своим же словам, а не по чужому языку; переключатели
+        // поэтому два, а не один — у входящих и исходящих «оригинал» это разные тексты.
+        this._showOwnOriginal = true;
     }
 
     // ── Отрисовка каркаса ────────────────────────────────────────────────────
@@ -13685,6 +14283,14 @@ class MessageFeed extends UIObject {
         const composer = document.createElement('div');
         composer.className = 'ui-msgfeed-composer';
 
+        // Верхняя панель: переключатель «оригиналы/переводы» и язык, на который
+        // переводим собеседнику. Пустая — скрыта целиком: полоса без кнопок
+        // выглядит как сломанный интерфейс.
+        this._topBar = document.createElement('div');
+        this._topBar.className = 'ui-toolbar compact ui-msgfeed-toolbar';
+        this._topBar.style.display = 'none';
+        composer.appendChild(this._topBar);
+
         // Выбранные вложения показываем ДО отправки — иначе человек не знает,
         // что именно уйдёт, и не может передумать.
         this._pendingEl = document.createElement('div');
@@ -13702,16 +14308,20 @@ class MessageFeed extends UIObject {
         row.appendChild(this._input);
 
         // Enter отправляет, Shift+Enter переносит строку — привычное поведение
-        // переписки; без него длинное сообщение не набрать.
+        // переписки; без него длинное сообщение не набрать. Enter всегда делает то
+        // же, что ГЛАВНАЯ кнопка: когда главная — «Отправить перевод», Enter шлёт
+        // перевод (см. _isTranslateDefault).
         this._input.addEventListener('keydown', (e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
-                this.send();
+                this.send({ translate: this._isTranslateDefault() });
             }
         });
 
+        // Кнопки справа от поля — тоже панель инструментов, а не голые кнопки в ряд:
+        // так обе группы composer'а выглядят одинаково и отделены от ленты.
         const actions = document.createElement('div');
-        actions.className = 'ui-msgfeed-actions';
+        actions.className = 'ui-toolbar compact ui-msgfeed-actions';
         row.appendChild(actions);
 
         // Смайлики и скрепка — кнопки только со значком (квадратные): подписи
@@ -13733,12 +14343,20 @@ class MessageFeed extends UIObject {
         this._attachBtn.Draw(actions);
         this._attachBtn.onClick = () => { if (this._fileInput) this._fileInput.click(); };
 
-        this._sendBtn = new Button(actions, {
-            showIcon: true, showText: true, caption: __t('msgfeed_send'),
-            icon: '/apps/general_icons/resources/public/16x16/send.png'
+        this._shotBtn = new Button(actions, {
+            showIcon: true, showText: false, height: 24,
+            icon: '/apps/general_icons/resources/public/16x16/screenshot.png',
+            tooltip: __t('msgfeed_screenshot')
         });
-        this._sendBtn.Draw(actions);
-        this._sendBtn.onClick = () => this.send();
+        this._shotBtn.Draw(actions);
+        this._shotBtn.onClick = () => this.attachScreenshot();
+
+        // Кнопка отправки пересобирается при смене настроек и языка, поэтому живёт
+        // в собственном гнезде: иначе её пришлось бы вылавливать среди соседей.
+        this._sendHost = document.createElement('span');
+        this._sendHost.style.display = 'inline-flex';
+        actions.appendChild(this._sendHost);
+        this._buildSendControl();
 
         this._fileInput = document.createElement('input');
         this._fileInput.type = 'file';
@@ -13751,13 +14369,198 @@ class MessageFeed extends UIObject {
         this._composerEl = composer;
     }
 
+    // ── Перевод: состав панелей ──────────────────────────────────────────────
+    /** Переводится ли отправка ПО УМОЛЧАНИЮ (главная кнопка и Enter). */
+    _isTranslateDefault() {
+        return !!(this._translate.outgoing && this._outgoingLanguageId);
+    }
+
+    /**
+     * Кнопка отправки: одна кнопка либо кнопка с выпадающим списком.
+     *
+     * Когда перевод исходящих включён и язык выбран, ГЛАВНОЕ действие — «Отправить
+     * перевод»: именно оно нужно в таком режиме чаще, оно же висит на Enter, а
+     * обычная отправка остаётся в выпадающем списке. Обратный порядок означал бы,
+     * что человек, включивший перевод, каждый раз лезет в меню.
+     */
+    _buildSendControl() {
+        if (!this._sendHost) return;
+        this._sendHost.innerHTML = '';
+
+        const sendIcon = '/apps/general_icons/resources/public/16x16/send.png';
+        // Высота — та же, что у смайлика и скрепки: кнопки одной панели обязаны
+        // стоять в одну линию, иначе панель выглядит собранной наспех.
+        const H = 24;
+        if (!this._isTranslateDefault()) {
+            this._sendBtn = new Button(this._sendHost, {
+                showIcon: true, showText: true, caption: __t('msgfeed_send'), icon: sendIcon, height: H
+            });
+            this._sendBtn.Draw(this._sendHost);
+            this._sendBtn.onClick = () => this.send({ translate: false });
+            return;
+        }
+
+        const translateIcon = '/apps/general_icons/resources/public/16x16/translate.png';
+        this._sendBtn = new SplitButton(this._sendHost, {
+            showIcon: true, showText: true, height: H,
+            caption: __t('msgfeed_send_translated'),
+            tooltip: __t('msgfeed_send_translated_hint'),
+            icon: translateIcon,
+            menu: [{
+                caption: __t('msgfeed_send'),
+                icon: sendIcon,
+                onClick: () => this.send({ translate: false })
+            }]
+        });
+        this._sendBtn.Draw(this._sendHost);
+        this._sendBtn.onClick = () => this.send({ translate: true });
+    }
+
+    /**
+     * Переключатель «перевод / оригинал» залипающими кнопками.
+     * @param {string} caption — чьи сообщения переключаем (входящие или свои)
+     * @param {boolean} translationOn — какой вариант выбран сейчас
+     * @param {function(boolean)} onPick — вызывается с «показывать перевод»
+     */
+    _buildViewSwitch(caption, translationOn, onPick) {
+        const label = document.createElement('span');
+        label.className = 'ui-msgfeed-toolbar-label';
+        label.textContent = caption + ':';
+        this._topBar.appendChild(label);
+
+        // Залипающие кнопки, а не кружки: это переключатель вида в панели
+        // инструментов. Смысл тот же — ровно один из вариантов.
+        const rg = new RadioGroup(this._topBar, {
+            appearance: 'buttons',
+            orientation: 'horizontal',
+            items: [
+                {
+                    value: 'translation',
+                    caption: __t('msgfeed_show_translations'),
+                    icon: '/apps/general_icons/resources/public/16x16/translate.png'
+                },
+                {
+                    value: 'original',
+                    caption: __t('msgfeed_show_originals'),
+                    icon: '/apps/general_icons/resources/public/16x16/document.png'
+                }
+            ]
+        });
+        rg.setValue(translationOn ? 'translation' : 'original');
+        rg.Draw(this._topBar);
+        rg.onChange = (value) => { onPick(value === 'translation'); this._rerenderAll(); };
+        return rg;
+    }
+
+    /** Пересобрать верхнюю панель по правам и выбранному языку. */
+    _buildTopBar() {
+        if (!this._topBar) return;
+        this._topBar.innerHTML = '';
+        this._viewSwitchIn = null;
+        this._viewSwitchOut = null;
+        this._langCombo = null;
+
+        const st = this._translate;
+        // Два переключателя, а не один: у входящих «оригинал» — это то, что написал
+        // собеседник, у своих — то, что набрал ты сам. Разные тексты и разные
+        // привычные значения по умолчанию.
+        if (st.incoming) {
+            this._viewSwitchIn = this._buildViewSwitch(
+                __t('msgfeed_incoming'), this._showTranslations,
+                (on) => { this._showTranslations = on; }
+            );
+        }
+        if (st.outgoing) {
+            this._viewSwitchOut = this._buildViewSwitch(
+                __t('msgfeed_outgoing'), !this._showOwnOriginal,
+                (on) => { this._showOwnOriginal = !on; }
+            );
+        }
+
+        if (st.outgoing) {
+            const label = document.createElement('span');
+            label.className = 'ui-msgfeed-toolbar-label';
+            label.textContent = __t('msgfeed_translate_to') + ':';
+            this._topBar.appendChild(label);
+
+            this._langCombo = new ComboBox(this._topBar, { width: 140, height: 22 });
+            this._langCombo.Draw(this._topBar);
+            // FormInput оборачивает поле в контейнер шириной 100% — в панели это
+            // растягивало список на всю строку и выталкивало его на следующую,
+            // хотя места рядом с подписью было вдоволь.
+            try {
+                const host = this._langCombo.containerElement;
+                if (host) { host.style.width = 'auto'; host.style.flex = '0 0 auto'; }
+            } catch (e) {}
+            this._langCombo.setItems((st.languages || []).map(l => ({ label: l.name, value: l.UID })));
+            const idx = (st.languages || []).findIndex(l => l.UID === this._outgoingLanguageId);
+            this._langCombo.setSelectedIndex(idx);
+            this._langCombo.onChange = (index, item) => {
+                const value = item && (item.value !== undefined ? item.value : item);
+                this._setOutgoingLanguage(value || null);
+            };
+        }
+
+        this._topBar.style.display = this._topBar.children.length ? '' : 'none';
+    }
+
+    /** Запомнить язык за собеседником (реквизит участия в чате, не состояние UI). */
+    async _setOutgoingLanguage(languageId) {
+        this._outgoingLanguageId = languageId || null;
+        this._buildSendControl();
+        if (!this.serverScript || !this.chatId) return;
+        try {
+            const res = await window.callServer(this.serverScript, this.langFn, {
+                chatId: this.chatId, languageId: this._outgoingLanguageId
+            });
+            if (res && res.error) showAlert(res.error);
+        } catch (e) {
+            console.error('[MessageFeed] язык собеседника не сохранён:', e && e.message);
+        }
+    }
+
+    /** Спросить у сервера состав панелей для текущего чата. */
+    async _loadComposerState() {
+        if (!this.serverScript || !this.chatId) return;
+        let st = null;
+        try {
+            st = await window.callServer(this.serverScript, this.stateFn, { chatId: this.chatId });
+        } catch (e) {
+            console.error('[MessageFeed] состав панелей не получен:', e && e.message);
+            return;
+        }
+        if (!st || st.error) return;
+        this._translate = {
+            incoming: !!st.translateIncoming,
+            outgoing: !!st.translateOutgoing,
+            languages: Array.isArray(st.languages) ? st.languages : [],
+            configured: !!st.configured
+        };
+        this._outgoingLanguageId = st.outgoingLanguageId || null;
+        this._buildTopBar();
+        this._buildSendControl();
+    }
+
+    /** Перерисовать все сообщения (сменился режим показа). */
+    _rerenderAll() {
+        for (const key of Object.keys(this._index)) {
+            const entry = this._index[key];
+            if (entry && entry.element) this._renderMessage(entry.data, entry.element);
+        }
+    }
+
     // ── Управление состоянием ────────────────────────────────────────────────
     setCurrentUser(userId) { this.currentUserId = userId || null; }
 
     setEnabled(on) {
         if (this._input) this._input.disabled = !on;
         const toggle = (btn) => { const el = btn && btn.getElement && btn.getElement(); if (el) el.disabled = !on; };
-        toggle(this._sendBtn); toggle(this._attachBtn); toggle(this._emojiBtn);
+        toggle(this._sendBtn); toggle(this._attachBtn); toggle(this._emojiBtn); toggle(this._shotBtn);
+        // Панели композера гаснут вместе с полем ввода: переключать вид и язык,
+        // когда чат не выбран, не над чем.
+        if (this._viewSwitchIn && typeof this._viewSwitchIn.setEnabled === 'function') this._viewSwitchIn.setEnabled(on);
+        if (this._viewSwitchOut && typeof this._viewSwitchOut.setEnabled === 'function') this._viewSwitchOut.setEnabled(on);
+        if (this._langCombo && this._langCombo.element) this._langCombo.element.style.pointerEvents = on ? '' : 'none';
     }
 
     /** Открыть чат: очистить ленту и загрузить последнюю страницу истории. */
@@ -13780,6 +14583,9 @@ class MessageFeed extends UIObject {
             return;
         }
         this.setEnabled(true);
+        // Состав панелей зависит от чата (язык запоминается за собеседником),
+        // поэтому спрашивается при каждом открытии, а не один раз при отрисовке.
+        await this._loadComposerState();
         await this._load({ before: null, prepend: false });
         this.scrollToBottom(false);
         // Отметку о прочтении здесь НЕ ставим намеренно: её ставит приложение
@@ -13925,10 +14731,17 @@ class MessageFeed extends UIObject {
             bubble.appendChild(this._renderAttachments(msg));
         }
 
-        if (msg.content) {
+        // Что показать. Оба текста уже здесь — переключение вида работает без похода
+        // на сервер, и «что было написано на самом деле» всегда в одном щелчке.
+        //   чужое сообщение: `content` — как прислали, `translation` — перевод мне;
+        //   своё:            `content` — как ушло, `original` — как я набрал.
+        let body;
+        if (own) body = (this._showOwnOriginal && msg.original) ? msg.original : msg.content;
+        else body = (this._showTranslations && msg.translation) ? msg.translation : msg.content;
+        if (body) {
             const text = document.createElement('div');
             text.className = 'ui-msg-text';
-            text.textContent = msg.content;
+            text.textContent = body;
             bubble.appendChild(text);
         }
 
@@ -13981,10 +14794,14 @@ class MessageFeed extends UIObject {
     }
 
     /**
-     * Фотография показывается миниатюрой; щелчок разворачивает её прямо в ленте
-     * и следующий щелчок сворачивает обратно. Отдельного окна просмотра нет
-     * намеренно: в переписке смотрят «на ходу», и модальное окно каждый раз
-     * выбрасывало бы человека из разговора.
+     * Фотография показывается миниатюрой; щелчок открывает её в отдельном окне
+     * просмотра, развёрнутом на весь экран.
+     *
+     * Раньше картинка разворачивалась ПРЯМО В ЛЕНТЕ. Это оказалось хуже по двум
+     * причинам: лента прыгала под уехавшим вниз разговором, а рассмотреть снимок
+     * экрана всё равно не удавалось — его ширина упиралась в ширину окна переписки.
+     * Отдельное окно не модальное: переписку за ним видно, и закрывается оно как
+     * любое другое.
      */
     _renderImage(att) {
         const img = document.createElement('img');
@@ -13993,8 +14810,9 @@ class MessageFeed extends UIObject {
         img.title = att.name || '';
         img.src = this._attUrl(att.UID, true);
         img.onclick = () => {
-            const full = img.classList.toggle('ui-msg-thumb-full');
-            img.src = this._attUrl(att.UID, !full);
+            const url = this._attUrl(att.UID, false);
+            MySpace.open('imageViewer', { url: url, name: att.name || '' })
+                .catch(e => console.error('[MessageFeed] окно просмотра не открылось:', e));
         };
         return img;
     }
@@ -14144,6 +14962,36 @@ class MessageFeed extends UIObject {
     _reportRead() { return this.markVisibleRead(); }
 
     // ── Вложения до отправки ─────────────────────────────────────────────────
+    /**
+     * Снять экран приложения и положить снимок во вложения.
+     *
+     * Своё окно в кадр не берём: показывать собеседнику саму переписку незачем.
+     * Сворачивать его ради этого тоже не надо — снимок собирается из дерева узлов,
+     * и достаточно исключить окно (решение владельца 13.09.2026); иначе окно на
+     * секунду мигало бы на ровном месте.
+     */
+    async attachScreenshot() {
+        const own = this.appForm && this.appForm.element ? this.appForm.element : null;
+        try {
+            const blob = await MySpace.snapshot.capture({ exclude: own });
+            const name = 'screen_' + this._stampForFile() + '.png';
+            this._takeFiles([new File([blob], name, { type: 'image/png' })]);
+        } catch (e) {
+            console.error('[MessageFeed] снимок не сделан:', e && e.message);
+            showAlert(__t('msgfeed_screenshot_failed'));
+            return;
+        }
+        if (this._input) this._input.focus();
+    }
+
+    /** Метка времени для имени файла: 2026-09-13_17-42-05. */
+    _stampForFile() {
+        const d = new Date();
+        const p = (n) => String(n).padStart(2, '0');
+        return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate())
+            + '_' + p(d.getHours()) + '-' + p(d.getMinutes()) + '-' + p(d.getSeconds());
+    }
+
     _takeFiles(fileList) {
         const files = Array.from(fileList || []);
         this._fileInput.value = '';
@@ -14192,10 +15040,21 @@ class MessageFeed extends UIObject {
     }
 
     // ── Отправка ─────────────────────────────────────────────────────────────
-    async send() {
+    /**
+     * Отправить набранное.
+     * @param {{translate?: boolean}} [opts] — `translate: true` шлёт ПЕРЕВОД на язык,
+     *        выбранный для собеседника. Собеседник получает обычное сообщение — о том,
+     *        что оно переведено, ему не сообщается (решение владельца 13.09.2026).
+     */
+    async send(opts) {
         if (!this.chatId || !this.serverScript) return;
         const content = (this._input.value || '').trim();
         if (!content && !this._pendingFiles.length) return;
+
+        // Переводим только если это РАЗРЕШЕНО и есть на какой язык. Иначе кнопка
+        // «Отправить перевод» молча отправляла бы оригинал.
+        const translateTo = (opts && opts.translate && this._isTranslateDefault())
+            ? this._outgoingLanguageId : null;
 
         // Ключ идемпотентности: по нему сервер отсекает повтор при ретрае, а
         // клиент находит свою временную строку, когда придёт подтверждение.
@@ -14232,7 +15091,8 @@ class MessageFeed extends UIObject {
 
         try {
             const res = await window.callServer(this.serverScript, this.sendFn, {
-                chatId: this.chatId, content: content, clientMsgId: clientMsgId, attachments: payload
+                chatId: this.chatId, content: content, clientMsgId: clientMsgId,
+                attachments: payload, translateTo: translateTo
             });
             if (res && res.error) {
                 showAlert(__t('msgfeed_send_error') + ' ' + res.error);

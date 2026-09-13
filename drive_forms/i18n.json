@@ -150,6 +150,60 @@
         "de": "Senden",
         "pl": "Wyślij"
     },
+    "msgfeed_screenshot": {
+        "en": "Attach a screenshot of the application",
+        "ru": "Прикрепить снимок экрана приложения",
+        "de": "Bildschirmfoto der Anwendung anhängen",
+        "pl": "Dołącz zrzut ekranu aplikacji"
+    },
+    "msgfeed_screenshot_failed": {
+        "en": "Could not take the screenshot",
+        "ru": "Снимок экрана сделать не удалось",
+        "de": "Das Bildschirmfoto konnte nicht erstellt werden",
+        "pl": "Nie udało się wykonać zrzutu ekranu"
+    },
+    "msgfeed_send_translated": {
+        "en": "Send translation",
+        "ru": "Отправить перевод",
+        "de": "Übersetzung senden",
+        "pl": "Wyślij tłumaczenie"
+    },
+    "msgfeed_send_translated_hint": {
+        "en": "The message is translated into the language chosen for the other party and sent as a normal message",
+        "ru": "Сообщение переводится на выбранный для собеседника язык и уходит как обычное сообщение",
+        "de": "Die Nachricht wird in die für den Gesprächspartner gewählte Sprache übersetzt und als normale Nachricht gesendet",
+        "pl": "Wiadomość jest tłumaczona na język wybrany dla rozmówcy i wysyłana jako zwykła wiadomość"
+    },
+    "msgfeed_show_translations": {
+        "en": "Translations",
+        "ru": "Переводы",
+        "de": "Übersetzungen",
+        "pl": "Tłumaczenia"
+    },
+    "msgfeed_show_originals": {
+        "en": "Originals",
+        "ru": "Оригиналы",
+        "de": "Originale",
+        "pl": "Oryginały"
+    },
+    "msgfeed_incoming": {
+        "en": "Incoming",
+        "ru": "Входящие",
+        "de": "Eingehend",
+        "pl": "Przychodzące"
+    },
+    "msgfeed_outgoing": {
+        "en": "Mine",
+        "ru": "Мои",
+        "de": "Meine",
+        "pl": "Moje"
+    },
+    "msgfeed_translate_to": {
+        "en": "Translate into",
+        "ru": "Переводить на",
+        "de": "Übersetzen nach",
+        "pl": "Tłumacz na"
+    },
     "msgfeed_send_error": {
         "en": "Message was not sent:",
         "ru": "Сообщение не отправлено:",

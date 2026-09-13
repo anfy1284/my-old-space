@@ -47,6 +47,12 @@
         "de": "Alles löschen",
         "pl": "Wyczyść wszystko"
     },
+    "settings_switch_save_confirm": {
+        "en": "Settings have been changed. Save them before switching? Cancel discards the changes.",
+        "ru": "Настройки изменены. Сохранить их перед переключением? «Отмена» — отказаться от правок.",
+        "de": "Die Einstellungen wurden geändert. Vor dem Wechsel speichern? «Abbrechen» verwirft die Änderungen.",
+        "pl": "Ustawienia zostały zmienione. Zapisać przed przełączeniem? „Anuluj” odrzuca zmiany."
+    },
     "settings_state_clear_confirm": {
         "en": "Clear remembered interface state for all users?",
         "ru": "Стереть запомненное состояние интерфейса у всех пользователей?",

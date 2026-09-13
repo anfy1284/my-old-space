@@ -448,6 +448,14 @@ td.ui-cell-readonly .ui-input-container > button { display: none !important; }
 .ui-button.ui-button-disabled { color: #808080; text-shadow: 1px 1px 0 var(--color-light); }
 .ui-button.ui-button-disabled img { opacity: 0.4; }
 
+/* Залипшая кнопка (Button.setPressed) — включённый режим в панели инструментов.
+   САМИ РАМКИ здесь не задаются: Button пишет рельеф инлайновыми стилями по цветам
+   из client_config (см. _applyRelief), и правило отсюда до них не дотянулось бы.
+   Остаётся только сдвиг содержимого на пиксель — так Win95 показывает нажатое. */
+.ui-button.ui-button-sticky-on {
+  padding-top: 1px; padding-left: 1px;
+}
+
 .ui-textbox { background-color:#ffffff; border-top:2px solid #808080; border-left:2px solid #808080; border-right:2px solid #ffffff; border-bottom:2px solid #ffffff; font-family: MS Sans Serif, sans-serif; font-size:11px; padding:2px 4px; outline:none; box-sizing:border-box; }
 
 .ui-label { display:inline-block; box-sizing:border-box; font-size:11px; font-family: MS Sans Serif, sans-serif; color:var(--color-text); }
@@ -1242,18 +1250,16 @@ input[type="checkbox"],
     margin-bottom: 3px;
 }
 
-/* Миниатюра; развёрнутая — та же картинка во всю ширину пузыря. */
+/* Миниатюра. Щелчок открывает картинку в окне просмотра (приложение imageViewer),
+   поэтому правила «развёрнутой миниатюры» здесь больше нет: разворачивалась она
+   прямо в ленте, лента от этого прыгала, а картинку всё равно упиралась в ширину
+   окна переписки. */
 .ui-msg-thumb {
     max-width: 120px;
     max-height: 120px;
-    cursor: default;
+    cursor: pointer;
     border: 1px solid #808080;
     align-self: flex-start;
-}
-
-.ui-msg-thumb-full {
-    max-width: 100%;
-    max-height: none;
 }
 
 .ui-msg-file {
@@ -1279,6 +1285,25 @@ input[type="checkbox"],
 .ui-msg-file-size {
     flex-shrink: 0;
     color: #404040;
+}
+
+/* ── Картинка на форме (контрол "image") ─────────────────────────────────── */
+/* Занимает всё отведённое место и центрирует изображение: просмотр вложения —
+   это окно, отданное картинке целиком, а не картинка, прижатая к левому краю. */
+.ui-picture {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    box-sizing: border-box;
+}
+
+.ui-picture-img {
+    max-width: 100%;
+    max-height: 100%;
+    display: block;
 }
 
 /* ── Поле ввода ──────────────────────────────────────────────────────────── */
@@ -1308,11 +1333,31 @@ input[type="checkbox"],
     box-shadow: inset 1px 1px 0px #000000, inset -1px -1px 0px var(--color-light);
 }
 
-.ui-msgfeed-actions {
-    display: flex;
+/* Обе панели композера — панели инструментов. Отступ слева НУЛЕВОЙ: общая
+   `.ui-toolbar` даёт padding 5px, и из-за него верхняя панель начиналась левее
+   поля ввода — соседние строки композера должны стоять по одной вертикали.
+   Селекторы из двух классов, чтобы перебить `.ui-toolbar.compact`. */
+.ui-toolbar.ui-msgfeed-actions {
     align-items: center;
     gap: 2px;
+    padding: 0;
     flex-shrink: 0;
+    flex-wrap: nowrap;
+}
+
+/* Верхняя панель: переключатель «оригиналы/переводы» и язык собеседника. */
+.ui-toolbar.ui-msgfeed-toolbar {
+    align-items: center;
+    gap: 4px;
+    padding: 0;
+    flex-wrap: wrap;
+}
+
+.ui-msgfeed-toolbar-label {
+    font-family: 'MS Sans Serif', Tahoma, Arial, sans-serif;
+    font-size: 11px;
+    margin-left: 8px;
+    white-space: nowrap;
 }
 
 /* Скрытое поле выбора файла — открывается кнопкой со скрепкой. */

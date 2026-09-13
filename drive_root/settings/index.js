@@ -192,6 +192,51 @@ function getUserSetting(userId, appName, key) {
     return getRecordSetting('user', userId, appName, key);
 }
 
+/**
+ * Одна настройка сразу по многим записям уровня — ОДНИМ запросом.
+ *
+ * Нужна там, где значение спрашивают про список людей, а не про одного: «кого из
+ * собеседников показывать в списке», «кому из участников слать уведомление».
+ * Вызов `getRecordSetting` в цикле дал бы по два запроса на каждого (значение +
+ * дефолты) — на десятке пользователей это уже заметно при каждом открытии окна.
+ *
+ * @param {string} scopeName — уровень (`user`, `hotel`, …); уровни без владельца сюда не годятся
+ * @param {string[]} recordIds — UID записей-владельцев
+ * @returns {Promise<Map<string, *>>} UID записи → значение (с учётом дефолтов)
+ */
+async function getRecordSettingMany(scopeName, recordIds, appName, key) {
+    const decl = declarationOf(appName, key, scopeName);
+    registry.ensureLoaded();
+    const scope = registry.getScope(scopeName);
+    if (!scope) throw new Error(`[settings] уровень "${scopeName}" не объявлен`);
+    if (scope.ownerless) throw new Error(`[settings] уровень "${scopeName}" без записей-владельцев — читать пачкой нечего`);
+
+    const ids = Array.from(new Set((recordIds || []).filter(Boolean).map(String)));
+    const out = new Map();
+    if (!ids.length) return out;
+
+    const SettingsValues = valuesModel();
+    const defaults = await loadDefaults(appName);
+    const byRecord = new Map();
+    if (SettingsValues) {
+        try {
+            const rows = await SettingsValues.findAll({
+                where: { scopeTable: scope.scopeTable, scopeId: ids, appName, kind: registry.KIND_SETTING },
+                raw: true
+            });
+            for (const row of rows) byRecord.set(String(row.scopeId), types.parseData(row.data));
+        } catch (e) {
+            log.error(`[settings] пакетное чтение ${appName}.${key}:`, e && e.message);
+        }
+    }
+
+    for (const id of ids) {
+        const data = byRecord.get(id) || {};
+        out.set(id, await resolveValue(decl, data[key], defaults));
+    }
+    return out;
+}
+
 /** Значение системной настройки (одна на инсталляцию). */
 async function getSystemSetting(appName, key) {
     const decl = declarationOf(appName, key, 'system');
@@ -305,7 +350,7 @@ async function clearSetting(scopeName, recordId, appName, key) {
 
 module.exports = {
     // чтение
-    getSystemSetting, getUserSetting, getRecordSetting, getAppSettings, getDefault,
+    getSystemSetting, getUserSetting, getRecordSetting, getRecordSettingMany, getAppSettings, getDefault,
     // запись
     setSystemSetting, setUserSetting, setRecordSetting, setDefault, clearSetting,
     // служебное

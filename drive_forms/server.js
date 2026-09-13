@@ -122,9 +122,50 @@ function loadApp(name) {
 }
 
 
+// Приложения, которые сами отвечают на вопрос «а можно ли мне это приложение».
+// Спрашивать у выключенного приложения его собственный выключатель — рекурсия:
+// `settings.disabledApps` и есть тот самый список (drive_root/appAvailability.js).
+const APP_AVAILABILITY_EXEMPT = new Set(['settings']);
+
+/**
+ * Гейт персональной доступности приложения для маршрутов `/app/call` и `/app/<app>/<метод>`.
+ *
+ * Здесь, а не в каждом приложении: имя приложения в этой точке известно (в отличие от
+ * `/server-call`, где скрипты зарегистрированы ИМЕНЕМ и своего приложения не знают —
+ * там приложение закрывается само через `appAvailability.guard`). Так бинарные маршруты
+ * приложения (выдача вложения мессенджера) закрываются без единой строки в приложении.
+ *
+ * @returns {Promise<boolean>} true — вызов разрешён
+ */
+async function isAppAllowedForSession(appName, sessionID) {
+	if (APP_AVAILABILITY_EXEMPT.has(appName)) return true;
+	try {
+		const appAvailability = require('../drive_root/appAvailability');
+		if (!appAvailability.declarationFor(appName)) return true;   // выключателя нет — и проверять нечего
+		const user = await globalRoot.getUserBySessionID(sessionID);
+		return await appAvailability.isEnabledForUser(user && user.UID, appName);
+	} catch (e) {
+		// Сбой проверки не должен отнимать работающее приложение — см. isEnabledForUser.
+		log.error('[invokeAppMethod] проверка доступности', appName, e && e.message);
+		return true;
+	}
+}
+
 // Helper function for dynamic app method invocation
 function invokeAppMethod(appName, methodName, params, sessionID, callback, req, res) {
 	// Path to app server.js
+	const appEntry = appsConfig.apps.find(a => a.name === appName);
+	if (!appEntry) return callback(new Error(t('App not found', 'en')));
+
+	// Приложение, выключенное этому пользователю, не отвечает ничем — ни JSON-методом,
+	// ни бинарным маршрутом. Иначе «выключено» означало бы только «значка не видно».
+	isAppAllowedForSession(appName, sessionID).then(allowed => {
+		if (!allowed) return callback(new Error(t('App not found', 'en')));
+		invokeAppMethodAllowed(appName, methodName, params, sessionID, callback, req, res);
+	}).catch(e => callback(e));
+}
+
+function invokeAppMethodAllowed(appName, methodName, params, sessionID, callback, req, res) {
 	const appEntry = appsConfig.apps.find(a => a.name === appName);
 	if (!appEntry) return callback(new Error(t('App not found', 'en')));
 

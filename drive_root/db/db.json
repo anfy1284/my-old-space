@@ -61,6 +61,13 @@
                     "allowNull": false,
                     "unique": false
                 },
+                "presentation": {
+                    "type": "STRING",
+                    "allowNull": true,
+                    "caption": {
+                        "i18n": "user_presentation_field"
+                    }
+                },
                 "password_hash": {
                     "type": "STRING",
                     "allowNull": true
@@ -98,6 +105,7 @@
             },
             "entityConfig": {
                 "systemData": "users_and_roles",
+                "presentationField": "presentation",
                 "hooks": {
                     "beforeUpdate": [
                         {

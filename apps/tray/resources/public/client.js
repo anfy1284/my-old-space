@@ -17,6 +17,11 @@
      * и приезжает на клиент в window.MySpaceAppConfig (см. buildAppConfigCode
      * в drive_forms/globalServerContext.js). Приложение, недоступное роли, до
      * клиента не доезжает вовсе — отдельной проверки прав здесь нет и не нужно.
+     *
+     * А вот ПЕРСОНАЛЬНАЯ доступность в манифест не приезжает и приехать не может:
+     * манифесты кэшируются по ключу «роль|язык» (см. drive_root/appAvailability.js).
+     * Поэтому состав значков собирается после `MySpace.appAvailability.ready` —
+     * приложение, выключенное этому человеку, значка не получает.
      */
     const Tray = {
         container: null,
@@ -31,20 +36,30 @@
             if (!container) return;   // панель задач ещё не отрисована — ждём события
 
             this.container = container;
-            this._built = true;
-
-            const configs = window.MySpaceAppConfig || {};
-            Object.keys(configs).forEach(appName => {
-                const tray = configs[appName] && configs[appName].tray;
-                if (!tray || !tray.icon) return;
-                this.addItem(appName, tray);
-            });
+            this._built = true;   // ДО ожидания списка: иначе два события готовности соберут трей дважды
 
             // Нажатое/отжатое состояние значка следует за окном приложения.
             window.addEventListener('form-created', () => this.updateAll());
             window.addEventListener('form-destroyed', () => this.updateAll());
             window.addEventListener('form-minimized', () => this.updateAll());
             window.addEventListener('form-restored', () => this.updateAll());
+
+            const availability = window.MySpace && MySpace.appAvailability;
+            const ready = (availability && availability.ready) || Promise.resolve();
+            ready.then(() => this.addDeclaredItems())
+                 .catch(() => this.addDeclaredItems());
+        },
+
+        /** Значки приложений, объявивших `tray` и доступных этому пользователю. */
+        addDeclaredItems: function () {
+            const configs = window.MySpaceAppConfig || {};
+            const availability = window.MySpace && MySpace.appAvailability;
+            Object.keys(configs).forEach(appName => {
+                const tray = configs[appName] && configs[appName].tray;
+                if (!tray || !tray.icon) return;
+                if (availability && !availability.isEnabled(appName)) return;
+                this.addItem(appName, tray);
+            });
             this.updateAll();
         },
 

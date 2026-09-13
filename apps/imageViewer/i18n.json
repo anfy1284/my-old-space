@@ -1,0 +1,20 @@
+{
+    "imgview_caption": {
+        "en": "Image",
+        "ru": "Изображение",
+        "de": "Bild",
+        "pl": "Obraz"
+    },
+    "imgview_save": {
+        "en": "Save",
+        "ru": "Сохранить",
+        "de": "Speichern",
+        "pl": "Zapisz"
+    },
+    "imgview_close": {
+        "en": "Close",
+        "ru": "Закрыть",
+        "de": "Schließen",
+        "pl": "Zamknij"
+    }
+}

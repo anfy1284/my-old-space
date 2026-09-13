@@ -84,6 +84,14 @@
                     "allowNull": true,
                     "caption": { "i18n": "msg_member_custom_name_field" }
                 },
+                "outgoingLanguageId": {
+                    "type": "STRING",
+                    "allowNull": true,
+                    "references": { "model": "languages", "key": "UID" },
+                    "onUpdate": "CASCADE",
+                    "onDelete": "SET NULL",
+                    "caption": { "i18n": "msg_member_outgoing_language_field" }
+                },
                 "joinedAt": {
                     "type": "DATE",
                     "allowNull": true,
@@ -124,9 +132,16 @@
                     "caption": { "i18n": "msg_message_author_field" }
                 },
                 "content": {
+                    "//": "Текст, КАК ОН УШЁЛ. Для получателя это и есть сообщение: если отправитель послал перевод, здесь лежит перевод, и никакой пометки о переводе получателю не полагается.",
                     "type": "TEXT",
                     "allowNull": true,
                     "caption": { "i18n": "msg_message_content_field" }
+                },
+                "originalContent": {
+                    "//": "Что автор НАБРАЛ, если сообщение ушло переведённым. Только для автора: свои сообщения человек должен видеть на том языке, на котором их писал. Получателю не отдаётся никогда.",
+                    "type": "TEXT",
+                    "allowNull": true,
+                    "caption": { "i18n": "msg_message_original_field" }
                 },
                 "clientMsgId": {
                     "type": "STRING",
@@ -186,6 +201,53 @@
                 "indexes": [
                     { "unique": true, "fields": ["messageId", "userId"] },
                     { "fields": ["chatId", "userId", "readAt"] }
+                ]
+            }
+        },
+        {
+            "//": "Перевод сообщения. Оригинал (messenger_messages.content) НЕ переписывается никогда: перевод — это ещё одно представление того же сообщения, и человек обязан иметь возможность увидеть, что было написано на самом деле. Ключ — сообщение + язык, а не сообщение + получатель: двум получателям с одним языком нужен один перевод.",
+            "name": "MessengerMessageTranslations",
+            "tableName": "messenger_message_translations",
+            "fields": {
+                "messageId": {
+                    "type": "STRING",
+                    "allowNull": false,
+                    "references": { "model": "messenger_messages", "key": "UID" },
+                    "onUpdate": "CASCADE",
+                    "onDelete": "CASCADE",
+                    "caption": { "i18n": "msg_tr_message_field" }
+                },
+                "userId": {
+                    "//": "Автор исходного сообщения — реквизит доступа (как у вложений). Право на переписку даёт участие в чате и проверяется явно (см. requireMember), шлюз отдаёт МЕНЬШЕ, а не больше.",
+                    "type": "STRING",
+                    "allowNull": false,
+                    "references": { "model": "users", "key": "UID" },
+                    "onUpdate": "CASCADE",
+                    "onDelete": "CASCADE",
+                    "caption": { "i18n": "msg_tr_author_field" }
+                },
+                "language": {
+                    "//": "Код языка ('de', 'ru'), как в таблице translations: перевод принадлежит ЯЗЫКУ, а не записи справочника.",
+                    "type": "STRING",
+                    "allowNull": false,
+                    "caption": { "i18n": "msg_tr_language_field" }
+                },
+                "content": {
+                    "type": "TEXT",
+                    "allowNull": true,
+                    "caption": { "i18n": "msg_tr_content_field" }
+                },
+                "engine": {
+                    "//": "Чем переведено (модель). Нужно, чтобы отличить перевод старой моделью от нового и не гадать, почему текст изменился.",
+                    "type": "STRING",
+                    "allowNull": true,
+                    "caption": { "i18n": "msg_tr_engine_field" }
+                }
+            },
+            "options": {
+                "timestamps": true,
+                "indexes": [
+                    { "unique": true, "fields": ["messageId", "language"] }
                 ]
             }
         },
@@ -292,6 +354,18 @@
             "target": "MessengerMessageReads",
             "type": "hasMany",
             "options": { "foreignKey": "messageId", "as": "receipts" }
+        },
+        {
+            "source": "MessengerMessages",
+            "target": "MessengerMessageTranslations",
+            "type": "hasMany",
+            "options": { "foreignKey": "messageId", "as": "translations" }
+        },
+        {
+            "source": "MessengerMessageTranslations",
+            "target": "MessengerMessages",
+            "type": "belongsTo",
+            "options": { "foreignKey": "messageId", "as": "message" }
         },
         {
             "source": "MessengerChatMembers",

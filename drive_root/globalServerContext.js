@@ -956,15 +956,9 @@ async function getTableMetadata(modelName) {
             // Find the target model
             const targetModel = Object.values(modelsDB).find(m => m.tableName === attr.references.model);
             if (targetModel) {
-                // Determine display field (prefer 'name', fallback to first string field)
-                let displayField = 'name';
-                const targetAttrs = targetModel.rawAttributes;
-                if (!targetAttrs['name']) {
-                    displayField = Object.keys(targetAttrs).find(k => {
-                        const t = targetAttrs[k].type.key || targetAttrs[k].type.constructor.key;
-                        return t === 'STRING';
-                    }) || 'UID';
-                }
+                // Поле представления целевой таблицы — одно правило на всю систему
+                // (объявленное моделью, иначе `name`); см. presentationFieldOf.
+                const displayField = presentationFieldOf(targetModel);
 
                 foreignKey = {
                     table: attr.references.model,
@@ -1346,7 +1340,12 @@ async function resolveTableForeignKeys(modelName, dataArray, fields, language) {
                 const tf = tmw.getTranslatableFields(fkTableName);
                 translatable = !!(tf && tf.includes(displayField));
             }
-            tableBatches.set(fkTableName, { displayField, translatable, lookup: null, uids: new Set() });
+            // Запасные поля представления (см. pickDisplayValue): у пользователя
+            // представление может быть не заполнено, и тогда показывать надо логин,
+            // а не UID. Читаем их тем же запросом — иначе подставлять будет нечего.
+            const targetModel = Object.values(modelsDB).find(m => m.tableName === fkTableName);
+            const fallbackFields = displayFallbackFields(targetModel && targetModel.rawAttributes, displayField);
+            tableBatches.set(fkTableName, { displayField, fallbackFields, translatable, lookup: null, uids: new Set() });
         }
     }
     // Предзагрузка lookup'ов переводов для translatable display-полей (1 запрос на таблицу/язык,
@@ -1388,14 +1387,14 @@ async function resolveTableForeignKeys(modelName, dataArray, fields, language) {
                 operation: 'read',
                 table: fkTableName,
                 where: { UID: { [Op.in]: uidsArray } },
-                options: { raw: true, attributes: ['UID', batch.displayField] },
+                options: { raw: true, attributes: ['UID', batch.displayField, ...batch.fallbackFields] },
                 context: { sessionID: SYSTEM_SESSION_ID }
             }).then(rows => {
                 // Populate cache from results
                 const found = new Set();
                 if (Array.isArray(rows)) {
                     for (const r of rows) {
-                        let displayValue = r[batch.displayField] || r.UID.toString();
+                        let displayValue = pickDisplayValue(r, batch.displayField, 'UID');
                         // Перевод справочного значения (таблица translations) на язык сессии.
                         // Запрос идёт под SYSTEM_SESSION_ID (минуя RLS и translationMiddleware),
                         // поэтому перевод применяем здесь явно.
@@ -1598,8 +1597,44 @@ module.exports.invalidateFkCache = function(tableName) {
 // это `number` («FeWo Nr. I»). После того как `name` стал системным полем
 // модели, выбор всегда попадает на него, и справочник комнат стал пустым.
 //
-// Поэтому значение подбирается по цепочке: представление → номер → код → UID.
-const DISPLAY_FALLBACK_FIELDS = ['number', 'code'];
+// Поэтому значение подбирается по цепочке: представление → имя → номер → код → UID.
+//
+// ── Поле представления объявляется моделью ───────────────────────────────────
+// По умолчанию представление таблицы — `name` (его заполняет билдер
+// `entityHooks.registerPresentation`). Но у таблицы бывает поле, которое человеку
+// показывать НЕЛЬЗЯ подменять: у пользователей `name` — это ЛОГИН, по нему идёт
+// вход, и переписать его «Иваном Ивановичем» нельзя. Поэтому модель вправе
+// объявить своё поле представления:
+//
+//     "entityConfig": { "presentationField": "presentation" }
+//
+// Незаполненное представление — не ошибка: цепочка запасных значений ниже
+// покажет логин, номер, код или UID. Так справочник пользователей получает
+// человеческое имя, не теряя логина ни в одном списке выбора.
+const DISPLAY_FALLBACK_FIELDS = ['name', 'number', 'code'];
+
+/**
+ * Поле представления модели: объявленное в `entityConfig.presentationField`,
+ * иначе `name`, иначе первое строковое поле, иначе `UID`.
+ *
+ * @param {Object} Model — модель Sequelize (с прикреплённым `entityConfig`)
+ * @returns {string} имя поля
+ */
+function presentationFieldOf(Model) {
+    const attrs = (Model && Model.rawAttributes) || {};
+    const declared = Model && Model.entityConfig && Model.entityConfig.presentationField;
+    if (declared && attrs[declared]) return declared;
+    if (attrs.name) return 'name';
+    const firstString = Object.keys(attrs).find(k => {
+        try {
+            const t = attrs[k].type ? (attrs[k].type.key || attrs[k].type.constructor.key) : '';
+            return t === 'STRING';
+        } catch (e) {
+            return false;
+        }
+    });
+    return firstString || 'UID';
+}
 
 function displayFallbackFields(attrs, displayField) {
     return DISPLAY_FALLBACK_FIELDS.filter(f => attrs && attrs[f] && f !== displayField);
@@ -1635,19 +1670,9 @@ async function getLookupList(options) {
     const Model = modelsDB[modelName];
     if (!Model) throw new Error(`Model ${modelName} not found in modelsDB`);
 
-// Determine display field: prefer 'name', fallback to first STRING attribute, then 'UID' or 'id'
+    // Поле представления: объявленное моделью, иначе `name` (см. presentationFieldOf).
     const attrs = Model.rawAttributes || {};
-    let displayField = 'name';
-    if (!attrs[displayField]) {
-        displayField = Object.keys(attrs).find(k => {
-            try {
-                const t = attrs[k].type ? (attrs[k].type.key || attrs[k].type.constructor.key) : '';
-                return t === 'STRING';
-            } catch (e) {
-                return false;
-            }
-        }) || 'UID';
-    }
+    const displayField = presentationFieldOf(Model);
     // Запасные поля представления — см. pickDisplayValue. Читаем их вместе с
     // основным, иначе подставлять будет нечего.
     const fallbackFields = displayFallbackFields(attrs, displayField);
@@ -1713,3 +1738,7 @@ const data = rows.map(r => ({ UID: r[keyField], display: pickDisplayValue(r, dis
 }
 
 module.exports.getLookupList = getLookupList;
+// Поле представления модели и подбор значения по цепочке запасных — правило одно
+// на всю систему, поэтому оно доступно и прикладному коду (см. userPresentation.js).
+module.exports.presentationFieldOf = presentationFieldOf;
+module.exports.pickDisplayValue = pickDisplayValue;

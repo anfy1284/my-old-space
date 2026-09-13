@@ -1,7 +1,9 @@
 'use strict';
 
 /**
- * Серверная часть приложения «Настройки» — служебные настройки (состояние интерфейса).
+ * Серверная часть приложения «Настройки» — персональное, чего нет в бандле:
+ * служебные настройки (состояние интерфейса) и список приложений, выключенных
+ * у этого пользователя.
  *
  * Отдельный RPC, а не бандл `/app/loadApps`: бандл кэшируется по ключу «роль|язык», и
  * персональное состояние утекло бы первому же пользователю с той же ролью и языком.
@@ -17,6 +19,7 @@
 
 const globalRoot = require('../../drive_root/globalServerContext');
 const state = require('../../drive_root/settings/state');
+const appAvailability = require('../../drive_root/appAvailability');
 const log = require('../../drive_root/log');
 
 async function currentUser(sessionID) {
@@ -30,6 +33,16 @@ module.exports = {
         const user = await currentUser(sessionID);
         if (!user) return {};
         return state.getAllForUser(user.UID);
+    },
+
+    /**
+     * Приложения, выключенные у текущего пользователя (см. drive_root/appAvailability).
+     * По этому списку трей не рисует значок, а `MySpace.open` отказывает.
+     * Без пользователя (экран входа) выключено всё, у чего есть выключатель.
+     */
+    disabledApps: async (params, sessionID) => {
+        const user = await currentUser(sessionID);
+        return appAvailability.disabledAppsForUser(user ? user.UID : null);
     },
 
     /**

@@ -58,6 +58,10 @@
             "path": "/printPreview"
         },
         {
+            "name": "imageViewer",
+            "path": "/imageViewer"
+        },
+        {
             "name": "general_icons",
             "path": "/general_icons"
         },

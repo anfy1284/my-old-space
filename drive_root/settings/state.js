@@ -161,7 +161,10 @@ async function listAll() {
     const names = new Map();
     if (all && all.Users) {
         try {
-            for (const u of await all.Users.findAll({ raw: true })) names.set(u.UID, u.name);
+            const userPresentation = require('../userPresentation');
+            for (const u of await all.Users.findAll({ attributes: userPresentation.ATTRIBUTES, raw: true })) {
+                names.set(u.UID, userPresentation.presentationOf(u));
+            }
         } catch (e) { /* без имён покажем UID */ }
     }
 

@@ -7,6 +7,50 @@
         "order": 70
     },
     "settings": {
+        "useMessenger": {
+            "scope": "user",
+            "type": "boolean",
+            "default": false,
+            "visibility": "admin",
+            "caption": {
+                "i18n": "set_messenger_use"
+            },
+            "hint": {
+                "i18n": "set_messenger_use_hint"
+            },
+            "order": 5
+        },
+        "translateIncoming": {
+            "scope": "user",
+            "type": "boolean",
+            "default": false,
+            "visibility": "admin",
+            "group": { "i18n": "set_messenger_group_translate" },
+            "caption": { "i18n": "set_messenger_translate_incoming" },
+            "hint": { "i18n": "set_messenger_translate_incoming_hint" },
+            "order": 20
+        },
+        "translateLanguage": {
+            "scope": "user",
+            "type": "reference",
+            "reference": { "table": "languages", "displayField": "name" },
+            "default": null,
+            "visibility": "admin",
+            "group": { "i18n": "set_messenger_group_translate" },
+            "caption": { "i18n": "set_messenger_translate_language" },
+            "hint": { "i18n": "set_messenger_translate_language_hint" },
+            "order": 30
+        },
+        "translateOutgoing": {
+            "scope": "user",
+            "type": "boolean",
+            "default": false,
+            "visibility": "admin",
+            "group": { "i18n": "set_messenger_group_translate" },
+            "caption": { "i18n": "set_messenger_translate_outgoing" },
+            "hint": { "i18n": "set_messenger_translate_outgoing_hint" },
+            "order": 40
+        },
         "maxAttachmentMb": {
             "scope": "system",
             "type": "number",
@@ -16,6 +60,26 @@
                 "i18n": "sysset_messenger_max_attachment_mb"
             },
             "order": 10
+        },
+        "translateApiKey": {
+            "//": "Ключ переводчика — СВОЙ у мессенджера. То, что сейчас это тот же поставщик, что у AI-ассистента, — совпадение: приложения независимы и настраиваются порознь (решение владельца 13.09.2026).",
+            "scope": "system",
+            "type": "string",
+            "default": null,
+            "visibility": "admin",
+            "group": { "i18n": "set_messenger_group_translate" },
+            "caption": { "i18n": "sysset_messenger_translate_api_key" },
+            "hint": { "i18n": "sysset_messenger_translate_api_key_hint" },
+            "order": 50
+        },
+        "translateModel": {
+            "scope": "system",
+            "type": "string",
+            "default": "gemini-2.5-flash",
+            "visibility": "admin",
+            "group": { "i18n": "set_messenger_group_translate" },
+            "caption": { "i18n": "sysset_messenger_translate_model" },
+            "order": 60
         }
     }
 }

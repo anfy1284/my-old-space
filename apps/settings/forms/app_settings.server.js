@@ -186,11 +186,17 @@ function buildLayout(isAdmin) {
     const hasDefault = scopes.some(s => s.name === 'default');
 
     // Шапка: уровень + селекторы записи (по одному на уровень, показывается нужный).
+    //
+    // `suppressModified` на всей шапке: это НАВИГАЦИЯ, а не правка настроек. Без него
+    // сама смена пользователя помечала форму изменённой, и вопрос «сохранить правки?»
+    // всплывал бы на каждом щелчке — а вопрос, который задают без повода, перестают
+    // читать.
     const header = [{
         type: 'emunList',
         name: SCOPE_FIELD,
         data: SCOPE_FIELD,
         caption: { i18n: 'settings_level' },
+        suppressModified: true,
         options: scopes.map(s => ({ value: s.name, caption: s.caption })),
         events: { onChange: 'onScopeChanged' }
     }];
@@ -202,6 +208,7 @@ function buildLayout(isAdmin) {
             name: recordField(scope.name),
             data: recordField(scope.name),
             caption: scope.caption,
+            suppressModified: true,
             properties: {
                 selection: { table: scope.table, idField: 'UID', displayField: scope.displayField }
             },

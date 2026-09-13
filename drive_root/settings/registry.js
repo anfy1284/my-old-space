@@ -69,7 +69,10 @@ const BUILTIN_SCOPES = {
         order: 80, declaredBy: CORE_APP
     },
     user: {
-        name: 'user', table: 'users', displayField: 'name', ownerless: false,
+        // Показываем ПРЕДСТАВЛЕНИЕ, а не `name`: у пользователей `name` — это логин
+        // (drive_root/userPresentation.js). Незаполненное представление подменяется
+        // логином там, где запись показывается (recordDisplay, pickRecordDisplay).
+        name: 'user', table: 'users', displayField: 'presentation', ownerless: false,
         scopeTable: 'users', assignable: true, adminOnly: false,
         caption: { i18n: 'settings_scope_user' },
         icon: '/apps/general_icons/resources/public/16x16/user.png',
