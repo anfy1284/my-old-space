@@ -348,6 +348,23 @@ use('root', async function entityHooksMiddleware(request, next) {
     return await next(request);
 });
 
+// ── Сторно выставлен → исходный документ отменён ─────────────────────────────
+// Сторно открывается несохранённой формой и живёт черновиком, пока его не
+// выставят; исходный документ обязан оставаться действующим до этого момента и
+// уйти в «отменён» ровно в нём — каким бы путём ни шло выставление (кнопка
+// приложения, скрипт). Отмена идёт отдельной записью ПОСЛЕ успешной: сорвалось
+// выставление — исходный документ не тронут (drive_root/db/storno.js).
+use('root', async function stornoIssueMiddleware(request, next) {
+    if (request.operation !== 'update') return await next(request);
+    const storno = require('./db/storno');
+    const issuing = await storno.issuingStornos(request);
+    const result = await next(request);
+    if (issuing && issuing.length) {
+        await storno.cancelSourcesOf(request.table, issuing, request.context || {});
+    }
+    return result;
+});
+
 module.exports = {
     use,
     execute,

@@ -3500,6 +3500,15 @@ class DataForm extends Form {
             return;
         }
 
+        // Встречный документ (сторно, коррекция) открывается НЕСОХРАНЁННЫМ: команда
+        // только собрала его. В базу он попадёт кнопкой «Сохранить»/«Выставить»;
+        // передумал и закрыл окно — не осталось ничего, ни черновика, ни номера.
+        if (res.openNew && window.MySpace && typeof window.MySpace.open === 'function') {
+            await window.MySpace.open('uniForm', Object.assign(
+                { mode: 'record', tableName: res.table || table }, res.openNew));
+            return;
+        }
+
         // Созданный документ ОТКРЫВАЕТСЯ — это и есть результат команды. Показывать
         // вместо него сообщение «создан такой-то номер» значит заставить
         // пользователя искать документ руками: ему нужны суммы, печать, номер на
@@ -3545,6 +3554,26 @@ class DataForm extends Form {
                 try { d.tabs.setTabVisible(d.index, this._evalEnabledWhen(d.decl)); } catch (e) {}
             }
         }
+        // Тон записи пересчитывается на тех же поводах: смена состояния, загрузка данных.
+        try { this.applyRecordTone(); } catch (e) {}
+    }
+
+    /**
+     * Покрасить поле состояния по `entityConfig.rowTones` — теми же правилами и тем же
+     * вычислителем (`mosResolveTone`), что строку журнала. Поле состояния — из замка
+     * (`immutable.field`); без замка — поле первого правила.
+     */
+    applyRecordTone() {
+        const rules = this._rowTones;
+        if (!Array.isArray(rules) || !rules.length) return;
+        const field = (this._lock && this._lock.field)
+            || (rules[0] && rules[0].when && rules[0].when.field) || null;
+        const ctrl = field ? this.getControl(field) : null;
+        if (!ctrl || !ctrl.element) return;
+        const el = /^(INPUT|SELECT|TEXTAREA)$/.test(ctrl.element.tagName || '')
+            ? ctrl.element
+            : (ctrl.element.querySelector ? ctrl.element.querySelector('input,select') : null);
+        mosApplyTone(el, mosResolveTone(rules, (f) => this.getControlValue(f)));
     }
 
     /** Таблица сменила выбор/перечитала данные — ядро само пересчитывает зависимости. */
@@ -5070,6 +5099,7 @@ class DataForm extends Form {
                 try { this._formEvents = both.events || null; } catch (e) { this._formEvents = null; }
                 try { this._prefilled = both.prefilled || null; } catch (e) { this._prefilled = null; }
                 try { this._lock = both.lock || null; } catch (e) { this._lock = null; }
+                try { this._rowTones = Array.isArray(both.rowTones) ? both.rowTones : null; } catch (e) { this._rowTones = null; }
                 try { this._windowState = both.windowState || null; } catch (e) {}
                 // Apply app caption (human-readable translated name) and icon
                 try {
@@ -15367,6 +15397,35 @@ class Tabs extends UIObject {
 }
 
 // DynamicTable class for displaying tabular data with virtual scrolling
+// ── Тон записи: `entityConfig.rowTones` ─────────────────────────────────────────────
+//
+// «Что это за документ» должно читаться с одного взгляда — в журнале и на форме.
+// Правила объявляет модель: [{ when: { field, in | notIn }, tone }], срабатывает ПЕРВОЕ
+// подходящее. Язык условия — тот же, что у `enabledWhen: { field, in }`, второго не
+// заводим. Тон — имя из палитры ядра (класс `ui-tone-<тон>` в style.css), не цвет.
+// `valueOf(field)` — чтение значения: у строки списка это поле объекта, у формы — контрол.
+const MOS_TONES = ['gray', 'red', 'green', 'blue', 'violet', 'yellow'];
+function mosResolveTone(rules, valueOf) {
+    if (!Array.isArray(rules)) return null;
+    for (const rule of rules) {
+        const w = rule && rule.when;
+        if (!w || !w.field || MOS_TONES.indexOf(rule.tone) === -1) continue;
+        let v = null;
+        try { v = valueOf(w.field); } catch (e) { v = null; }
+        const cur = (v === null || v === undefined) ? '' : String(v);
+        if (Array.isArray(w.in) && w.in.map(String).indexOf(cur) === -1) continue;
+        if (Array.isArray(w.notIn) && w.notIn.map(String).indexOf(cur) !== -1) continue;
+        return rule.tone;
+    }
+    return null;
+}
+/** Снять прежний тон с элемента и поставить новый (null — без тона). */
+function mosApplyTone(el, tone) {
+    if (!el || !el.classList) return;
+    for (const t of MOS_TONES) el.classList.remove('ui-tone-' + t);
+    if (tone) el.classList.add('ui-tone-' + tone);
+}
+
 class DynamicTable extends Table {
     constructor(options = {}) {
         super(null, { columns: options.fields || options.columns || [], rowHeight: options.rowHeight, appForm: options.appForm, dataKey: options.dataKey || options.data || options.tableName, readOnly: options.readOnly !== false, locked: !!options.locked, showToolbar: options.showToolbar, hiddenButtons: options.hiddenButtons });
@@ -15625,6 +15684,10 @@ class DynamicTable extends Table {
             tr.appendChild(td);
         }
         tr._dtFilled = true;
+        // Тон строки по объявлению модели (сервер отдаёт правила вместе с данными).
+        // Ставится при КАЖДОМ заполнении: элемент строки переиспользуется под другую
+        // запись после сортировки/обновления.
+        mosApplyTone(tr, mosResolveTone(this.rowTones, (f) => row[f]));
 
         // Restore active highlight if needed
         if (this._activeRowIndex === globalIndex) tr.classList.add('active');
@@ -16162,6 +16225,7 @@ class DynamicTable extends Table {
             this.columns = columns.slice();
             this.fields = columns.slice();
             this.editSessionId = data.editSessionId || this.editSessionId;
+            this.rowTones = Array.isArray(data.rowTones) ? data.rowTones : null;
 
             // Populate dataCache using rangeFrom as base index
             rows.forEach((row, index) => {

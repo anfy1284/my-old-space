@@ -596,6 +596,17 @@ input[type="checkbox"],
   background-color: #f0f0f0 !important;
 }
 
+/* Тон строки по состоянию записи (entityConfig.rowTones → класс ui-tone-<тон>).
+   Той же специфичности, что и зебра, но объявлен ПОЗЖЕ — перекрывает её; активная
+   строка (!important) остаётся голубой. Эти же классы красят поле состояния на форме
+   (DataForm.applyRecordTone). Набор тонов — палитра ядра, а не цвета приложения. */
+.ui-dynamictable table tbody tr.ui-table-row.ui-tone-gray,   input.ui-tone-gray,   select.ui-tone-gray   { background-color: #dcdcdc; }
+.ui-dynamictable table tbody tr.ui-table-row.ui-tone-red,    input.ui-tone-red,    select.ui-tone-red    { background-color: #f6d3d3; }
+.ui-dynamictable table tbody tr.ui-table-row.ui-tone-green,  input.ui-tone-green,  select.ui-tone-green  { background-color: #d8efd2; }
+.ui-dynamictable table tbody tr.ui-table-row.ui-tone-blue,   input.ui-tone-blue,   select.ui-tone-blue   { background-color: #d5e3f5; }
+.ui-dynamictable table tbody tr.ui-table-row.ui-tone-violet, input.ui-tone-violet, select.ui-tone-violet { background-color: #e5d9f2; }
+.ui-dynamictable table tbody tr.ui-table-row.ui-tone-yellow, input.ui-tone-yellow, select.ui-tone-yellow { background-color: #faf1c8; }
+
 /* Hide input buttons in non-active table rows (useful when rows are styled
    gray for inactive state). This makes buttons invisible instead of gray. */
 .ui-dynamictable table tbody tr.ui-table-row:not(.active) .input-field-button,

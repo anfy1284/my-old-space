@@ -42,7 +42,7 @@
  * Вызывается из ЧЕТЫРЁХ мест (логика — одна, здесь):
  *   1. Миграция: корневой `events_handler.js` → `onModelsPostCollect` (создаёт таблицу).
  *   2. Рантайм:  `globalServerContext.collectAllModelDefs` (модель знает о части).
- *   3. Создание встречного документа: `storno.js` (заполняет зеркальную часть).
+ *   3. Сборка встречного документа: `storno.prepareCounter` (строки для несохранённой формы).
  *   4. Сохранение формы: `apps/uniForm/server.js` (пересчитывает разницу).
  */
 
@@ -271,60 +271,40 @@ function isCorrection(Model, row) {
 }
 
 /**
- * Встречный документ создан — привести его строковые части в порядок.
- * Зовётся из `storno.js` для ОБОИХ видов, прикладного хука для этого не нужно.
+ * Строки встречного документа, которые ядро обязано ПОСЧИТАТЬ, а не скопировать.
+ * Зовётся из `storno.prepareCounter` для ОБОИХ видов — в памяти, без записи:
+ * встречный документ открывается несохранённой формой.
  *
- * • Коррекция: «как должно быть» = действующее состояние исходного документа.
- *   Ядро `storno.js` положило туда исходные строки — для первой коррекции это то
- *   же самое, но для второй уже нет.
+ * • Коррекция: «как должно быть» = действующее состояние исходного документа
+ *   (для первой коррекции это исходные строки, для второй уже нет), собственная
+ *   часть пуста — разницу посчитает сохранение (`recalcOnSave`).
  * • Сторно: если у документа есть коррекции, отменять надо действующее состояние,
  *   а не исходные строки, — иначе вернётся больше, чем причитается.
+ *
+ * @returns {Promise<Object|null>} { имяТаблицы: строки } — чем заменить части; null — копии верны
  */
-async function onCounterCreated({ globalCtx, dbGateway, table, sourceUID, newUID, kind, context }) {
+async function counterRows({ globalCtx, table, sourceUID, kind }) {
     const Model = modelFor(globalCtx, table);
     const cfg = readConfig(Model);
-    if (!cfg) return;
+    if (!cfg) return null;
 
-    const effective = await effectiveRows(globalCtx, table, sourceUID, newUID);
-    const Section = modelFor(globalCtx, cfg.section);
-    const parentField = Section.tabularSection.parentField;
-    const Utilities = require('./utilites');
-
+    const effective = await effectiveRows(globalCtx, table, sourceUID, null);
     if (kind === 'correction') {
-        const Target = modelFor(globalCtx, cfg.targetTable);
-        await rewrite(dbGateway, cfg.targetTable, parentField, newUID, effective,
-            () => Utilities.generateUID(Target.name), cfg, context);
-        return;
+        return { [cfg.targetTable]: effective, [cfg.section]: [] };
     }
 
-    // Сторно: строки уже инвертированы ядром из ИСХОДНЫХ. Пересобирать нужно,
-    // только если состояние успели изменить коррекциями.
     const corrCfg = Model.entityConfig.correction;
     const where = { [corrCfg.link]: sourceUID };
     if (corrCfg.kindField) where[corrCfg.kindField] = corrCfg.kindValue || 'correction';
-    if (await Model.count({ where }) === 0) return;
+    if (await Model.count({ where }) === 0) return null;
 
-    const negated = effective.map(r => {
+    const ordered = effective.map((r, i) => {
         const q = Number(r[cfg.quantity]) || 0;
-        return Object.assign({}, r, { [cfg.quantity]: -q, [cfg.amount]: M.mul(r[cfg.price], -q) });
-    });
-    await rewrite(dbGateway, cfg.section, parentField, newUID, negated,
-        () => Utilities.generateUID(Section.name), cfg, context);
-}
-
-/** Перезаписать табличную часть документа готовыми строками. */
-async function rewrite(dbGateway, table, parentField, parentUID, rows, newUID, cfg, context) {
-    await dbGateway.execute({
-        operation: 'delete', table, where: { [parentField]: parentUID }, context
-    });
-    let order = 0;
-    for (const row of rows) {
-        const data = Object.assign({}, row, {
-            UID: newUID(), [parentField]: parentUID, [cfg.order]: ++order
+        return Object.assign({}, r, {
+            [cfg.quantity]: -q, [cfg.amount]: M.mul(r[cfg.price], -q), [cfg.order]: i + 1
         });
-        delete data.createdAt; delete data.updatedAt;
-        await dbGateway.execute({ operation: 'create', table, data, context });
-    }
+    });
+    return { [cfg.section]: ordered };
 }
 
 /**
@@ -337,7 +317,7 @@ async function rewrite(dbGateway, table, parentField, parentUID, rows, newUID, c
  *
  * @returns {boolean} была ли подмена
  */
-async function recalcOnSave({ globalCtx, table, changes, tabularSections, parentUID, sessionID }) {
+async function recalcOnSave({ globalCtx, table, changes, tabularSections, parentUID, sessionID, counterOf }) {
     if (!tabularSections) return false;
     let Model;
     try { Model = modelFor(globalCtx, table); } catch (e) { return false; }
@@ -358,8 +338,16 @@ async function recalcOnSave({ globalCtx, table, changes, tabularSections, parent
     const docUID = parentUID || (changes && changes.UID);
     if (!docUID) return false;
     const stored = await Model.findByPk(docUID, { raw: true });
-    if (!stored || !isCorrection(Model, stored)) return false;
-    const sourceUID = stored[corrCfg.link];
+    let sourceUID = null;
+    if (stored) {
+        if (!isCorrection(Model, stored)) return false;
+        sourceUID = stored[corrCfg.link];
+    } else if (counterOf && counterOf.kind === 'correction') {
+        // НОВАЯ коррекция (форма открыта командой и ещё не сохранялась): в базе её
+        // нет, природу знает датасет формы — `counterOf`, уже проверенный
+        // `storno.verifyCounter` до этого вызова.
+        sourceUID = counterOf.sourceUID;
+    }
     if (!sourceUID) return false;
 
     // Исходный документ обязан существовать. Если его нет — считать не от чего, и
@@ -391,6 +379,6 @@ module.exports = {
     collapse,
     effectiveRows,
     diffRows,
-    onCounterCreated,
+    counterRows,
     recalcOnSave
 };

@@ -415,7 +415,7 @@ async function getLayoutWithData(params, sessionID) {
                     });
                     const spec = await generateFormSpec(resolvedParams.tableName, resolvedParams, sessionID);
                     return { layout: spec.layout, data: spec.data, datasetId: spec.datasetId,
-                             clientScript: spec.clientScript || null, formIcon: spec.formIcon || null, appCaption: spec.appCaption || null, windowState: spec.windowState || null, fkLookups: spec.fkLookups || null, isNew: !!spec.isNew, events: spec.events || null, prefilled: spec.prefilled || null, lock: spec.lock || null };
+                             clientScript: spec.clientScript || null, formIcon: spec.formIcon || null, appCaption: spec.appCaption || null, windowState: spec.windowState || null, fkLookups: spec.fkLookups || null, isNew: !!spec.isNew, events: spec.events || null, prefilled: spec.prefilled || null, lock: spec.lock || null, rowTones: spec.rowTones || null };
                 }
             } catch (e) {
                 console.error('[uniForm/getLayoutWithData] datasetId refresh error:', e && e.message || e);
@@ -432,7 +432,7 @@ async function getLayoutWithData(params, sessionID) {
                     table: params.tableName,
                     id: params.recordID || params.recordId || params.id
                 });
-                return { layout: spec.layout, data: spec.data, datasetId, clientScript: spec.clientScript || null, formIcon: spec.formIcon || null, appCaption: spec.appCaption || null, windowState: spec.windowState || null, fkLookups: spec.fkLookups || null, isNew: !!spec.isNew, events: spec.events || null, prefilled: spec.prefilled || null, lock: spec.lock || null };
+                return { layout: spec.layout, data: spec.data, datasetId, clientScript: spec.clientScript || null, formIcon: spec.formIcon || null, appCaption: spec.appCaption || null, windowState: spec.windowState || null, fkLookups: spec.fkLookups || null, isNew: !!spec.isNew, events: spec.events || null, prefilled: spec.prefilled || null, lock: spec.lock || null, rowTones: spec.rowTones || null };
             } catch (e) {
                 console.error('[uniForm/getLayoutWithData] generateFormSpec error:', e && e.message || e);
             }
@@ -568,6 +568,20 @@ async function applyChanges(payload, sessionID) {
         }
 
         const parentUID = recordId;
+        const isNewRecord = !recordId || !!dsObj.isNew;
+
+        // Встречный документ, открытый командой «Сторнировать»/«Скорректировать»
+        // (drive_root/db/storno.js): форма пришла несохранённой, и природа документа
+        // лежит в параметрах её открытия. Проверяется ЗАНОВО до всего остального —
+        // между открытием и сохранением исходный документ могли уже сторнировать.
+        // Только у НОВОЙ записи: у сохранённой ссылка уже в базе.
+        let counter = null;
+        if (isNewRecord && dsObj.params && dsObj.params.counterOf) {
+            counter = await require('../../drive_root/db/storno').verifyCounter({
+                table: tableName, counterOf: dsObj.params.counterOf, sessionID,
+                t: (key) => tForSession(key, sessionID)
+            });
+        }
 
         // Документ-коррекция: собственная строковая часть — это РАЗНИЦА между
         // «как должно быть» (что правит пользователь) и уже выставленным.
@@ -578,7 +592,8 @@ async function applyChanges(payload, sessionID) {
             await difference.recalcOnSave({
                 globalCtx: require('../../drive_root/globalServerContext'),
                 table: tableName, changes,
-                tabularSections: tabularSectionsData, parentUID, sessionID
+                tabularSections: tabularSectionsData, parentUID, sessionID,
+                counterOf: counter ? { kind: counter.kind, sourceUID: counter.sourceUID } : null
             });
         } catch (e) {
             console.error('[uniForm] difference recalc:', e && e.message || e);
@@ -591,8 +606,15 @@ async function applyChanges(payload, sessionID) {
             changes,
             tabularSections: tabularSectionsData || {},
             parentUID,
-            isNew:           !recordId || !!dsObj.isNew
+            isNew:           isNewRecord,
+            // Проверенная природа нового встречного документа — приложению для правил,
+            // зависящих от знака (сумма сторно отрицательна). null у обычной записи.
+            counterOf:       counter ? { kind: counter.kind, sourceUID: counter.sourceUID } : null
         }, { tableName, sessionID });
+
+        // Ссылку и вид ставит ядро ПОСЛЕ прикладного обработчика: приложение вправе
+        // вычищать эти поля из присланного формой (с формы им не верят).
+        if (counter) require('../../drive_root/db/storno').stampCounter(changes, counter);
 
         if (recordId && !dsObj.isNew) {
             console.log(`[uniForm] Updating ${tableName} UID=${recordId} with`, changes);
@@ -1612,15 +1634,27 @@ async function generateFormSpec(tableName, params, sessionID) {
         // форме список состояний остался бы полным и «выставлено» выбиралось бы
         // прямо в нём, мимо команды.
         let lock = null;
+        // Тон записи (`entityConfig.rowTones`): те же правила, что красят строку журнала,
+        // красят на форме поле состояния (DataForm.applyRecordTone).
+        let rowTones = null;
         try {
             const gCtxLock = require('../../drive_root/globalServerContext');
             const lockModelName = gCtxLock.getModelNameForTable(tableName) || tableName;
             const LockModel = (gCtxLock.modelsDB || {})[lockModelName];
+            if (LockModel && LockModel.entityConfig && Array.isArray(LockModel.entityConfig.rowTones)) {
+                rowTones = LockModel.entityConfig.rowTones;
+            }
             if (LockModel) {
-                const values = {};
-                for (const d of data) values[d.name] = d.value;
-                lock = require('../../drive_root/db/immutable').describeLock(LockModel, values);
-                if (lock) applyLockToLayout(layout, lock);
+                const immutable = require('../../drive_root/db/immutable');
+                if (immutable.readConfig(LockModel)) {
+                    const values = {};
+                    for (const d of data) values[d.name] = d.value;
+                    // Администратор при включённой настройке — без замка (тот же
+                    // признак, что снимает запрет записи в dbGateway).
+                    const override = await immutable.adminOverride(sessionID);
+                    lock = immutable.describeLock(LockModel, values, { override });
+                    if (lock) applyLockToLayout(layout, lock);
+                }
             }
         } catch (e) {
             console.error('[uniForm/generateFormSpec] lock resolve error:', e && e.message || e);
@@ -1648,7 +1682,7 @@ async function generateFormSpec(tableName, params, sessionID) {
             }
         }
 
-        return { data, layout, datasetId, clientScript, formIcon, appCaption: resolvedCaption, windowState: finalWindowState, fkLookups: await fkLookupsPromise, isNew: isNew, events: clientEvents, prefilled, lock };
+        return { data, layout, datasetId, clientScript, formIcon, appCaption: resolvedCaption, windowState: finalWindowState, fkLookups: await fkLookupsPromise, isNew: isNew, events: clientEvents, prefilled, lock, rowTones };
     } catch (e) {
         console.error('[uniForm/generateFormSpec] failed:', e && e.message || e);
         return { data: [], layout: [] };

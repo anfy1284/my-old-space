@@ -329,12 +329,23 @@ function registerDynamicTableMethods(appName, config = {}) {
 
             // Pass range and editSessionId from server so client can position
             // the floating table precisely (server may apply its own buffer offset)
+            // Тон строки по состоянию записи (`entityConfig.rowTones`) — правила, а не
+            // посчитанные цвета: клиент применяет их к каждой строке сам (mosResolveTone),
+            // тем же кодом, что красит поле состояния на форме.
+            let rowTones = null;
+            try {
+                const M = globalServerContext.modelsDB && globalServerContext.modelsDB[modelName];
+                const rt = M && M.entityConfig && M.entityConfig.rowTones;
+                if (Array.isArray(rt) && rt.length) rowTones = rt;
+            } catch (e) { /* без тонов список всё равно работает */ }
+
             return {
                 columns,
                 rows,
                 totalRows,
                 range: (raw && raw.range) ? raw.range : null,
-                editSessionId: (raw && raw.editSessionId) ? raw.editSessionId : undefined
+                editSessionId: (raw && raw.editSessionId) ? raw.editSessionId : undefined,
+                rowTones
             };
         },
 

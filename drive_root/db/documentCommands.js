@@ -1,34 +1,27 @@
 'use strict';
 
 /**
- * documentCommands.js — КОМАНДЫ ДОКУМЕНТА «Сторнировать» и «Скорректировать».
- * Механизм ЯДРА: приложение получает их вместе с объявлением встречного
- * документа, не написав ни серверной функции, ни обработчика на клиенте.
+ * documentCommands.js — КОМАНДЫ ДОКУМЕНТА «Сторнировать», «Скорректировать»,
+ * «Признать недействительным». Механизм ЯДРА: приложение получает их вместе с
+ * объявлением в `entityConfig`, не написав ни серверной функции, ни обработчика
+ * на клиенте.
  *
  * Регистрируются один раз как серверный скрипт `document.actions`; кнопка формы
  * зовёт их декларацией в лейауте, без клиентского кода:
  *
- *   { "name": "btnStorno",  "command": "storno",  "icon": …, "caption": … }
- *   { "name": "btnCorrect", "command": "correct", "icon": …, "caption": … }
+ *   { "name": "btnStorno",     "command": "storno",     "icon": …, "caption": … }
+ *   { "name": "btnCorrect",    "command": "correct",    "icon": …, "caption": … }
+ *   { "name": "btnInvalidate", "command": "invalidate", "icon": …, "caption": … }
  *
- * Что здесь общего для любого документа, а что остаётся приложению:
+ * Сторно и коррекция НИЧЕГО НЕ ПИШУТ (13.09.2026): команда собирает встречный
+ * документ в памяти (`storno.prepareCounter`) и отдаёт форме `openNew` — клиент
+ * открывает НЕСОХРАНЁННУЮ форму. Передумал — закрыл окно, в базе ничего не осталось.
+ * Документ создаёт сохранение формы, выставляет — обычная кнопка «Выставить»
+ * приложения, а исходный документ сторно отменяется в момент выставления
+ * (middleware `dbGateway` → `storno.issuingStornos`/`cancelSourcesOf`).
  *
- *   ядро      — создать встречный документ, связать с исходным, собрать его
- *               строки (`difference.js`), перевести исходный в «отменён»;
- *   приложение — ВЫСТАВИТЬ документ, потому что выставление собирает печатную
- *               форму и проверяет её реквизиты, а печатная форма у каждого
- *               документа своя. Объявляется именем хука:
- *
- *                 "storno": { …, "issueHook": "invoice.issue" }
- *
- *               Хук получает `{ table, UID, print, sessionID }` и возвращает
- *               `{ error?, html? }`. Нет хука — встречный документ остаётся
- *               черновиком, и это законно: так живёт коррекция, которую ещё
- *               предстоит заполнить.
- *
- * Порядок шагов у сторно неизменен: создать → ВЫСТАВИТЬ → и только потом
- * отменить исходный. Если выставление сорвётся, исходный документ обязан
- * остаться действующим, а не превратиться в отменённый без замены.
+ * «Недействителен» встречного документа не создаёт и меняет только состояние
+ * (`invalidate.js`) — ему открывать нечего.
  */
 
 const storno = require('./storno');
@@ -43,27 +36,7 @@ async function say(sessionID, key, fallback) {
     return fallback;
 }
 
-function modelFor(table) {
-    const globalCtx = require('../globalServerContext');
-    const name = globalCtx.getModelNameForTable(table);
-    return name ? globalCtx.modelsDB[name] : null;
-}
-
-/**
- * Выставить документ прикладным хуком, если он объявлен.
- * @returns {Promise<{issued: boolean, error?: string, html?: string}>}
- */
-async function issueVia(hookName, table, UID, print, sessionID) {
-    if (!hookName) return { issued: false };
-    const entityHooks = require('../entityHooks');
-    const fn = entityHooks.resolve(hookName);
-    if (typeof fn !== 'function') return { issued: false };
-    const res = await fn({ table, UID, print, sessionID });
-    if (res && res.error) return { issued: false, error: res.error };
-    return { issued: true, html: res && res.html };
-}
-
-/** Оповестить открытые списки: документ появился/изменился. */
+/** Оповестить открытые списки: документ изменился. */
 function notify(table, op, uid) {
     try {
         require('../../apps/uniForm/server').notifyTableChange(table, op, uid);
@@ -71,74 +44,57 @@ function notify(table, op, uid) {
 }
 
 /**
- * «Сторнировать»: полная отмена. Встречный документ выставляется сразу — у него
- * нечего дозаполнять, он зеркало исходного.
+ * Собрать встречный документ вида `kind` и вернуть данные несохранённой формы.
+ * Отказы («уже сторнирован», «не выставлен» …) — здесь же, до открытия окна.
  */
-async function stornoDocument({ table, uid, print }, ctx) {
+async function prepareCounterCommand(kind, { table, uid }, ctx) {
     const sessionID = ctx && ctx.sessionID;
     if (!table || !uid) return { error: await say(sessionID, 'storno_refuse_no_target', 'Документ не найден') };
-    const Model = modelFor(table);
-    const cfg = Model && storno.stornoConfig(Model);
-    if (!cfg) return { error: await say(sessionID, 'storno_refuse_not_declared', 'Для этого документа сторно не объявлено') };
-
     try {
-        const context = { sessionID };
-        const { UID: newUID } = await storno.createStorno({
-            table, UID: uid, context, t: (key) => say(sessionID, key, key)
+        const prep = await storno.prepareCounter({
+            table, UID: uid, kind, context: { sessionID }, t: (key) => say(sessionID, key, key)
         });
-
-        const issued = await issueVia(cfg.issueHook, table, newUID, print, sessionID);
-        if (issued.error) {
-            // Сторно создан, но не выставлен: исходный документ НЕ отменяем.
-            return { error: issued.error, documentUID: newUID, table };
-        }
-
-        await storno.cancelSource(table, uid, context);
-
-        const doc = await Model.findByPk(newUID, { raw: true });
-        notify(table, 'create', newUID);
         return {
-            ok: true, table, documentUID: newUID,
-            number: doc && doc.number,
-            // Форме исходного документа: показать новое состояние сразу.
-            sourceState: cfg.cancelStatus || null,
-            stateField: (require('./immutable').readConfig(Model) || {}).field || null,
-            html: issued.html,
-            // Созданный документ ОТКРЫВАЕТСЯ. Пользователю нужен не факт «создано»,
-            // а сам документ: его номер, суммы, возможность распечатать. Сообщение
-            // остаётся только на случай, когда открыть окно нечем.
-            openDocument: true,
-            message: await say(sessionID, 'storno_created', 'Сторно-документ создан:')
+            ok: true, table,
+            // Параметры открытия формы записи: `prefill`/`prefillTabular` — как у
+            // «создать на основании», `counterOf` — природа документа, которую при
+            // сохранении проверит и запишет ядро (storno.verifyCounter/stampCounter).
+            openNew: { prefill: prep.prefill, prefillTabular: prep.prefillTabular, counterOf: prep.counterOf }
         };
     } catch (e) {
         return { error: (e && e.userMessage) || (e && e.message) || String(e) };
     }
 }
 
+/** «Сторнировать»: полная отмена. */
+async function stornoDocument(params, ctx) {
+    return await prepareCounterCommand('storno', params || {}, ctx);
+}
+
+/** «Скорректировать»: частичное изменение, исходный документ остаётся действующим. */
+async function correctDocument(params, ctx) {
+    return await prepareCounterCommand('correction', params || {}, ctx);
+}
+
 /**
- * «Скорректировать»: частичное изменение. В отличие от сторно НЕ выставляется —
- * пользователю ещё предстоит сказать, как должно быть. Исходный документ статуса
- * не меняет, он остаётся действующим.
+ * «Признать недействительным» (Ungültig): встречного документа нет, меняется только
+ * состояние (`invalidate.js`). Форме возвращается новое состояние — она покажет его
+ * сразу; открывать нечего, поэтому ответ несёт сообщение.
  */
-async function correctDocument({ table, uid }, ctx) {
+async function invalidateCommand({ table, uid }, ctx) {
     const sessionID = ctx && ctx.sessionID;
     if (!table || !uid) return { error: await say(sessionID, 'storno_refuse_no_target', 'Документ не найден') };
-    const Model = modelFor(table);
-    const cfg = Model && storno.counterConfig(Model, 'correction');
-    if (!cfg) return { error: await say(sessionID, 'correction_refuse_not_declared', 'Для этого документа коррекция не объявлена') };
-
     try {
-        const { UID: newUID } = await storno.createCorrection({
+        const res = await require('./invalidate').invalidateDocument({
             table, UID: uid, context: { sessionID }, t: (key) => say(sessionID, key, key)
         });
-        const doc = await Model.findByPk(newUID, { raw: true });
-        notify(table, 'create', newUID);
+        notify(table, 'update', uid);
         return {
-            ok: true, table, documentUID: newUID,
-            number: doc && doc.number,
-            // Открыть созданный документ: работать пользователь будет в нём.
-            openDocument: true,
-            message: await say(sessionID, 'correction_created', 'Документ коррекции создан:')
+            ok: true, table, documentUID: uid,
+            number: res.number,
+            sourceState: res.status,
+            stateField: res.field,
+            message: await say(sessionID, 'invalidate_done', 'Документ признан недействительным:')
         };
     } catch (e) {
         return { error: (e && e.userMessage) || (e && e.message) || String(e) };
@@ -149,8 +105,9 @@ async function correctDocument({ table, uid }, ctx) {
 function register(loadServerScript) {
     return loadServerScript('document.actions', {
         storno: stornoDocument,
-        correct: correctDocument
+        correct: correctDocument,
+        invalidate: invalidateCommand
     }, 'user');
 }
 
-module.exports = { register, stornoDocument, correctDocument };
+module.exports = { register, stornoDocument, correctDocument, invalidateCommand };

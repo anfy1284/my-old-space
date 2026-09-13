@@ -33,9 +33,53 @@
  * базе. Обойти её из прикладного кода нельзя; системный вызов
  * (`sessionID === '__SYS_INTERNAL__'`) НЕ является исключением: неизменность
  * документа — требование GoBD, а не права доступа.
+ *
+ * Исключение ровно одно — АДМИНИСТРАТОР при включённой системной настройке
+ * `core.adminEditsClosedDocuments` (решение владельца 13.09.2026: люди ошибаются,
+ * выставленный по ошибке счёт должен исправляться, а не обрастать встречными
+ * документами). Тогда для его сессии не действуют ни запрет правки, ни запрет
+ * удаления, ни таблица переходов — в том числе возврат в черновик, после которого
+ * повторное выставление снимает новую архивную копию. Журнал изменений пишет
+ * такие правки как обычно, а таблицы `appendOnly` (журнал, архив) закрыты и для него.
  */
 
 const SYSTEM_SESSION_ID = '__SYS_INTERNAL__';
+
+/** Системная настройка, снимающая замок с закрытых документов для администратора. */
+const ADMIN_OVERRIDE_SETTING = { app: 'core', key: 'adminEditsClosedDocuments' };
+
+/**
+ * Снят ли замок для этой сессии: пользователь — администратор и настройка включена.
+ *
+ * Роль берётся только по сессии, как в RLS. Системная сессия не пользователь и
+ * исключения не получает. Любой сбой — «не снят»: ошибка обязана запирать, а не
+ * отпирать.
+ */
+async function adminOverride(sessionID) {
+    if (!sessionID || sessionID === SYSTEM_SESSION_ID) return false;
+    try {
+        const user = await require('../globalServerContext').getUserBySessionID(sessionID);
+        if (!user || !user.UID) return false;
+        const role = await require('../../drive_forms/globalServerContext').getUserAccessRole({ UID: user.UID });
+        if (role !== 'admin') return false;
+        return (await require('../settings').getSystemSetting(ADMIN_OVERRIDE_SETTING.app, ADMIN_OVERRIDE_SETTING.key)) === true;
+    } catch (e) {
+        return false;
+    }
+}
+
+/**
+ * Ленивая проверка исключения на один запрос: чтение настройки нужно лишь тогда,
+ * когда запрос действительно упёрся в замок, а не на каждую запись в любую таблицу.
+ */
+function overrideFor(request) {
+    const sessionID = request && request.context && request.context.sessionID;
+    let cached;
+    return async () => {
+        if (cached === undefined) cached = await adminOverride(sessionID);
+        return cached;
+    };
+}
 
 // Сравнение «то же самое значение» берём у журнала изменений, а не пишем второе:
 // разойдясь, они начали бы считать изменением разное — журнал молчал бы там, где
@@ -189,6 +233,7 @@ async function check(request, globalCtx, t) {
     }
 
     const cfg = readConfig(Model);
+    const override = overrideFor(request);
 
     // ── 1. Сам документ ───────────────────────────────────────────────────
     if (cfg) {
@@ -201,7 +246,7 @@ async function check(request, globalCtx, t) {
 
             if (operation === 'delete') {
                 const allowed = cfg.deletable ? cfg.deletable.indexOf(state) !== -1 : !closed;
-                if (!allowed) {
+                if (!allowed && !(await override())) {
                     throw new ImmutableError(await refusalText(t, 'delete'), 'DOCUMENT_IMMUTABLE',
                         { table, UID: row.UID, state });
                 }
@@ -216,7 +261,7 @@ async function check(request, globalCtx, t) {
 
             if (cfg.transitions && nextState !== undefined && nextState !== state) {
                 const allowedTargets = cfg.transitions[state] || [];
-                if (allowedTargets.indexOf(nextState) === -1) {
+                if (allowedTargets.indexOf(nextState) === -1 && !(await override())) {
                     throw new ImmutableError(
                         await refusalText(t, 'transition', { from: state, to: nextState }),
                         'TRANSITION_NOT_ALLOWED',
@@ -246,7 +291,7 @@ async function check(request, globalCtx, t) {
                 });
                 if (current) forbidden = suspect.filter(k => !same(current[k], data[k]));
             }
-            if (forbidden.length) {
+            if (forbidden.length && !(await override())) {
                 throw new ImmutableError(await refusalText(t, 'update'), 'DOCUMENT_IMMUTABLE',
                     { table, UID: row.UID, state, fields: forbidden });
             }
@@ -266,7 +311,7 @@ async function check(request, globalCtx, t) {
 
     const parents = await statesOf(parent.Model, { UID: parentIds }, parentCfg.field, options);
     for (const p of parents) {
-        if (parentCfg.when.indexOf(p[parentCfg.field]) !== -1) {
+        if (parentCfg.when.indexOf(p[parentCfg.field]) !== -1 && !(await override())) {
             throw new ImmutableError(await refusalText(t, 'updateLine'), 'DOCUMENT_IMMUTABLE',
                 { table, parentUID: p.UID, state: p[parentCfg.field] });
         }
@@ -295,8 +340,9 @@ async function checkInsert(request, globalCtx, t) {
     if (!parentId) return;
 
     const parents = await statesOf(parent.Model, { UID: parentId }, parentCfg.field, options);
+    const override = overrideFor(request);
     for (const p of parents) {
-        if (parentCfg.when.indexOf(p[parentCfg.field]) !== -1) {
+        if (parentCfg.when.indexOf(p[parentCfg.field]) !== -1 && !(await override())) {
             throw new ImmutableError(await refusalText(t, 'updateLine'), 'DOCUMENT_IMMUTABLE',
                 { table, parentUID: p.UID, state: p[parentCfg.field] });
         }
@@ -322,9 +368,13 @@ async function checkInsert(request, globalCtx, t) {
  *
  * @param {Object} Model — модель Sequelize (нужен только `entityConfig`)
  * @param {Object} values — значения записи (для новой — значения по умолчанию формы)
+ * @param {Object} [opts]
+ * @param {boolean} [opts.override] — замок снят для этой сессии (`adminOverride`):
+ *        форма не запирается никогда, а выбрать можно любое состояние, кроме
+ *        командных — выставление по-прежнему только кнопкой, иначе не будет архива.
  * @returns {{field, state, closed, closedStates, editable, states}|null}
  */
-function describeLock(Model, values) {
+function describeLock(Model, values, opts) {
     const cfg = readConfig(Model);
     if (!cfg) return null;
 
@@ -339,8 +389,26 @@ function describeLock(Model, values) {
     // Ручные переходы КАЖДОГО состояния: разрешённые минус командные. Отдаём картой,
     // а не только для текущего состояния: документ может быть проведён в уже открытом
     // окне, и список выбора обязан пересчитаться там же, без переоткрытия формы.
+    const override = !!(opts && opts.override);
+
     let manual = null;
-    if (cfg.transitions) {
+    if (override) {
+        // Все состояния, которые знает декларация, — из любого в любое, кроме командных.
+        const known = [];
+        const add = (s) => { if (s != null && known.indexOf(s) === -1) known.push(s); };
+        cfg.when.forEach(add);
+        (cfg.deletable || []).forEach(add);
+        if (cfg.transitions) {
+            for (const from of Object.keys(cfg.transitions)) {
+                add(from);
+                (cfg.transitions[from] || []).forEach(add);
+            }
+        }
+        manual = {};
+        for (const from of known) {
+            manual[from] = known.filter(s => s !== from && commandStates.indexOf(s) === -1);
+        }
+    } else if (cfg.transitions) {
         manual = {};
         for (const from of Object.keys(cfg.transitions)) {
             manual[from] = (cfg.transitions[from] || []).filter(s => commandStates.indexOf(s) === -1);
@@ -354,8 +422,10 @@ function describeLock(Model, values) {
     return {
         field: cfg.field,
         state,
-        closed: state !== null && cfg.when.indexOf(state) !== -1,
-        closedStates: cfg.when.slice(),
+        closed: !override && state !== null && cfg.when.indexOf(state) !== -1,
+        // Пустой список при снятом замке: форма, в которой документ выставили
+        // командой, не запирается (`DataForm.applyRecordLock`).
+        closedStates: override ? [] : cfg.when.slice(),
         editable: formEditable.slice(),
         states,
         manual
@@ -376,6 +446,8 @@ async function isClosed(globalCtx, table, uid) {
 module.exports = {
     ImmutableError,
     SYSTEM_SESSION_ID,
+    ADMIN_OVERRIDE_SETTING,
+    adminOverride,
     readConfig,
     findParent,
     describeLock,

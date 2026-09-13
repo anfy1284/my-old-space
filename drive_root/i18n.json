@@ -1055,12 +1055,6 @@
         "de": "Modell für die Tabelle nicht gefunden.",
         "pl": "Nie znaleziono modelu tabeli."
     },
-    "storno_refuse_create_failed": {
-        "en": "The cancellation document could not be created.",
-        "ru": "Не удалось создать сторно-документ.",
-        "de": "Der Stornobeleg konnte nicht erstellt werden.",
-        "pl": "Nie udało się utworzyć dokumentu storno."
-    },
     "correction_refuse_not_declared": {
         "en": "Correction is not declared for this document",
         "ru": "Для этого документа коррекция не объявлена",
@@ -1084,12 +1078,6 @@
         "ru": "Счёт сторнирован — корректировать нечего",
         "de": "Die Rechnung wurde storniert — es gibt nichts mehr zu korrigieren",
         "pl": "Rachunek został stornowany — nie ma czego korygować"
-    },
-    "correction_created": {
-        "en": "Correction document created:",
-        "ru": "Документ коррекции создан:",
-        "de": "Korrekturbeleg erstellt:",
-        "pl": "Utworzono dokument korygujący:"
     },
     "storno_document_confirm": {
         "en": "Create a storno document?",
@@ -1144,6 +1132,54 @@
         "ru": "Язык интерфейса",
         "de": "Sprache der Oberfläche",
         "pl": "Język interfejsu"
+    },
+    "invalidate_refuse_not_declared": {
+        "en": "Marking as void is not declared for this document.",
+        "ru": "Для этого документа признание недействительным не объявлено.",
+        "de": "Für diesen Beleg ist die Kennzeichnung als ungültig nicht vorgesehen.",
+        "pl": "Dla tego dokumentu unieważnienie nie jest przewidziane."
+    },
+    "invalidate_refuse_state": {
+        "en": "Only an issued document can be marked as void.",
+        "ru": "Недействительным можно признать только выставленный документ.",
+        "de": "Nur ein ausgestellter Beleg kann als ungültig gekennzeichnet werden.",
+        "pl": "Tylko wystawiony dokument można unieważnić."
+    },
+    "invalidate_refuse_has_counter": {
+        "en": "A storno or correction already refers to this document — it cannot be marked as void.",
+        "ru": "К документу уже оформлены сторно или коррекция — признать его недействительным нельзя.",
+        "de": "Zu diesem Beleg gibt es bereits ein Storno oder eine Korrektur — er kann nicht als ungültig gekennzeichnet werden.",
+        "pl": "Do tego dokumentu istnieje już storno lub korekta — nie można go unieważnić."
+    },
+    "invalidate_done": {
+        "en": "The document is marked as void:",
+        "ru": "Документ признан недействительным:",
+        "de": "Der Beleg ist als ungültig gekennzeichnet:",
+        "pl": "Dokument został unieważniony:"
+    },
+    "storno_refuse_invalidated": {
+        "en": "The document is void — there is nothing to cancel or correct.",
+        "ru": "Документ признан недействительным — отменять и корректировать нечего.",
+        "de": "Der Beleg ist ungültig — es gibt nichts zu stornieren oder zu korrigieren.",
+        "pl": "Dokument jest nieważny — nie ma czego anulować ani korygować."
+    },
+    "settings_core_group_documents": {
+        "en": "Documents",
+        "ru": "Документы",
+        "de": "Belege",
+        "pl": "Dokumenty"
+    },
+    "settings_core_admin_edits_closed_docs": {
+        "en": "Administrator may change and delete issued documents",
+        "ru": "Администратор может менять и удалять выставленные документы",
+        "de": "Administrator darf ausgestellte Belege ändern und löschen",
+        "pl": "Administrator może zmieniać i usuwać wystawione dokumenty"
+    },
+    "settings_core_admin_edits_closed_docs_hint": {
+        "en": "To correct an issued invoice, set it back to draft, edit it and issue it again — a new archive copy is taken. Changes are still recorded in the audit log.",
+        "ru": "Чтобы исправить выставленный счёт, верните его в черновик, поправьте и выставьте снова — будет снята новая архивная копия. Изменения по-прежнему пишутся в журнал.",
+        "de": "Um eine ausgestellte Rechnung zu korrigieren: zurück auf Entwurf setzen, ändern und erneut ausstellen — dabei wird eine neue Archivkopie erstellt. Änderungen werden weiterhin protokolliert.",
+        "pl": "Aby poprawić wystawiony rachunek, przywróć go do wersji roboczej, popraw i wystaw ponownie — zostanie utworzona nowa kopia archiwalna. Zmiany nadal trafiają do dziennika."
     },
     "settings_scope_user": {
         "en": "User",

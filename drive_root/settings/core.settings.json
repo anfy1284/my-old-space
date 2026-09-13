@@ -13,6 +13,17 @@
             "caption": { "i18n": "settings_core_language" },
             "default": null,
             "order": 10
+        },
+        "adminEditsClosedDocuments": {
+            "//": "Снимает с администратора замок выставленных документов (drive_root/db/immutable.js#adminOverride). Решение владельца 13.09.2026.",
+            "scope": "system",
+            "type": "boolean",
+            "default": false,
+            "visibility": "admin",
+            "group": { "i18n": "settings_core_group_documents" },
+            "caption": { "i18n": "settings_core_admin_edits_closed_docs" },
+            "hint": { "i18n": "settings_core_admin_edits_closed_docs_hint" },
+            "order": 100
         }
     }
 }
