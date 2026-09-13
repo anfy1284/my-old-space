@@ -14,6 +14,19 @@ const projectRoot = globalRoot.getProjectRoot() || process.cwd();
 i18n.loadI18n(projectRoot);
 console.log('[drive_forms/init] i18n registry loaded');
 
+// Реестр объявленных настроек приложений (settings.json каждого приложения).
+// Проверка таблиц — отдельным шагом: реестр собирается раньше, чем есть модели,
+// и опечатка в имени таблицы иначе всплыла бы молчаливым null через полгода.
+const settingsRegistry = require('../drive_root/settings/registry');
+try {
+	settingsRegistry.load(projectRoot);
+	const models = globalRoot.modelsDB || {};
+	const tables = Object.keys(models).map(n => models[n] && models[n].tableName).filter(Boolean);
+	if (tables.length) settingsRegistry.validateTables(tables);
+} catch (e) {
+	console.error('[drive_forms/init] settings registry failed:', e && e.message);
+}
+
 async function runAppInits() {
 	try {
 		const localAppsPath = path.join(__dirname, 'apps.json');

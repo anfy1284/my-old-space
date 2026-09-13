@@ -96,6 +96,12 @@
             "code": "scheduler",
             "name": "Scheduled tasks",
             "displayOrder": 30
+        },
+        {
+            "UID": "000000000-sysdata-0004",
+            "code": "app_settings",
+            "name": "Application settings",
+            "displayOrder": 40
         }
     ],
     "translations": [

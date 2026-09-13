@@ -5480,8 +5480,16 @@ class TextBox extends FormInput {
 
     getValue() {
         if (this.isDate) { return this._getDateISO(); }
-        // For selection controls, rawValue holds the FK ID which differs from displayed text
-        if ((this.showSelectionButton || this.listMode) && this.rawValue !== undefined && this.rawValue !== null) {
+        // Поле выбора записи возвращает UID, а не то, что видно в поле.
+        //
+        // Условие включает САМ факт справочника (`selection.table`), а не только наличие
+        // кнопок: у поля с `readOnly` кнопок нет вовсе (см. renderItem, ветка
+        // recordSelector), и без этой проверки `getValue`/`collectData` отдавали
+        // ПРЕДСТАВЛЕНИЕ вместо идентификатора. Поймано на форме настроек: заблокированный
+        // селектор пользователя отдавал «user» вместо UID, и сохранение своих же настроек
+        // отклонялось как «чужая запись».
+        const isSelectionField = this.showSelectionButton || this.listMode || !!(this.selection && this.selection.table);
+        if (isSelectionField && this.rawValue !== undefined && this.rawValue !== null) {
             return this.rawValue;
         }
         // For numeric inputs, return a Number (not a string)

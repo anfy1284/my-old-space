@@ -58,5 +58,17 @@
         "ru": "Прочитано",
         "de": "Gelesen",
         "pl": "Przeczytane"
+    },
+    "sysset_notification_retention_days": {
+        "en": "Keep notifications, days",
+        "ru": "Хранить уведомления, дней",
+        "de": "Benachrichtigungen aufbewahren, Tage",
+        "pl": "Przechowywanie powiadomień, dni"
+    },
+    "settings_app_notifications": {
+        "en": "Notifications",
+        "ru": "Уведомления",
+        "de": "Benachrichtigungen",
+        "pl": "Powiadomienia"
     }
 }

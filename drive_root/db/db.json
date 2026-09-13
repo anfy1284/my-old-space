@@ -1295,6 +1295,28 @@
             }
         },
         {
+            "name": "SettingsValues",
+            "tableName": "settings_values",
+            "fields": {
+                "scopeTable": { "type": "STRING", "allowNull": false },
+                "scopeId": { "type": "STRING", "allowNull": false },
+                "appName": { "type": "STRING", "allowNull": false },
+                "kind": { "type": "STRING", "allowNull": false, "defaultValue": "setting" },
+                "data": { "type": "JSON", "allowNull": false, "defaultValue": {} },
+                "userId": { "type": "STRING", "allowNull": true },
+                "organizationId": { "type": "STRING", "allowNull": true }
+            },
+            "options": {
+                "timestamps": true,
+                "indexes": [
+                    { "unique": true, "fields": ["scopeTable", "scopeId", "appName", "kind"] }
+                ]
+            },
+            "entityConfig": {
+                "systemData": "app_settings"
+            }
+        },
+        {
             "name": "DocumentAuditLog",
             "tableName": "document_audit_log",
             "entityConfig": {

@@ -1,0 +1,13 @@
+{
+    "level": "app",
+    "autoStart": false,
+    "system": [
+        "app_settings"
+    ],
+    "access": [
+        "admin",
+        "user"
+    ],
+    "dependencies": {},
+    "mainMenuCommands": []
+}

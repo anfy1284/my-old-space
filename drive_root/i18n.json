@@ -1126,5 +1126,35 @@
         "ru": "runScript: функция не найдена в скрипте: ",
         "de": "runScript: Funktion im Skript nicht gefunden: ",
         "pl": "runScript: nie znaleziono funkcji w skrypcie: "
+    },
+    "settings_app_core": {
+        "en": "Interface",
+        "ru": "Интерфейс",
+        "de": "Oberfläche",
+        "pl": "Interfejs"
+    },
+    "settings_core_language": {
+        "en": "Interface language",
+        "ru": "Язык интерфейса",
+        "de": "Sprache der Oberfläche",
+        "pl": "Język interfejsu"
+    },
+    "settings_scope_user": {
+        "en": "User",
+        "ru": "Пользователь",
+        "de": "Benutzer",
+        "pl": "Użytkownik"
+    },
+    "settings_scope_system": {
+        "en": "System",
+        "ru": "Система",
+        "de": "System",
+        "pl": "System"
+    },
+    "settings_scope_default": {
+        "en": "Default values",
+        "ru": "Значения по умолчанию",
+        "de": "Standardwerte",
+        "pl": "Wartości domyślne"
     }
 }

@@ -57,5 +57,27 @@ module.exports = {
         // в роли желаемого состояния, и создаёт её ядро (drive_root/db/difference.js).
         const ts = injectTargetSections(mergedModelsDef);
         if (ts) console.log(`[my-old-space:events_handler] ${ts} mirror tabular section(s) synthesized for correction documents.`);
+    },
+
+    /**
+     * Вызывается после миграции схемы и досева `defaultValues`.
+     *
+     * Засев значений по умолчанию для настроек приложений: объявленный в `settings.json`
+     * дефолт попадает в строку дефолтов ОДИН раз, дальше его правит администратор и
+     * ядро эту строку не трогает (drive_root/settings/seed.js).
+     *
+     * @param {Object} context — { sequelize, projectRoot, level }
+     */
+    onDatabasePostInit: async function (context) {
+        const { sequelize, projectRoot } = context || {};
+        if (!sequelize) return;
+        try {
+            const { seedDefaults } = require('./drive_root/settings/seed');
+            await seedDefaults(sequelize, projectRoot);
+        } catch (e) {
+            // Настройки без дефолтов работают (значение берётся из объявления), поэтому
+            // сорванный засев не повод не пустить систему.
+            console.error('[my-old-space:events_handler] settings seed failed:', e && e.message || e);
+        }
     }
 };

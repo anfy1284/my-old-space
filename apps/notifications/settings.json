@@ -1,0 +1,21 @@
+{
+    "app": {
+        "caption": {
+            "i18n": "settings_app_notifications"
+        },
+        "icon": "/apps/general_icons/resources/public/16x16/chat.png",
+        "order": 60
+    },
+    "settings": {
+        "retentionDays": {
+            "scope": "system",
+            "type": "number",
+            "default": 30,
+            "visibility": "admin",
+            "caption": {
+                "i18n": "sysset_notification_retention_days"
+            },
+            "order": 10
+        }
+    }
+}

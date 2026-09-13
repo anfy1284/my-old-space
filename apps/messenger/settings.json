@@ -1,0 +1,21 @@
+{
+    "app": {
+        "caption": {
+            "i18n": "settings_app_messenger"
+        },
+        "icon": "/apps/general_icons/resources/public/16x16/chat.png",
+        "order": 70
+    },
+    "settings": {
+        "maxAttachmentMb": {
+            "scope": "system",
+            "type": "number",
+            "default": 10,
+            "visibility": "admin",
+            "caption": {
+                "i18n": "sysset_messenger_max_attachment_mb"
+            },
+            "order": 10
+        }
+    }
+}

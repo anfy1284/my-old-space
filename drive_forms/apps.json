@@ -76,6 +76,10 @@
         {
             "name": "backup",
             "path": "/backup"
+        },
+        {
+            "name": "settings",
+            "path": "/settings"
         }
     ]
 }

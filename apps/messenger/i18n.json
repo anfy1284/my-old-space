@@ -53,7 +53,6 @@
         "de": "Zugriff verweigert",
         "pl": "Brak dostępu"
     },
-
     "msg_chat_owner_field": {
         "en": "Owner",
         "ru": "Владелец",
@@ -102,7 +101,6 @@
         "de": "Letzte Nachricht",
         "pl": "Ostatnia wiadomość"
     },
-
     "msg_member_chat_field": {
         "en": "Chat",
         "ru": "Чат",
@@ -139,7 +137,6 @@
         "de": "Aktiv",
         "pl": "Aktywny"
     },
-
     "msg_message_chat_field": {
         "en": "Chat",
         "ru": "Чат",
@@ -164,7 +161,6 @@
         "de": "Client-Nachrichtenkennung",
         "pl": "Identyfikator klienta"
     },
-
     "msg_read_message_field": {
         "en": "Message",
         "ru": "Сообщение",
@@ -195,7 +191,6 @@
         "de": "Gelesen am",
         "pl": "Przeczytano"
     },
-
     "msg_att_message_field": {
         "en": "Message",
         "ru": "Сообщение",
@@ -243,5 +238,17 @@
         "ru": "Миниатюра",
         "de": "Vorschaubild",
         "pl": "Miniatura"
+    },
+    "sysset_messenger_max_attachment_mb": {
+        "en": "Messenger: max attachment size, MB",
+        "ru": "Мессенджер: предел размера вложения, МБ",
+        "de": "Messenger: maximale Anhangsgröße, MB",
+        "pl": "Komunikator: maksymalny rozmiar załącznika, MB"
+    },
+    "settings_app_messenger": {
+        "en": "Messenger",
+        "ru": "Мессенджер",
+        "de": "Messenger",
+        "pl": "Komunikator"
     }
 }

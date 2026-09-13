@@ -471,9 +471,9 @@ module.exports = function factory(modelsDB, Utilities) {
     // ── Вложения ────────────────────────────────────────────────────────────
     async function maxAttachmentBytes() {
         try {
-            const systemSettings = require('../../systemSettings/lib/systemSettings');
-            const mb = await systemSettings.getNumber('messengerMaxAttachmentMb', 10);
-            return Math.max(1, mb) * 1024 * 1024;
+            const settings = require('../../../drive_root/settings');
+            const mb = await settings.getSystemSetting('messenger', 'maxAttachmentMb');
+            return Math.max(1, Number(mb) || 10) * 1024 * 1024;
         } catch (e) {
             return 10 * 1024 * 1024;
         }

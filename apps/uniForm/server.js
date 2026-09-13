@@ -242,6 +242,30 @@ async function translateLayoutI18n(items, sessionID) {
 }
 
 /**
+ * Клиентские события формы (form-level) из объявления лейаута.
+ *
+ * На клиент отдаются только привязки БЕЗ `serverScript`: серверные (`onLoadData`,
+ * `onSave`, `onBeforeSave`) исполняются здесь и клиенту не нужны, а `onReady`,
+ * `onChange` и прочие клиентские — нужны, иначе форма стоит недонастроенной.
+ *
+ * Функция общая на все ветки ответа намеренно: ветка формы с собственным
+ * `onLoadData` события просто не возвращала, и любое `onReady` в такой форме молча
+ * не срабатывало (форма настроек: селекторы уровней не прятались, кнопка смены
+ * пароля не гасла). Пока фильтр был написан в одном месте из двух, разойтись они
+ * могли только так.
+ */
+function clientEventsOf(customLayoutObj) {
+    let out = null;
+    if (customLayoutObj && customLayoutObj.events) {
+        for (const k of Object.keys(customLayoutObj.events)) {
+            const b = customLayoutObj.events[k];
+            if (b && !b.serverScript) { (out = out || {})[k] = b; }
+        }
+    }
+    return out;
+}
+
+/**
  * Резолвит appCaption в строку для сессии.
  * Принимает строку или объект { i18n: 'key' }.
  */
@@ -328,6 +352,7 @@ async function getLayoutWithData(params, sessionID) {
                 return {
                     layout: clLayout, data: listData, datasetId,
                     clientScript: customLayout.clientScript || null,
+                    events: clientEventsOf(customLayout),
                     formIcon: customLayout.listIcon || customLayout.formIcon || getDefaultIconForTable(tableName, 'list'),
                     // Заголовок никогда не должен остаться родовым «uniForm». Если у таблицы
                     // нет зарегистрированной подписи — берём перевод по ключу = имя таблицы
@@ -1120,7 +1145,8 @@ async function generateFormSpec(tableName, params, sessionID) {
                     // (tForSession вернёт само имя при отсутствии перевода). Заголовок никогда
                     // не должен остаться родовым «uniForm» (форма через onLoadData).
                     const resolvedOnLoadCaption = (await resolveAppCaption(appCaption, sessionID)) || await tForSession(tableName, sessionID);
-                    return { layout, data, datasetId, clientScript, formIcon, appCaption: resolvedOnLoadCaption, windowState: windowState || 'centered', fkLookups };
+                    return { layout, data, datasetId, clientScript, formIcon, appCaption: resolvedOnLoadCaption, windowState: windowState || 'centered', fkLookups,
+                             events: clientEventsOf(customLayoutObj) };
                 }
             } catch (e) {
                 console.error('[uniForm/generateFormSpec] onLoadData dispatch error:', e && e.message || e);
@@ -1609,13 +1635,7 @@ async function generateFormSpec(tableName, params, sessionID) {
         // привязки из events, у которых НЕТ serverScript (серверные, напр. onBeforeSave,
         // обрабатываются на сервере и на клиент не отдаются). Напр. onChange — общее
         // событие «форма изменилась», которое DataForm дёргает из setModified.
-        let clientEvents = null;
-        if (customLayoutObj && customLayoutObj.events) {
-            for (const k of Object.keys(customLayoutObj.events)) {
-                const b = customLayoutObj.events[k];
-                if (b && !b.serverScript) { (clientEvents = clientEvents || {})[k] = b; }
-            }
-        }
+        const clientEvents = clientEventsOf(customLayoutObj);
 
         // Программно заполненные значения — только для НОВОЙ записи (для существующей
         // «изменения» не было). Пустой реестр на клиент не отдаём.

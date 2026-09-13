@@ -22,6 +22,10 @@
 const systemData = require('./systemData');
 
 systemData.registerStrategy('users_and_roles', require('./systemDataUsers').mergeUsers);
+// Настройки приложений: восстанавливаются из копии ЦЕЛИКОМ, все уровни (решение
+// владельца 10.09.2026). Стратегия всё равно нужна: умолчание механизма — «текущее
+// целиком», то есть ровно обратное. Выборочный вариант лежит рядом за константой.
+systemData.registerStrategy('app_settings', require('./systemDataSettings').restoreSettings);
 // Остальным типам («настройки копирования», «регламентные задания») отдельная
 // стратегия не нужна: у них побеждает текущее целиком, а это и есть умолчание.
 

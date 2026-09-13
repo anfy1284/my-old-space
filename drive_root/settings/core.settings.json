@@ -1,0 +1,18 @@
+{
+    "app": {
+        "caption": { "i18n": "settings_app_core" },
+        "icon": "/apps/general_icons/resources/public/16x16/settings.png",
+        "order": 10
+    },
+
+    "settings": {
+        "language": {
+            "scope": "user",
+            "type": "reference",
+            "reference": { "table": "languages", "displayField": "name" },
+            "caption": { "i18n": "settings_core_language" },
+            "default": null,
+            "order": 10
+        }
+    }
+}

@@ -16,7 +16,7 @@
 
 const { Op } = require('sequelize');
 const dbGateway = require('../../drive_root/dbGateway');
-const systemSettings = require('../systemSettings/lib/systemSettings');
+const settings = require('../../drive_root/settings');
 
 // Если описания настройки нет вовсе (не досеялось, чужая инсталляция) — задача
 // обязана отработать, а не встать. Тот же срок, что и в описании настройки.
@@ -42,7 +42,7 @@ module.exports = function (modelsDB, Utilities) {
                 // Настройка читается на КАЖДОМ прогоне: задача идёт в отдельном
                 // процессе-воркере, и значение, прочитанное при его старте, могло
                 // устареть на недели (тот же урок, что с настройками бэкапа).
-                const days = await systemSettings.getNumber('notificationRetentionDays', FALLBACK_RETENTION_DAYS);
+                const days = await settings.getSystemSetting('notifications', 'retentionDays');
                 const retention = (Number.isFinite(days) && days > 0) ? days : FALLBACK_RETENTION_DAYS;
 
                 const cutoff = new Date(Date.now() - retention * 24 * 60 * 60 * 1000);

@@ -286,13 +286,28 @@ async function getUserAccessRole(user) {
 const _SESSION_CTX_NS = 'session_context';
 const _SYSTEM_SESSION_ID = '__SYS_INTERNAL__';
 
-// 5.8: кэш UID статичного поля настройки 'Language' (undefined — ещё не искали).
-let _languageFieldUID;
-async function _resolveLanguageFieldUID(mdb) {
-    if (_languageFieldUID !== undefined) return _languageFieldUID;
-    const langField = await mdb.UserSettingsFields.findOne({ where: { name: 'Language' } });
-    _languageFieldUID = langField ? langField.UID : null;
-    return _languageFieldUID;
+/**
+ * Язык интерфейса пользователя: настройка `core.language` (ссылка на `languages`).
+ *
+ * Читается через общий механизм настроек (drive_root/settings) — своего EAV-запроса
+ * здесь больше нет. Контекст сессии кэшируется, поэтому лишних запросов не будет и
+ * без кэша настроек (его нет намеренно, см. drive_root/settings/index.js).
+ *
+ * @returns {Promise<string|null>} код языка ('de', 'ru', …) либо null
+ */
+async function _resolveUserLanguageCode(userUID) {
+    try {
+        const settings = require('../drive_root/settings');
+        const langUID = await settings.getUserSetting(userUID, 'core', 'language');
+        if (!langUID) return null;
+        const mdb = global.modelsDB;
+        if (!mdb || !mdb.Languages) return null;
+        const langRecord = await mdb.Languages.findByPk(String(langUID));
+        return (langRecord && langRecord.code) ? langRecord.code : null;
+    } catch (e) {
+        console.error('[getSessionContext] Error resolving language:', e.message);
+        return null;
+    }
 }
 
 /**
@@ -324,27 +339,8 @@ async function getSessionContext(sessionID) {
 
     const role = await getUserAccessRole(user);
 
-    // Resolve user's language preference from settings
-    let language = 'en';
-    try {
-        const mdb = global.modelsDB;
-        if (mdb && mdb.UserSettingsFields && mdb.UserSettingsStringValues && mdb.Languages) {
-            // 5.8: UID поля настройки 'Language' статичен — кэшируем, чтобы не делать
-            // findOne на КАЖДЫЙ cache-miss контекста сессии (был 1 из 3 запросов).
-            const langFieldUID = await _resolveLanguageFieldUID(mdb);
-            if (langFieldUID) {
-                const val = await mdb.UserSettingsStringValues.findOne({
-                    where: { userId: user.UID, settingsFieldId: langFieldUID }
-                });
-                if (val && val.value) {
-                    const langRecord = await mdb.Languages.findByPk(val.value);
-                    if (langRecord) language = langRecord.code;
-                }
-            }
-        }
-    } catch (e) {
-        console.error('[getSessionContext] Error resolving language:', e.message);
-    }
+    // Язык интерфейса — настройка `core.language`; не задана → английский.
+    const language = (await _resolveUserLanguageCode(user.UID)) || 'en';
 
     const ctx = { userId: user.UID, name: user.name, role, language };
     await _memStoreForRoles.set(_SESSION_CTX_NS, sessionID, ctx);
