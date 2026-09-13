@@ -44,6 +44,9 @@ const PROJECT_APP = 'project';
 
 const VISIBILITIES = new Set(['user', 'admin']);
 
+/** Вид контрола там, где их несколько (пока только enum: список или радио-группа). */
+const CONTROLS = new Set(['list', 'radio']);
+
 /**
  * Встроенные уровни.
  *
@@ -182,10 +185,12 @@ function readSettings(raw, appName, file) {
             continue;
         }
         if (!decl.caption) log.warn(`[settings] ${where}: нет caption — в форме будет виден идентификатор`);
-        // Радио-кнопок в наборе контролов формы пока нет (см. §13 ТЗ, следующий шаг):
-        // молча подсунуть выпадающий список нельзя — владелец просил именно радио.
-        if (decl.control === 'radio') {
-            log.warn(`[settings] ${where}: control "radio" ещё не реализован — поле будет выпадающим списком`);
+        // `control` выбирает вид контрола там, где их несколько: enum рисуется списком
+        // либо радио-группой. Неизвестное значение — ошибка объявления, а не тихий откат
+        // к умолчанию: автор ждёт одного вида, а получает другой.
+        if (decl.control && !CONTROLS.has(decl.control)) {
+            declError(where, `неизвестный control "${decl.control}" (допустимо: ${Array.from(CONTROLS).join(', ')})`);
+            continue;
         }
 
         const normalized = {

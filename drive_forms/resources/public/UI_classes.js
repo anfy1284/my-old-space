@@ -3618,6 +3618,50 @@ class DataForm extends Form {
                 { const ctrlKey = item.name || item.data; if (ctrlKey) this.registerControl(ctrlKey, ctrl); }
                 break;
             }
+            case 'radioGroup': {
+                // Варианты — как у `emunList`: из данных (если сервер прислал `options`),
+                // иначе из лейаута. Значение — из `item.value` или из загруженных данных.
+                let rgItems = [];
+                try {
+                    if (item.data && this._dataMap && this._dataMap[item.data] && Array.isArray(this._dataMap[item.data].options)) {
+                        rgItems = this._dataMap[item.data].options;
+                    } else if (Array.isArray(item.options)) {
+                        rgItems = item.options;
+                    } else if (properties && Array.isArray(properties.listItems)) {
+                        rgItems = properties.listItems;
+                    }
+                } catch (e) { rgItems = []; }
+
+                let rgValue = item.value;
+                if ((rgValue === null || rgValue === undefined) && item.data && this._dataMap
+                        && Object.prototype.hasOwnProperty.call(this._dataMap, item.data)) {
+                    const rec = this._dataMap[item.data];
+                    rgValue = (rec && rec.value !== undefined) ? rec.value : rec;
+                }
+
+                const rg = new RadioGroup(contentArea, Object.assign({}, properties, { items: rgItems }));
+                rg.setCaption(caption);
+                rg.setValue(rgValue);
+                rg.Draw(contentArea);
+
+                // Правка радио — такое же изменение формы, как ввод в поле: и в _dataMap,
+                // и в признак «форма изменена». Без этого выбор терялся при сохранении.
+                if (item.data) {
+                    const fieldKey = item.data;
+                    const formSelf = this;
+                    rg._onValueChanged = function (value) {
+                        try {
+                            if (!formSelf._dataMap) formSelf._dataMap = {};
+                            if (!formSelf._dataMap[fieldKey]) formSelf._dataMap[fieldKey] = { name: fieldKey, value };
+                            else formSelf._dataMap[fieldKey].value = value;
+                        } catch (_) {}
+                        try { if (!item.suppressModified && typeof formSelf.setModified === 'function') formSelf.setModified(true); } catch (_) {}
+                    };
+                }
+                try { if (item.data && rg.element) rg.element.dataset.field = item.data; } catch (e) {}
+                { const ctrlKey = item.name || item.data; if (ctrlKey) this.registerControl(ctrlKey, rg); }
+                break;
+            }
             case 'checkbox': {
                 const cb = new CheckBox(contentArea, properties);
                 let checked = !!item.value;
@@ -8816,18 +8860,42 @@ class RadioButton extends UIObject {
     }
 }
 
+/**
+ * Группа радио-кнопок — контрол лейаута (`"type": "radioGroup"`).
+ *
+ * Отличие от выпадающего списка не косметическое: список прячет варианты, радио
+ * показывает их все сразу. Для настройки из двух-трёх взаимоисключающих режимов это
+ * важнее компактности — пользователь видит, между чем выбирает, не открывая ничего.
+ *
+ * Варианты — пары значение/подпись, как у `emunList`:
+ *   "options": [ { "value": "bookingDate", "caption": "По дате брони" }, … ]
+ * Строка вместо объекта тоже принимается: подпись = значение.
+ *
+ * `getValue()` возвращает ЗНАЧЕНИЕ, а не подпись: старый класс отдавал текст кнопки,
+ * и такое значение уехало бы в базу вместо кода варианта.
+ */
 class RadioGroup extends UIObject {
-    constructor(parentElement = null) {
+    constructor(parentElement = null, properties = {}) {
         super();
         this.parentElement = parentElement;
         this.items = [];
         this.value = null;
-        this.groupName = 'radiogroup_' + Math.random().toString(36).substr(2, 9);
+        this.readOnly = !!(properties && properties.readOnly);
+        this.orientation = (properties && properties.orientation === 'horizontal') ? 'horizontal' : 'vertical';
+        this.groupName = 'radiogroup_' + Math.random().toString(36).slice(2, 11);
         this.radios = [];
+        this.onChange = null;
+        if (properties && Array.isArray(properties.items)) this.setItems(properties.items);
+        if (properties && properties.value !== undefined) this.value = properties.value;
     }
 
+    /** Варианты: [{ value, caption }] либо массив строк. */
     setItems(items) {
-        this.items = items;
+        this.items = (items || []).map(it => (it && typeof it === 'object')
+            ? { value: it.value, caption: (it.caption !== undefined && it.caption !== null) ? String(it.caption) : String(it.value) }
+            : { value: it, caption: String(it) });
+        if (this.element) this._rebuild();
+        return this;
     }
 
     setGroupName(name) {
@@ -8836,66 +8904,111 @@ class RadioGroup extends UIObject {
     }
 
     setValue(value) {
-        this.value = value;
-        this.radios.forEach(r => {
-            if (r.text === value) {
-                r.setChecked(true);
-            } else {
-                r.setChecked(false);
-            }
-        });
+        this.value = (value === undefined) ? null : value;
+        this._syncChecked();
+        return this;
     }
 
+    /** Значение выбранного варианта (не подпись). */
     getValue() {
-        const checked = this.radios.find(r => r.checked);
-        return checked ? checked.text : null;
+        return this.value;
+    }
+
+    /** Подпись выбранного варианта — для мест, где нужен текст. */
+    getText() {
+        const found = this.items.find(i => String(i.value) === String(this.value));
+        return found ? found.caption : '';
+    }
+
+    setReadOnly(readOnly) {
+        this.readOnly = !!readOnly;
+        this._syncEnabled();
+        return this;
+    }
+
+    /** Единый способ выключить контрол: тем же именем, что у полей ввода. */
+    setEnabled(enabled) {
+        return this.setReadOnly(!enabled);
+    }
+
+    setCaption(caption) {
+        this.caption = caption || '';
+        if (this.captionElement) this.captionElement.textContent = this.caption ? (this.caption + ':') : '';
+        return this;
+    }
+
+    _syncChecked() {
+        this.radios.forEach((r, i) => r.setChecked(String(this.items[i] && this.items[i].value) === String(this.value)));
+    }
+
+    _syncEnabled() {
+        for (const r of this.radios) {
+            if (!r.element) continue;
+            r.element.style.opacity = this.readOnly ? '0.5' : '';
+            r.element.style.pointerEvents = this.readOnly ? 'none' : '';
+        }
+    }
+
+    _rebuild() {
+        if (!this.itemsBox) return;
+        this.itemsBox.innerHTML = '';
+        this.radios = [];
+        for (const item of this.items) {
+            const rb = new RadioButton(null);
+            rb.setText(item.caption);
+            rb.setGroup(this.groupName);
+            rb.Draw(this.itemsBox);
+            // RadioButton сам себя рисует абсолютом только без родителя; здесь родитель
+            // есть, поэтому кнопки укладываются потоком и группа не ломает выравнивание
+            // соседних полей в форме.
+            if (rb.element) {
+                rb.element.style.position = 'static';
+                rb.element.style.marginRight = (this.orientation === 'horizontal') ? '12px' : '';
+            }
+            rb.onClick = () => {
+                if (this.readOnly) return;
+                if (String(this.value) === String(item.value)) return;
+                this.value = item.value;
+                this._syncChecked();
+                // Служебный хук ядра (запись в _dataMap и признак «форма изменена») отдельно
+                // от `onChange`: `onChange` — это КЛИЕНТСКАЯ привязка из лейаута, форма
+                // присваивает её после отрисовки (_wireItemEvents) и затёрла бы обёртку.
+                if (typeof this._onValueChanged === 'function') {
+                    try { this._onValueChanged(this.value, item.caption); } catch (e) { console.error('[RadioGroup] _onValueChanged', e); }
+                }
+                if (typeof this.onChange === 'function') {
+                    try { this.onChange(this.value, item.caption); } catch (e) { console.error('[RadioGroup] onChange', e); }
+                }
+            };
+            this.radios.push(rb);
+        }
+        this._syncChecked();
+        this._syncEnabled();
     }
 
     Draw(container) {
         if (!this.element) {
             this.element = document.createElement('div');
-            this.element.style.position = 'absolute';
+            this.element.style.display = 'flex';
+            this.element.style.alignItems = 'center';
+            this.element.style.gap = '4px';
 
-            const itemHeight = 20;
-            const totalHeight = this.items.length * itemHeight;
-            this.setHeight(totalHeight);
+            this.captionElement = document.createElement('label');
+            this.captionElement.className = 'ui-radiogroup-label';
+            this.captionElement.style.fontFamily = 'MS Sans Serif, sans-serif';
+            this.captionElement.style.fontSize = '11px';
+            this.captionElement.textContent = this.caption ? (this.caption + ':') : '';
+            this.element.appendChild(this.captionElement);
 
-            if (!this.parentElement) {
-                this.element.style.left = this.x + 'px';
-                this.element.style.top = this.y + 'px';
-                this.element.style.width = this.width + 'px';
-                this.element.style.height = this.height + 'px';
-            }
+            this.itemsBox = document.createElement('div');
+            this.itemsBox.style.display = 'flex';
+            this.itemsBox.style.flexDirection = (this.orientation === 'horizontal') ? 'row' : 'column';
+            this.itemsBox.style.gap = (this.orientation === 'horizontal') ? '0' : '2px';
+            this.element.appendChild(this.itemsBox);
 
-            this.items.forEach((item, idx) => {
-                const rb = new RadioButton(null);
-                rb.setText(item);
-                rb.setGroup(this.groupName);
-                rb.setX(0); // Relative to group container
-                rb.setY(idx * itemHeight);
-
-                if (this.value === item) {
-                    rb.setChecked(true);
-                }
-
-                this.radios.push(rb);
-                rb.Draw(this.element);
-
-                const originalOnClick = rb.onClick;
-                rb.onClick = (e) => {
-                    this.value = item;
-                    this.radios.forEach(other => {
-                        if (other !== rb) other.setChecked(false);
-                    });
-                    if (originalOnClick) originalOnClick(e);
-                };
-            });
+            this._rebuild();
         }
-
         if (container) container.appendChild(this.element);
-
-        if (this.width > 0 && this.element) this.element.style.width = this.width + 'px';
-
         return this.element;
     }
 }

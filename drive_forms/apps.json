@@ -30,10 +30,6 @@
             "path": "/notifications"
         },
         {
-            "name": "systemSettings",
-            "path": "/systemSettings"
-        },
-        {
             "name": "main_menu",
             "path": "/main_menu"
         },
@@ -44,10 +40,6 @@
         {
             "name": "fileSystem",
             "path": "/fileSystem"
-        },
-        {
-            "name": "UserSettings",
-            "path": "/UserSettings"
         },
         {
             "name": "uniForm",

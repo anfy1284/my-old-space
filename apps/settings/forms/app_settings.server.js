@@ -117,7 +117,10 @@ function controlFor(decl) {
             ctrl.type = 'textarea';
             break;
         case 'enum':
-            ctrl.type = 'emunList';
+            // Радио показывает все варианты сразу, список их прячет. Для двух-трёх
+            // взаимоисключающих режимов это важнее компактности, поэтому выбор контрола
+            // отдан объявлению (`control`), а не угадывается по числу вариантов.
+            ctrl.type = (decl.control === 'radio') ? 'radioGroup' : 'emunList';
             ctrl.options = (decl.options || []).map(o => ({ value: o.value, caption: o.caption || String(o.value) }));
             break;
         case 'reference':

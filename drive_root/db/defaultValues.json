@@ -7,55 +7,6 @@
             "UID": "000000000-organizations-0001"
         }
     ],
-    "user_settings_types": [
-        {
-            "name": "string",
-            "valueTableName": "user_settings_string_values",
-            "UID": "000000000-roles-0001"
-        },
-        {
-            "name": "number",
-            "valueTableName": "user_settings_number_values",
-            "UID": "000000000-roles-0002"
-        },
-        {
-            "name": "boolean",
-            "valueTableName": "user_settings_boolean_values",
-            "UID": "000000000-roles-0003"
-        },
-        {
-            "name": "date",
-            "valueTableName": "user_settings_date_values",
-            "UID": "000000000-roles-0004"
-        },
-        {
-            "name": "enum",
-            "valueTableName": "user_settings_string_values",
-            "UID": "000000000-roles-0005"
-        }
-    ],
-    "user_settings_fields": [
-        {
-            "name": "Language",
-            "displayName": "Language",
-            "typeId": "000000000-roles-0001",
-            "options": {
-                "referenceTable": "languages",
-                "displayField": "name"
-            },
-            "UID": "000000000-users-0007"
-        },
-        {
-            "name": "BookingCalendarOrientation",
-            "displayName": "calendar_orientation_setting",
-            "typeId": "000000000-roles-0005",
-            "options": [
-                "horizontal",
-                "vertical"
-            ],
-            "UID": "000000000-users-0008"
-        }
-    ],
     "languages": [
         {
             "name": "English",

@@ -58,6 +58,38 @@ module.exports = async function (modelsDB) {
             layout: settingsServer.buildLayout(false)
         }));
 
+        // ── Служебная форма выбора таблицы для автозаполнения ────────────────────────
+        // Список таблиц собирается из определений моделей, записей в базе для него нет.
+        // Регистрируется в двух режимах: `record` открывается формой выбора, `list` нужен
+        // recordSelector'у, который ходит в неё как в обычную таблицу.
+        const tableListServer = require('./forms/table_list.server');
+        const tableListFns = tableListServer(modelsDB, Utilities);
+        const tableListScript = loadServerScript('settings.tableList', tableListFns, 'user');
+
+        const tableListClient = fs
+            .readFileSync(path.join(__dirname, 'forms/table_list.client.js'), 'utf8')
+            .replace(/__SERVER_SCRIPT__/g, tableListScript);
+        const tableListClientUID = await loadScript(tableListClient, 'user');
+
+        const tableListLayout = tableListServer.buildTableListLayout();
+        for (const mode of ['record', 'list']) {
+            await layoutMemory.saveLayout({
+                appName:   'uniForm',
+                mode,
+                tableName: 'user_settings_table_list',
+                // Роль '*', а не 'user': подбор лейаута идёт точным совпадением роли, а
+                // затем '*'. Со старой регистрацией на 'user' администратор получал
+                // generic-лейаут списка и ошибку «Model user_settings_table_list not found
+                // in modelsDB» — таблица виртуальная, модели у неё нет и быть не может.
+                roles:     '*',
+                layout:       tableListLayout,
+                clientScript: tableListClientUID,
+                events: {
+                    onLoadData: { serverScript: tableListScript, fn: 'onLoadData_tableList' }
+                }
+            });
+        }
+
         const mainMenu = require('../main_menu/server.js');
         mainMenu.addMenuItems([{
             id: 'main',

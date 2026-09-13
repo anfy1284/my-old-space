@@ -66,6 +66,13 @@ function normalizeType(t, dialect = 'postgres', origin = 'db') {
 
   if (s.includes('JSON')) return 'JSON';
 
+  // Двоичные данные: Sequelize BLOB в postgres — это `bytea`. Без этой пары та же
+  // болезнь, что была у DATE и FLOAT: таблица считается изменившейся при КАЖДОМ старте
+  // и каждый раз пересоздаётся через backup-drop-restore. Поймано на
+  // `messenger_attachments` (поля `data`/`thumb`): пока вложений нет — незаметно, а с
+  // данными это копирование всей таблицы на каждый рестарт и потеря при сбое посередине.
+  if (s === 'BLOB' || s === 'BYTEA') return 'BYTEA';
+
   return s;
 }
 
