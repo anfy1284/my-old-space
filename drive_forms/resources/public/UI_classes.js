@@ -3425,6 +3425,29 @@ class DataForm extends Form {
         this._visibleWhen.push({ tabs: tabsCtrl, index: tabIndex, decl });
     }
 
+    /**
+     * `visibleWhen` на САМОМ элементе (поле, строка ссылок). Тот же довод, что у вкладки:
+     * поле «Bezieht sich auf Rechnung» у обычного счёта не о нём, и пустое поле в первой
+     * строке шапки — мусор. Прячется контрол вместе с подписью (`UIObject.setHidden`
+     * убирает и `_alignedLabel`). Условие и пересчёт — те же (`refreshEnabledWhen`).
+     */
+    _declareItemVisibleWhen(controlName, decl) {
+        if (!controlName || !decl || typeof decl !== 'object') return;
+        if (!this._visibleWhen) this._visibleWhen = [];
+        this._visibleWhen.push({ control: controlName, decl });
+    }
+
+    /**
+     * `tones` на элементе: те же правила, что `entityConfig.rowTones`
+     * ([{ when: { field, in | notIn }, tone }], первое подходящее), но красят ОДНО поле —
+     * напр. ссылку на исходный документ у коррекции. Применяет `applyRecordTone`.
+     */
+    _declareItemTones(controlName, rules) {
+        if (!controlName || !Array.isArray(rules)) return;
+        if (!this._itemTones) this._itemTones = [];
+        this._itemTones.push({ control: controlName, rules });
+    }
+
     _evalEnabledWhen(decl) {
         // Условие по значению поля записи (состояние документа).
         if (decl.field) {
@@ -3551,7 +3574,15 @@ class DataForm extends Form {
         }
         if (this._visibleWhen && this._visibleWhen.length) {
             for (const d of this._visibleWhen) {
-                try { d.tabs.setTabVisible(d.index, this._evalEnabledWhen(d.decl)); } catch (e) {}
+                try {
+                    const show = this._evalEnabledWhen(d.decl);
+                    if (d.tabs) {
+                        d.tabs.setTabVisible(d.index, show);
+                    } else {
+                        const c = this.getControl(d.control);
+                        if (c && typeof c.setVisible === 'function') c.setVisible(show);
+                    }
+                } catch (e) {}
             }
         }
         // Тон записи пересчитывается на тех же поводах: смена состояния, загрузка данных.
@@ -3564,16 +3595,25 @@ class DataForm extends Form {
      * (`immutable.field`); без замка — поле первого правила.
      */
     applyRecordTone() {
+        const valueOf = (f) => this.getControlValue(f);
+        const inputOf = (ctrl) => {
+            if (!ctrl || !ctrl.element) return null;
+            return /^(INPUT|SELECT|TEXTAREA)$/.test(ctrl.element.tagName || '')
+                ? ctrl.element
+                : (ctrl.element.querySelector ? ctrl.element.querySelector('input,select') : null);
+        };
         const rules = this._rowTones;
-        if (!Array.isArray(rules) || !rules.length) return;
-        const field = (this._lock && this._lock.field)
-            || (rules[0] && rules[0].when && rules[0].when.field) || null;
-        const ctrl = field ? this.getControl(field) : null;
-        if (!ctrl || !ctrl.element) return;
-        const el = /^(INPUT|SELECT|TEXTAREA)$/.test(ctrl.element.tagName || '')
-            ? ctrl.element
-            : (ctrl.element.querySelector ? ctrl.element.querySelector('input,select') : null);
-        mosApplyTone(el, mosResolveTone(rules, (f) => this.getControlValue(f)));
+        if (Array.isArray(rules) && rules.length) {
+            const field = (this._lock && this._lock.field)
+                || (rules[0] && rules[0].when && rules[0].when.field) || null;
+            const el = inputOf(field ? this.getControl(field) : null);
+            if (el) mosApplyTone(el, mosResolveTone(rules, valueOf));
+        }
+        // Тон отдельных полей (`tones` на элементе лейаута).
+        for (const t of (this._itemTones || [])) {
+            const el = inputOf(this.getControl(t.control));
+            if (el) mosApplyTone(el, mosResolveTone(t.rules, valueOf));
+        }
     }
 
     /** Таблица сменила выбор/перечитала данные — ядро само пересчитывает зависимости. */
@@ -3675,6 +3715,7 @@ class DataForm extends Form {
         // контролы и вкладки, которых после ре-рендера уже нет.
         if (isRoot) this._enabledWhen = null;
         if (isRoot) this._visibleWhen = null;
+        if (isRoot) this._itemTones = null;
         for (const item of items) {
             await this.renderItem(item, contentArea);
         }
@@ -4882,6 +4923,50 @@ class DataForm extends Form {
                 }
                 break;
             }
+            case 'infoLine': {
+                // Строка-пометка (class InfoLine): «Rechnung ungültig» в шапке документа.
+                try {
+                    const line = new InfoLine(contentArea, properties || {});
+                    line.setCaption(caption);
+                    line.Draw(contentArea);
+                    // Объявлено условие показа — рождается скрытой: пересчёт `visibleWhen`
+                    // покажет её, если условие выполнено, и пометка не мигнёт на чужом документе.
+                    if (item.visibleWhen) line.setHidden(true);
+                    { const ctrlKey = item.name || item.data; if (ctrlKey) this.controlsMap[ctrlKey] = line; }
+                } catch (e) {
+                    console.error('[infoLine] render error:', e);
+                }
+                break;
+            }
+            case 'relatedLinks': {
+                // Строка ссылок на связанные записи (class RelatedLinks): встречные
+                // документы в шапке исходного и т.п. Прячется сама, пока ссылок нет.
+                try {
+                    const links = new RelatedLinks(contentArea, properties || {});
+                    const linkDecl = (properties && properties.link) || {};
+                    const valueOf = (name) => {
+                        const rec = this._dataMap && this._dataMap[name];
+                        let v = rec ? rec.value : null;
+                        if (v && typeof v === 'object') v = v.UID || v.value || null;
+                        return (v === '' || v === undefined) ? null : v;
+                    };
+                    if (linkDecl.from) {
+                        // На кого ссылаюсь я: запись, на которую указывает поле текущей записи.
+                        links.filterField = 'UID';
+                        links.filterValue = valueOf(linkDecl.from);
+                    } else {
+                        // Кто ссылается на меня: записи, у которых поле = мой UID.
+                        links.filterField = linkDecl.field || null;
+                        links.filterValue = valueOf('UID');
+                    }
+                    links.setCaption(caption);
+                    links.Draw(contentArea);
+                    { const ctrlKey = item.name || item.data; if (ctrlKey) this.controlsMap[ctrlKey] = links; }
+                } catch (e) {
+                    console.error('[relatedLinks] render error:', e);
+                }
+                break;
+            }
             default:
                 console.warn('Unknown layout item type:', item.type);
         }
@@ -4904,6 +4989,17 @@ class DataForm extends Form {
                 if (item.enabledWhen) this._declareEnabledWhen(item.name, item.enabledWhen);
             }
         } catch(e) {}
+
+        // Видимость и тон ОТДЕЛЬНОГО элемента по значениям записи: `visibleWhen`, `tones`.
+        // Ключ — как у controlsMap (name, иначе data). У вкладок свой `visibleWhen`
+        // объявляется на самой вкладке; здесь — на элементе лейаута.
+        try {
+            const key = item.name || item.data;
+            if (key && this.controlsMap[key]) {
+                if (item.visibleWhen) this._declareItemVisibleWhen(key, item.visibleWhen);
+                if (Array.isArray(item.tones) && item.tones.length) this._declareItemTones(key, item.tones);
+            }
+        } catch (e) {}
     }
 
     // Привязывает клиентские события на любой UI-объект.
@@ -14333,7 +14429,9 @@ class MessageFeed extends UIObject {
 
         this._input = document.createElement('textarea');
         this._input.className = 'ui-msgfeed-input';
-        this._input.rows = 2;
+        // Шесть строк (было две, решение владельца 14.09.2026): длинное сообщение
+        // должно быть видно целиком, пока его пишут.
+        this._input.rows = 6;
         this._input.placeholder = __t('msgfeed_input_placeholder');
         row.appendChild(this._input);
 
@@ -14347,6 +14445,14 @@ class MessageFeed extends UIObject {
                 this.send({ translate: this._isTranslateDefault() });
             }
         });
+
+        // Картинка из буфера обмена (Ctrl+V после снимка экрана, «Копировать
+        // изображение» в браузере) становится вложением — тем же путём, что выбор
+        // файла и кнопка снимка (`_takeFiles`), с показом до отправки.
+        // Только когда в буфере НЕТ простого текста: Excel и Word кладут рядом с
+        // текстом ещё и картинку, и вставка ячеек или абзаца не должна превращаться
+        // во вложение вместо текста.
+        this._input.addEventListener('paste', (e) => this._pasteImages(e));
 
         // Кнопки справа от поля — тоже панель инструментов, а не голые кнопки в ряд:
         // так обе группы composer'а выглядят одинаково и отделены от ленты.
@@ -15022,6 +15128,27 @@ class MessageFeed extends UIObject {
             + '_' + p(d.getHours()) + '-' + p(d.getMinutes()) + '-' + p(d.getSeconds());
     }
 
+    /** Вставка в поле ввода: картинки буфера обмена → вложения (см. _buildComposer). */
+    _pasteImages(e) {
+        const cd = e && e.clipboardData;
+        if (!cd) return;
+        const text = cd.getData ? cd.getData('text/plain') : '';
+        if (text && text.trim()) return;
+        const images = [];
+        for (const item of Array.from(cd.items || [])) {
+            if (item.kind !== 'file' || !/^image\//.test(item.type || '')) continue;
+            const f = item.getAsFile();
+            if (!f) continue;
+            // У картинки из буфера имени нет или оно общее («image.png») — две
+            // вставки подряд были бы неразличимы в списке вложений и в чате.
+            const ext = (f.type.split('/')[1] || 'png').replace('jpeg', 'jpg');
+            images.push(new File([f], 'paste_' + this._stampForFile() + (images.length ? '_' + (images.length + 1) : '') + '.' + ext, { type: f.type }));
+        }
+        if (!images.length) return;
+        e.preventDefault();
+        this._takeFiles(images);
+    }
+
     _takeFiles(fileList) {
         const files = Array.from(fileList || []);
         this._fileInput.value = '';
@@ -15404,7 +15531,7 @@ class Tabs extends UIObject {
 // подходящее. Язык условия — тот же, что у `enabledWhen: { field, in }`, второго не
 // заводим. Тон — имя из палитры ядра (класс `ui-tone-<тон>` в style.css), не цвет.
 // `valueOf(field)` — чтение значения: у строки списка это поле объекта, у формы — контрол.
-const MOS_TONES = ['gray', 'red', 'green', 'blue', 'violet', 'yellow'];
+const MOS_TONES = ['gray', 'red', 'redDark', 'rose', 'green', 'blue', 'violet', 'yellow', 'pink'];
 function mosResolveTone(rules, valueOf) {
     if (!Array.isArray(rules)) return null;
     for (const rule of rules) {
@@ -15424,6 +15551,179 @@ function mosApplyTone(el, tone) {
     if (!el || !el.classList) return;
     for (const t of MOS_TONES) el.classList.remove('ui-tone-' + t);
     if (tone) el.classList.add('ui-tone-' + tone);
+}
+
+// ── Строка ссылок на связанные записи: `type: "relatedLinks"` ────────────────────────
+//
+// «К этому счёту есть коррекция 1442» должно читаться в шапке документа с первого
+// взгляда, а не на вкладке. Контрол показывает связанные записи одной строкой ссылок
+// и сам прячется, пока их нет. Отбор — в одну из двух сторон:
+//   `link.field` — записи `tableName`, у которых это поле = UID текущей записи (кто ссылается
+//                  на меня: коррекции исходного счёта);
+//   `link.from`  — запись `tableName`, на которую указывает это поле ТЕКУЩЕЙ записи (на кого
+//                  ссылаюсь я: исходный счёт коррекции).
+// Данные — тем же RPC, что у списков (`getDynamicTableData`), то есть под теми же RLS.
+// Видимость: `visibleWhen` элемента И наличие ссылок — одно без другого не показывает строку.
+//
+//   { "type": "relatedLinks", "name": "counterDocs", "caption": …,
+//     "properties": { "tableName": "invoices", "link": { "field": "correctsInvoiceId" },
+//                     "labelField": "number", "detailFields": ["correctionKind", "status"],
+//                     "tone": "pink" } }
+//
+// Подписи значений `detailFields` — из `options` колонок, уже переведённых сервером.
+// Щелчок открывает запись. Данные читаются при отрисовке формы.
+class RelatedLinks extends UIObject {
+    constructor(parentElement = null, properties = {}) {
+        super();
+        this.parentElement = parentElement;
+        this.props = properties || {};
+        this.caption = '';
+        // Отбор строк: поле и значение (выставляет renderItem по `link`).
+        this.filterField = null;
+        this.filterValue = null;
+        this.appName = this.props.appName || 'uniForm';
+        // Видимость складывается из двух условий: форма (`visibleWhen`) и данные (есть ссылки).
+        this._externalHidden = false;
+        this._hasRows = false;
+    }
+
+    setCaption(caption) {
+        this.caption = caption || '';
+        if (this._captionEl) this._captionEl.textContent = this.caption ? (this.caption + ':') : '';
+    }
+
+    Draw(container) {
+        const el = document.createElement('div');
+        el.className = 'ui-related-links';
+        el._uiObject = this;
+        const cap = document.createElement('span');
+        cap.className = 'ui-related-links-caption';
+        el.appendChild(cap);
+        this._captionEl = cap;
+        const list = document.createElement('span');
+        list.className = 'ui-related-links-list';
+        el.appendChild(list);
+        this._listEl = list;
+        this.element = el;
+        this.setCaption(this.caption);
+        mosApplyTone(el, this.props.tone || null);
+        const host = container || this.parentElement;
+        if (host && host.appendChild) host.appendChild(el);
+        // Пустая строка ссылок — не сведение, а мусор: прячемся до ответа сервера.
+        this._setHasRows(false);
+        this.load();
+        return el;
+    }
+
+    async load() {
+        const p = this.props;
+        const field = this.filterField;
+        const value = this.filterValue;
+        if (!p.tableName || !field || !value || typeof callServerMethod !== 'function') {
+            this._setHasRows(false);
+            return;
+        }
+        const labelField = p.labelField || 'name';
+        const details = Array.isArray(p.detailFields) ? p.detailFields : [];
+        let data = null;
+        try {
+            data = await callServerMethod(this.appName, 'getDynamicTableData', {
+                tableName: p.tableName,
+                firstRow: 0,
+                visibleRows: p.maxLinks || 20,
+                sort: [{ field: labelField, order: 'asc' }],
+                filters: [{ field, operator: '=', value, type: 'server' }],
+                fields: [labelField].concat(details)
+            });
+        } catch (e) {
+            console.error('[relatedLinks] load failed', e);
+        }
+        this.render((data && data.rows) || [], (data && data.columns) || []);
+    }
+
+    render(rows, columns) {
+        if (!this._listEl) return;
+        const p = this.props;
+        const labelField = p.labelField || 'name';
+        const details = Array.isArray(p.detailFields) ? p.detailFields : [];
+        const captionOf = (fieldName, value) => {
+            const col = (columns || []).find(c => c && c.data === fieldName);
+            const opts = col && (Array.isArray(col.options) ? col.options
+                : (col.properties && Array.isArray(col.properties.listItems) ? col.properties.listItems : null));
+            const hit = opts ? opts.find(o => o && String(o.value) === String(value)) : null;
+            if (hit) return String(hit.caption || hit.label || value);
+            return (value === null || value === undefined) ? '' : String(value);
+        };
+        this._listEl.innerHTML = '';
+        rows.forEach((row, i) => {
+            if (i) this._listEl.appendChild(document.createTextNode(', '));
+            const a = document.createElement('a');
+            a.className = 'ui-related-link';
+            a.href = '#';
+            const parts = details.map(f => captionOf(f, row[f])).filter(Boolean);
+            const label = (row[labelField] === null || row[labelField] === undefined) ? '' : String(row[labelField]);
+            a.textContent = label + (parts.length ? ' (' + parts.join(', ') + ')' : '');
+            a.addEventListener('click', (ev) => { ev.preventDefault(); this.open(row.UID); });
+            this._listEl.appendChild(a);
+        });
+        this._setHasRows(rows.length > 0);
+    }
+
+    /** Скрыть/показать по воле ФОРМЫ (`visibleWhen`); без ссылок строка всё равно скрыта. */
+    setHidden(hidden) {
+        this._externalHidden = !!hidden;
+        this._applyVisibility();
+    }
+
+    /** Есть ли что показывать — решают данные. */
+    _setHasRows(has) {
+        this._hasRows = !!has;
+        this._applyVisibility();
+    }
+
+    _applyVisibility() {
+        super.setHidden(this._externalHidden || !this._hasRows);
+    }
+
+    open(uid) {
+        if (!uid || !window.MySpace || typeof window.MySpace.open !== 'function') return;
+        window.MySpace.open('uniForm', { mode: 'record', tableName: this.props.tableName, recordID: uid });
+    }
+}
+
+// ── Строка-пометка: `type: "infoLine"` ───────────────────────────────────────────────
+//
+// Текст в том же виде, что строка ссылок (`relatedLinks`), но без ссылок: пометка
+// состояния документа в шапке — «Rechnung ungültig». Показ — по `visibleWhen` элемента
+// (рождается скрытой, если условие объявлено), фон — `properties.tone`.
+class InfoLine extends UIObject {
+    constructor(parentElement = null, properties = {}) {
+        super();
+        this.parentElement = parentElement;
+        this.props = properties || {};
+        this.caption = '';
+    }
+
+    setCaption(caption) {
+        this.caption = caption || '';
+        if (this._textEl) this._textEl.textContent = this.caption;
+    }
+
+    Draw(container) {
+        const el = document.createElement('div');
+        el.className = 'ui-related-links ui-info-line';
+        el._uiObject = this;
+        const text = document.createElement('span');
+        text.className = 'ui-related-links-caption';
+        el.appendChild(text);
+        this._textEl = text;
+        this.element = el;
+        this.setCaption(this.caption);
+        mosApplyTone(el, this.props.tone || null);
+        const host = container || this.parentElement;
+        if (host && host.appendChild) host.appendChild(el);
+        return el;
+    }
 }
 
 class DynamicTable extends Table {

@@ -376,5 +376,197 @@
         "ru": "Мессенджер",
         "de": "Messenger",
         "pl": "Komunikator"
+    },
+    "sysset_messenger_analysis_model": {
+        "en": "Translation review model",
+        "ru": "Модель разбора переводов",
+        "de": "Modell für die Übersetzungsprüfung",
+        "pl": "Model przeglądu tłumaczeń"
+    },
+    "msg_handler_review_translations": {
+        "en": "Messenger: review translations",
+        "ru": "Мессенджер: разбор переводов",
+        "de": "Messenger: Übersetzungen prüfen",
+        "pl": "Komunikator: przegląd tłumaczeń"
+    },
+    "msg_trctx_app_caption": {
+        "en": "Translator context",
+        "ru": "Контекст переводчика",
+        "de": "Übersetzerkontext",
+        "pl": "Kontekst tłumacza"
+    },
+    "msg_trctx_record_caption": {
+        "en": "Translator context version",
+        "ru": "Версия контекста переводчика",
+        "de": "Version des Übersetzerkontexts",
+        "pl": "Wersja kontekstu tłumacza"
+    },
+    "msg_trctx_user_field": {
+        "en": "User",
+        "ru": "Пользователь",
+        "de": "Benutzer",
+        "pl": "Użytkownik"
+    },
+    "msg_trctx_version_field": {
+        "en": "Version",
+        "ru": "Версия",
+        "de": "Version",
+        "pl": "Wersja"
+    },
+    "msg_trctx_terms_field": {
+        "en": "Terms",
+        "ru": "Термины",
+        "de": "Begriffe",
+        "pl": "Terminy"
+    },
+    "msg_trctx_rules_field": {
+        "en": "Rules",
+        "ru": "Правила",
+        "de": "Regeln",
+        "pl": "Reguły"
+    },
+    "msg_trctx_review_field": {
+        "en": "Review",
+        "ru": "Разбор",
+        "de": "Prüfung",
+        "pl": "Przegląd"
+    },
+    "msg_trctx_restored_from_field": {
+        "en": "Restored from version",
+        "ru": "Восстановлена из версии",
+        "de": "Wiederhergestellt aus Version",
+        "pl": "Przywrócona z wersji"
+    },
+    "msg_trctx_note_field": {
+        "en": "Note",
+        "ru": "Примечание",
+        "de": "Notiz",
+        "pl": "Uwaga"
+    },
+    "msg_trctx_restore_btn": {
+        "en": "Restore this version",
+        "ru": "Восстановить эту версию",
+        "de": "Diese Version wiederherstellen",
+        "pl": "Przywróć tę wersję"
+    },
+    "msg_trctx_restore_confirm": {
+        "en": "Make this version current? A new version with the same content is created; the history is kept.",
+        "ru": "Сделать эту версию текущей? Будет создана новая версия с тем же содержимым, история сохранится.",
+        "de": "Diese Version zur aktuellen machen? Es wird eine neue Version mit demselben Inhalt angelegt, der Verlauf bleibt erhalten.",
+        "pl": "Ustawić tę wersję jako bieżącą? Zostanie utworzona nowa wersja o tej samej treści, historia zostanie zachowana."
+    },
+    "msg_trctx_restored": {
+        "en": "Restored as version",
+        "ru": "Восстановлено как версия",
+        "de": "Wiederhergestellt als Version",
+        "pl": "Przywrócono jako wersja"
+    },
+    "msg_trctx_not_found": {
+        "en": "Translator context version not found.",
+        "ru": "Версия контекста переводчика не найдена.",
+        "de": "Version des Übersetzerkontexts nicht gefunden.",
+        "pl": "Nie znaleziono wersji kontekstu tłumacza."
+    },
+    "msg_trctx_restore_denied": {
+        "en": "Only an administrator can restore a translator context version.",
+        "ru": "Восстановить версию контекста переводчика может только администратор.",
+        "de": "Nur ein Administrator kann eine Version des Übersetzerkontexts wiederherstellen.",
+        "pl": "Tylko administrator może przywrócić wersję kontekstu tłumacza."
+    },
+    "msg_trrev_app_caption": {
+        "en": "Translation reviews",
+        "ru": "Разборы переводов",
+        "de": "Übersetzungsprüfungen",
+        "pl": "Przeglądy tłumaczeń"
+    },
+    "msg_trrev_record_caption": {
+        "en": "Translation review",
+        "ru": "Разбор переводов",
+        "de": "Übersetzungsprüfung",
+        "pl": "Przegląd tłumaczeń"
+    },
+    "msg_trrev_user_field": {
+        "en": "User",
+        "ru": "Пользователь",
+        "de": "Benutzer",
+        "pl": "Użytkownik"
+    },
+    "msg_trrev_run_field": {
+        "en": "Run",
+        "ru": "Запуск",
+        "de": "Lauf",
+        "pl": "Uruchomienie"
+    },
+    "msg_trrev_period_from_field": {
+        "en": "Messages from",
+        "ru": "Сообщения с",
+        "de": "Nachrichten ab",
+        "pl": "Wiadomości od"
+    },
+    "msg_trrev_period_to_field": {
+        "en": "Messages up to",
+        "ru": "Сообщения по",
+        "de": "Nachrichten bis",
+        "pl": "Wiadomości do"
+    },
+    "msg_trrev_messages_field": {
+        "en": "Messages",
+        "ru": "Сообщений",
+        "de": "Nachrichten",
+        "pl": "Wiadomości"
+    },
+    "msg_trrev_findings_field": {
+        "en": "Errors found",
+        "ru": "Найдено ошибок",
+        "de": "Gefundene Fehler",
+        "pl": "Znalezione błędy"
+    },
+    "msg_trrev_iterations_field": {
+        "en": "Verification passes",
+        "ru": "Итераций проверки",
+        "de": "Prüfdurchläufe",
+        "pl": "Iteracje weryfikacji"
+    },
+    "msg_trrev_changed_field": {
+        "en": "Dictionaries updated",
+        "ru": "Обновлено словарей",
+        "de": "Aktualisierte Wörterbücher",
+        "pl": "Zaktualizowane słowniki"
+    },
+    "msg_trrev_model_field": {
+        "en": "Model",
+        "ru": "Модель",
+        "de": "Modell",
+        "pl": "Model"
+    },
+    "msg_trrev_summary_field": {
+        "en": "Summary",
+        "ru": "Итог",
+        "de": "Zusammenfassung",
+        "pl": "Podsumowanie"
+    },
+    "msg_trrev_report_field": {
+        "en": "Report",
+        "ru": "Отчёт",
+        "de": "Bericht",
+        "pl": "Raport"
+    },
+    "msg_trrev_notify_title": {
+        "en": "Translation review",
+        "ru": "Разбор переводов",
+        "de": "Übersetzungsprüfung",
+        "pl": "Przegląd tłumaczeń"
+    },
+    "msg_trrev_notify_text": {
+        "en": "Messages: {{messages}}, translations reviewed: {{items}}, errors: {{findings}}, verification passes: {{passes}}, dictionaries updated: {{changed}}",
+        "ru": "Сообщений: {{messages}}, переводов на разборе: {{items}}, ошибок: {{findings}}, итераций проверки: {{passes}}, обновлено словарей: {{changed}}",
+        "de": "Nachrichten: {{messages}}, geprüfte Übersetzungen: {{items}}, Fehler: {{findings}}, Prüfdurchläufe: {{passes}}, aktualisierte Wörterbücher: {{changed}}",
+        "pl": "Wiadomości: {{messages}}, sprawdzone tłumaczenia: {{items}}, błędy: {{findings}}, iteracje weryfikacji: {{passes}}, zaktualizowane słowniki: {{changed}}"
+    },
+    "msg_trrev_none": {
+        "en": "No new messages to review",
+        "ru": "Новых сообщений для разбора нет",
+        "de": "Keine neuen Nachrichten zu prüfen",
+        "pl": "Brak nowych wiadomości do przeglądu"
     }
 }

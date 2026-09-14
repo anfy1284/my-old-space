@@ -166,6 +166,73 @@ async function provisionChats(modelsDB) {
     // виден и ничего не стоит. Раньше здесь жил ensureCommonChatMembership.
 }
 
+/**
+ * Формы контекста переводчика: версии и разборы (только администратор).
+ *
+ * Строки обеих таблиц пишет регламентное задание `messenger.reviewTranslations`;
+ * человек их только смотрит, а версию может сделать текущей кнопкой «Восстановить»
+ * (новая версия-копия — таблицы только на дозапись).
+ */
+async function registerTranslationForms(loadScript) {
+    const layoutMemory = require('../../drive_root/layoutMemory');
+    const TRANSLATE_ICON = '/apps/general_icons/resources/public/16x16/translate.png';
+    const JOURNAL_ICON = '/apps/general_icons/resources/public/16x16/journal.png';
+
+    const contextsClient = fs
+        .readFileSync(path.join(__dirname, 'forms/translation_contexts.client.js'), 'utf8')
+        .replace(/__SERVER_SCRIPT__/g, SERVER_SCRIPT_NAME);
+    const contextsClientUID = await loadScript(contextsClient, 'admin');
+
+    await layoutMemory.saveLayout({
+        appName: 'uniForm',
+        mode: 'record',
+        tableName: 'messenger_translation_contexts',
+        roles: 'admin',
+        layout: require('./forms/translation_contexts.layout.json'),
+        clientScript: contextsClientUID,
+        appCaption: { i18n: 'msg_trctx_app_caption' },
+        recordCaption: { i18n: 'msg_trctx_record_caption' },
+        formIcon: TRANSLATE_ICON,
+        listIcon: TRANSLATE_ICON
+    });
+    await layoutMemory.saveLayout({
+        appName: 'uniForm',
+        mode: 'record',
+        tableName: 'messenger_translation_reviews',
+        roles: 'admin',
+        layout: require('./forms/translation_reviews.layout.json'),
+        appCaption: { i18n: 'msg_trrev_app_caption' },
+        recordCaption: { i18n: 'msg_trrev_record_caption' },
+        formIcon: JOURNAL_ICON,
+        listIcon: JOURNAL_ICON
+    });
+    layoutMemory.registerListSort('messenger_translation_contexts', [{ field: 'version', order: 'desc' }]);
+    layoutMemory.registerListSort('messenger_translation_reviews', [{ field: 'periodTo', order: 'desc' }]);
+
+    require('../main_menu/server.js').addMenuItems([{
+        id: 'main',
+        items: [{
+            caption: { i18n: 'msg_trctx_app_caption' },
+            action: 'open',
+            singleton: true,
+            appName: 'uniForm',
+            roles: ['admin'],
+            order: 92,
+            icon: TRANSLATE_ICON,
+            params: { mode: 'list', dbTable: 'messenger_translation_contexts' }
+        }, {
+            caption: { i18n: 'msg_trrev_app_caption' },
+            action: 'open',
+            singleton: true,
+            appName: 'uniForm',
+            roles: ['admin'],
+            order: 93,
+            icon: JOURNAL_ICON,
+            params: { mode: 'list', dbTable: 'messenger_translation_reviews' }
+        }]
+    }]);
+}
+
 module.exports = async function (modelsDB) {
     try {
         const { loadScript, loadServerScript, Utilities } = require('../../');
@@ -229,6 +296,10 @@ module.exports = async function (modelsDB) {
             appAvailability.guard(APP_NAME, Object.assign({}, serverFns, { getFormSpec })),
             'user'
         );
+
+        // Контекст переводчика: версии и разборы — формы и пункты меню администратора.
+        try { await registerTranslationForms(loadScript); }
+        catch (e) { log.error('[messenger/init] формы контекста переводчика:', e && e.message); }
 
         // Новый пользователь — сразу с чатами: иначе он есть в системе, но
         // написать ему некуда.

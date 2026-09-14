@@ -1151,6 +1151,24 @@
         "de": "Zu diesem Beleg gibt es bereits ein Storno oder eine Korrektur — er kann nicht als ungültig gekennzeichnet werden.",
         "pl": "Do tego dokumentu istnieje już storno lub korekta — nie można go unieważnić."
     },
+    "invalidate_notice": {
+        "en": "This document was declared void on {{date}}.",
+        "ru": "Документ признан недействительным {{date}}.",
+        "de": "Dieser Beleg wurde am {{date}} für ungültig erklärt.",
+        "pl": "Dokument unieważniono dnia {{date}}."
+    },
+    "invalidate_notice_nodate": {
+        "en": "This document was declared void.",
+        "ru": "Документ признан недействительным.",
+        "de": "Dieser Beleg wurde für ungültig erklärt.",
+        "pl": "Dokument unieważniono."
+    },
+    "invalidate_watermark": {
+        "en": "VOID",
+        "ru": "НЕДЕЙСТВИТЕЛЕН",
+        "de": "Ungültig",
+        "pl": "NIEWAŻNY"
+    },
     "invalidate_done": {
         "en": "The document is marked as void:",
         "ru": "Документ признан недействительным:",

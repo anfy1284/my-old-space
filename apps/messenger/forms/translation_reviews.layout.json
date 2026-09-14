@@ -1,0 +1,24 @@
+[
+    {
+        "type": "commandBar",
+        "hiddenButtons": ["ok", "save"]
+    },
+    {
+        "type": "group",
+        "caption": "",
+        "noBorder": true,
+        "alignFields": true,
+        "orientation": "vertical",
+        "layout": [
+            { "type": "date", "name": "periodFrom", "data": "periodFrom", "caption": { "i18n": "msg_trrev_period_from_field" }, "readOnly": true },
+            { "type": "date", "name": "periodTo", "data": "periodTo", "caption": { "i18n": "msg_trrev_period_to_field" }, "readOnly": true },
+            { "type": "number", "name": "messagesCount", "data": "messagesCount", "caption": { "i18n": "msg_trrev_messages_field" }, "readOnly": true },
+            { "type": "number", "name": "findingsCount", "data": "findingsCount", "caption": { "i18n": "msg_trrev_findings_field" }, "readOnly": true },
+            { "type": "number", "name": "iterations", "data": "iterations", "caption": { "i18n": "msg_trrev_iterations_field" }, "readOnly": true },
+            { "type": "number", "name": "changedScopes", "data": "changedScopes", "caption": { "i18n": "msg_trrev_changed_field" }, "readOnly": true },
+            { "type": "textbox", "name": "model", "data": "model", "caption": { "i18n": "msg_trrev_model_field" }, "readOnly": true },
+            { "type": "textarea", "name": "summary", "data": "summary", "caption": { "i18n": "msg_trrev_summary_field" }, "readOnly": true },
+            { "type": "textarea", "name": "report", "data": "report", "caption": { "i18n": "msg_trrev_report_field" }, "readOnly": true }
+        ]
+    }
+]

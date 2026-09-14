@@ -606,6 +606,24 @@ input[type="checkbox"],
 .ui-dynamictable table tbody tr.ui-table-row.ui-tone-blue,   input.ui-tone-blue,   select.ui-tone-blue   { background-color: #d5e3f5; }
 .ui-dynamictable table tbody tr.ui-table-row.ui-tone-violet, input.ui-tone-violet, select.ui-tone-violet { background-color: #e5d9f2; }
 .ui-dynamictable table tbody tr.ui-table-row.ui-tone-yellow, input.ui-tone-yellow, select.ui-tone-yellow { background-color: #faf1c8; }
+.ui-dynamictable table tbody tr.ui-table-row.ui-tone-pink,   input.ui-tone-pink,   select.ui-tone-pink,
+.ui-related-links.ui-tone-pink { background-color: #f8d7e8; }
+/* Оттенки красного для всего, что связано с отменой документа (решение владельца 14.09.2026):
+   red — отменён сторно, redDark — сам сторно-документ, rose — недействителен, pink — коррекция.
+   Должны различаться между собой, а не сливаться в «что-то красное». */
+.ui-dynamictable table tbody tr.ui-table-row.ui-tone-redDark, input.ui-tone-redDark, select.ui-tone-redDark,
+.ui-related-links.ui-tone-redDark { background-color: #eeb0b0; }
+.ui-dynamictable table tbody tr.ui-table-row.ui-tone-rose,    input.ui-tone-rose,    select.ui-tone-rose,
+.ui-related-links.ui-tone-rose { background-color: #e6c0cc; }
+.ui-related-links.ui-tone-red { background-color: #f6d3d3; }
+
+/* Строка ссылок на связанные записи (type: "relatedLinks" в лейауте): «Korrekturen /
+   Storno: 1442 (Korrektur, Entwurf)». Ссылка открывает запись. Строки нет, пока
+   связанных записей нет (RelatedLinks прячет себя сам). */
+.ui-related-links { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 1px 6px; min-height: 20px; }
+.ui-related-links-caption { white-space: nowrap; }
+.ui-related-link { color: #0000cc; text-decoration: underline; cursor: pointer; white-space: nowrap; }
+.ui-related-link:hover { color: #cc0000; }
 
 /* Hide input buttons in non-active table rows (useful when rows are styled
    gray for inactive state). This makes buttons invisible instead of gray. */

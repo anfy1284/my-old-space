@@ -1,0 +1,28 @@
+[
+    {
+        "type": "commandBar",
+        "hiddenButtons": ["ok", "save"],
+        "extraButtons": [
+            {
+                "name": "btnRestoreVersion",
+                "caption": { "i18n": "msg_trctx_restore_btn" },
+                "icon": "/apps/general_icons/resources/public/16x16/restore.png",
+                "events": { "onClick": "restoreVersion" }
+            }
+        ]
+    },
+    {
+        "type": "group",
+        "caption": "",
+        "noBorder": true,
+        "alignFields": true,
+        "orientation": "vertical",
+        "layout": [
+            { "type": "number", "name": "version", "data": "version", "caption": { "i18n": "msg_trctx_version_field" }, "readOnly": true },
+            { "type": "textbox", "name": "restoredFromId", "data": "restoredFromId", "caption": { "i18n": "msg_trctx_restored_from_field" }, "readOnly": true },
+            { "type": "textarea", "name": "terms", "data": "terms", "caption": { "i18n": "msg_trctx_terms_field" }, "readOnly": true },
+            { "type": "textarea", "name": "rules", "data": "rules", "caption": { "i18n": "msg_trctx_rules_field" }, "readOnly": true },
+            { "type": "textarea", "name": "note", "data": "note", "caption": { "i18n": "msg_trctx_note_field" }, "readOnly": true }
+        ]
+    }
+]

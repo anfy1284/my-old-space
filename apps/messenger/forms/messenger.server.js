@@ -32,6 +32,7 @@ const appAvailability = require('../../../drive_root/appAvailability');
 const userPresentation = require('../../../drive_root/userPresentation');
 const presence = require('../../../drive_root/presence');
 const translator = require('../lib/translator');
+const translationContext = require('../lib/translationContext');
 const log = require('../../../drive_root/log');
 const { sendSessionEventToUser } = require('../../../drive_forms/dynamicTableRegistry');
 const { tForSession } = require('../../../drive_forms/globalServerContext');
@@ -45,6 +46,9 @@ const THUMB_SIZE = 240;
 // и строка списка — это анонс, а не место для чтения переписки.
 const PREVIEW_LIMIT = 60;
 const NOTIFY_LIMIT = 160;
+// Сколько последних сообщений чата получает переводчик как контекст. Хватает, чтобы
+// понять, о чём речь и как называются вещи, и не раздувать каждый запрос к модели.
+const TRANSLATION_HISTORY = 8;
 
 // Какой чат сейчас открыт у пользователя: userId → { chatId, at }. Живёт в
 // памяти процесса — сведения сиюминутные, переживать перезапуск им незачем.
@@ -530,9 +534,11 @@ module.exports = function factory(modelsDB, Utilities) {
      * @param {Object} messageRow — созданное сообщение (UID, userId, content)
      * @param {Array} members — участники чата
      * @param {string} [sentLangCode] — язык, на который текст уже переведён при отправке
+     * @param {function(): Promise<Object|null>} [getContext] — контекст переводчика;
+     *        собирается лениво — только если кому-то действительно нужен перевод
      * @returns {Promise<{byCode: Map<string,string>, langByUser: Map<string,Object>}>}
      */
-    async function translateForRecipients(messageRow, members, sentLangCode) {
+    async function translateForRecipients(messageRow, members, sentLangCode, getContext) {
         const byCode = new Map();
         const langByUser = new Map();
         const content = String(messageRow.content || '').trim();
@@ -555,9 +561,10 @@ module.exports = function factory(modelsDB, Utilities) {
             targets.set(lang.code, lang);
         }
 
+        const context = (targets.size && typeof getContext === 'function') ? await getContext() : null;
         for (const [code, lang] of targets) {
             try {
-                const res = await translator.translate(content, lang);
+                const res = await translator.translate(content, lang, null, context);
                 if (!res.ok) { log.warn('[messenger] перевод на', code, 'не выполнен:', res.error); continue; }
                 byCode.set(code, res.text);
                 // Уникальный индекс (messageId, language) — повтор невозможен;
@@ -589,13 +596,91 @@ module.exports = function factory(modelsDB, Utilities) {
      *
      * @returns {Promise<{ok: boolean, text?: string, error?: string}>}
      */
-    async function translateOutgoing(content, languageUID) {
+    async function translateOutgoing(content, languageUID, context) {
         const langs = await languageIndex();
         const lang = langs.byId.get(String(languageUID));
         if (!lang) return { ok: false, error: 'msg_translate_no_language' };
-        const res = await translator.translate(content, lang);
+        const res = await translator.translate(content, lang, null, context);
         if (!res.ok) return { ok: false, error: res.error };
         return { ok: true, text: res.text, code: lang.code };
+    }
+
+    // ── Контекст переводчика ────────────────────────────────────────────────
+    /**
+     * Контекст переводчика для сообщения чата (решение владельца 14.09.2026): автор и
+     * читатели по именам — без них модель не знает рода; последние сообщения чата — о чём
+     * речь; словарь — один на всю систему (lib/translationContext.js), его еженедельно
+     * правит разбор (lib/translationReview.js).
+     *
+     * Сбой сбора контекста перевод НЕ отменяет: переводим без него, а не отказываем
+     * человеку в отправке.
+     *
+     * @param {string} chatId
+     * @param {string} authorId
+     * @param {Array} members — участники чата
+     * @param {Date} [beforeDate] — история только до этого момента (само сообщение — не история)
+     * @returns {Promise<Object|null>}
+     */
+    async function translationContextFor(chatId, authorId, members, beforeDate) {
+        try {
+            const ids = Array.from(new Set((members || []).map(m => m.userId).concat([authorId]).filter(Boolean)));
+            const names = await userPresentation.presentationsByIds(modelsDB, ids);
+
+            const where = { chatId: chatId };
+            if (beforeDate) where.createdAt = { [Op.lt]: beforeDate };
+            const recent = await Messages().findAll({
+                where, attributes: ['userId', 'content'],
+                order: [['createdAt', 'DESC']], limit: TRANSLATION_HISTORY, raw: true
+            });
+            const history = recent.reverse()
+                .filter(r => String(r.content || '').trim())
+                .map(r => ({ author: names.get(r.userId) || '?', text: r.content }));
+
+            const current = await translationContext.loadCurrent(readTranslationContexts);
+
+            return {
+                author: names.get(authorId) || null,
+                readers: (members || []).filter(m => m.userId !== authorId).map(m => names.get(m.userId)).filter(Boolean),
+                history,
+                glossaryText: current ? translationContext.toPromptText(current.context) : ''
+            };
+        } catch (e) {
+            log.warn('[messenger] контекст переводчика не собран:', e && e.message);
+            return null;
+        }
+    }
+
+    /** Чтение версий контекста — моделью, как и остальные данные мессенджера (см. шапку файла). */
+    async function readTranslationContexts(table, where, options) {
+        const Model = modelsDB.MessengerTranslationContexts;
+        if (!Model || table !== translationContext.TABLE) return [];
+        return await Model.findAll(Object.assign({ where, raw: true }, options || {}));
+    }
+
+    /**
+     * «Восстановить эту версию» контекста переводчика: текущей становится НОВАЯ версия с
+     * тем же содержимым — таблица только на дозапись, история не теряется. Только
+     * администратор: словарь влияет на переводы всех.
+     */
+    async function restoreTranslationContext(params, ctx) {
+        const user = await currentUser(ctx);
+        const { getUserAccessRole } = require('../../../drive_forms/globalServerContext');
+        const role = user ? await getUserAccessRole({ UID: user.UID }) : null;
+        if (role !== 'admin') return { error: await tForSession('msg_trctx_restore_denied', ctx.sessionID) };
+
+        const Model = modelsDB.MessengerTranslationContexts;
+        const source = (Model && params && params.contextId)
+            ? await Model.findByPk(String(params.contextId), { raw: true }) : null;
+        if (!source) return { error: await tForSession('msg_trctx_not_found', ctx.sessionID) };
+
+        const latest = await Model.findOne({ order: [['version', 'DESC']], raw: true });
+        const version = (Number(latest && latest.version) || 0) + 1;
+        await Model.create({
+            userId: null, version,
+            terms: source.terms, rules: source.rules,
+            reviewId: null, restoredFromId: source.UID, note: null
+        });
+        return { success: true, version };
     }
 
     // ── Отправка ────────────────────────────────────────────────────────────
@@ -630,13 +715,26 @@ module.exports = function factory(modelsDB, Utilities) {
             }
         }
 
+        // Участники и контекст переводчика — один раз на сообщение: они нужны и переводу
+        // исходящего, и переводу для получателей. Контекст собирается лениво — только
+        // если перевод действительно понадобится.
+        const members = await chatMembers(chatId);
+        let contextCreatedAt = null;
+        let trContext;
+        const getTranslationContext = async () => {
+            if (trContext === undefined) {
+                trContext = await translationContextFor(chatId, access.user.UID, members, contextCreatedAt);
+            }
+            return trContext;
+        };
+
         // Перевод исходящего — ДО записи: в базу ложится ровно то, что уйдёт человеку.
         // Право на эту кнопку проверяется здесь, а не только тем, что она нарисована:
         // кнопка на экране — не разрешение.
         if (params && params.translateTo && content) {
             const prefs = await translationPrefs(access.user.UID);
             if (!prefs.outgoing) return { error: await tForSession('Access denied', ctx.sessionID) };
-            const out = await translateOutgoing(content, params.translateTo);
+            const out = await translateOutgoing(content, params.translateTo, await getTranslationContext());
             if (!out.ok) return { error: await tForSession('msg_translate_failed', ctx.sessionID) };
             // Уходит перевод, но набранное сохраняется: свои сообщения автор обязан
             // видеть на том языке, на котором их писал. Это ВТОРОЙ текст того же
@@ -670,8 +768,10 @@ module.exports = function factory(modelsDB, Utilities) {
         const plain = created.get ? created.get({ plain: true }) : created;
         const [decorated] = await decorateMessages([plain], chatId, access.user.UID);
 
-        const members = await chatMembers(chatId);
-        const translations = await translateForRecipients(plain, members, sentLangCode);
+        // Новое сообщение — не история: если контекст ещё не собран, он возьмёт только
+        // то, что было до него.
+        contextCreatedAt = created.createdAt;
+        const translations = await translateForRecipients(plain, members, sentLangCode, getTranslationContext);
 
         await fanOut(chatId, access.user, decorated, members, translations);
         return { success: true, message: decorated };
@@ -924,6 +1024,8 @@ module.exports = function factory(modelsDB, Utilities) {
         loadChats, loadMessages, sendMessage, markRead,
         getUnreadTotal, setActiveChat,
         composerState, setOutgoingLanguage,
+        // Откат версии контекста переводчика (форма версии, только admin).
+        restoreTranslationContext,
         // Не RPC, а внутренний метод для бинарного маршрута (server.js).
         readAttachment,
         maxAttachmentBytes

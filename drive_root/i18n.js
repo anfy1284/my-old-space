@@ -185,4 +185,15 @@ function tf(key, langCode = 'en', vars = {}) {
     return str;
 }
 
-module.exports = { loadI18n, t, tf, pluralCategory };
+/**
+ * Снимок реестра переводов: { ключ: { язык: строка | формы числа } }.
+ *
+ * Копия: реестр снаружи не меняют. Нужен тем, кому важны сами СЛОВА интерфейса, а не
+ * перевод одного ключа, — напр. контекст переводчика мессенджера сверяет термины со
+ * словами, которые люди видят на экране (apps/messenger/lib/translationContext.js).
+ */
+function entries() {
+    return JSON.parse(JSON.stringify(_registry));
+}
+
+module.exports = { loadI18n, t, tf, pluralCategory, entries };

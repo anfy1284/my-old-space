@@ -229,4 +229,14 @@ async function openChat(params) {
     await MySpace.open('messenger', { chatId: chatId });
 }
 
-return { onFormReady, openChat };
+/**
+ * Открыть разбор переводов — обработчик клика по уведомлению регламентного задания
+ * `messenger.reviewTranslations` (lib/translationReview.js). Вызывается ПО ИМЕНИ.
+ */
+async function openTranslationReview(params) {
+    var reviewId = params && params.reviewId;
+    if (!reviewId || !window.MySpace || typeof MySpace.open !== 'function') return;
+    await MySpace.open('uniForm', { mode: 'record', tableName: 'messenger_translation_reviews', recordID: reviewId });
+}
+
+return { onFormReady, openChat, openTranslationReview };

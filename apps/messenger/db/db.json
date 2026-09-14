@@ -310,6 +310,132 @@
                     { "fields": ["messageId"] }
                 ]
             }
+        },
+        {
+            "//": "Разбор переводов регламентным заданием messenger.reviewTranslations (lib/translationReview.js). Строка — один прогон по новым сообщениям; periodTo — докуда разобрано, следующий прогон начинает отсюда. Только на дозапись: отчёт объясняет, почему поменялся словарь. userId всегда NULL — реквизит доступа ради валидатора; строки видит только администратор.",
+            "name": "MessengerTranslationReviews",
+            "tableName": "messenger_translation_reviews",
+            "entityConfig": { "appendOnly": true },
+            "fields": {
+                "userId": {
+                    "type": "STRING",
+                    "allowNull": true,
+                    "caption": { "i18n": "msg_trrev_user_field" }
+                },
+                "runId": {
+                    "type": "STRING",
+                    "allowNull": true,
+                    "caption": { "i18n": "msg_trrev_run_field" }
+                },
+                "periodFrom": {
+                    "type": "DATE",
+                    "allowNull": true,
+                    "caption": { "i18n": "msg_trrev_period_from_field" }
+                },
+                "periodTo": {
+                    "type": "DATE",
+                    "allowNull": true,
+                    "caption": { "i18n": "msg_trrev_period_to_field" }
+                },
+                "messagesCount": {
+                    "type": "INTEGER",
+                    "allowNull": false,
+                    "defaultValue": 0,
+                    "caption": { "i18n": "msg_trrev_messages_field" }
+                },
+                "findingsCount": {
+                    "type": "INTEGER",
+                    "allowNull": false,
+                    "defaultValue": 0,
+                    "caption": { "i18n": "msg_trrev_findings_field" }
+                },
+                "iterations": {
+                    "type": "INTEGER",
+                    "allowNull": false,
+                    "defaultValue": 0,
+                    "caption": { "i18n": "msg_trrev_iterations_field" }
+                },
+                "changedScopes": {
+                    "type": "INTEGER",
+                    "allowNull": false,
+                    "defaultValue": 0,
+                    "caption": { "i18n": "msg_trrev_changed_field" }
+                },
+                "model": {
+                    "type": "STRING",
+                    "allowNull": true,
+                    "caption": { "i18n": "msg_trrev_model_field" }
+                },
+                "summary": {
+                    "type": "TEXT",
+                    "allowNull": true,
+                    "caption": { "i18n": "msg_trrev_summary_field" }
+                },
+                "report": {
+                    "type": "TEXT",
+                    "allowNull": true,
+                    "caption": { "i18n": "msg_trrev_report_field" }
+                }
+            },
+            "options": {
+                "timestamps": true,
+                "indexes": [
+                    { "fields": ["periodTo"] }
+                ]
+            }
+        },
+        {
+            "//": "Версия контекста переводчика (lib/translationContext.js): термины и правила. Словарь ОДИН на всю систему (решение владельца 14.09.2026). Только на дозапись: откат — новая версия-копия старой (restoredFromId), история не теряется. Текущая версия — с наибольшим version.",
+            "name": "MessengerTranslationContexts",
+            "tableName": "messenger_translation_contexts",
+            "entityConfig": { "appendOnly": true },
+            "fields": {
+                "userId": {
+                    "type": "STRING",
+                    "allowNull": true,
+                    "caption": { "i18n": "msg_trctx_user_field" }
+                },
+                "version": {
+                    "type": "INTEGER",
+                    "allowNull": false,
+                    "defaultValue": 1,
+                    "caption": { "i18n": "msg_trctx_version_field" }
+                },
+                "terms": {
+                    "type": "TEXT",
+                    "allowNull": true,
+                    "caption": { "i18n": "msg_trctx_terms_field" }
+                },
+                "rules": {
+                    "type": "TEXT",
+                    "allowNull": true,
+                    "caption": { "i18n": "msg_trctx_rules_field" }
+                },
+                "reviewId": {
+                    "type": "STRING",
+                    "allowNull": true,
+                    "references": { "model": "messenger_translation_reviews", "key": "UID" },
+                    "onUpdate": "CASCADE",
+                    "onDelete": "SET NULL",
+                    "caption": { "i18n": "msg_trctx_review_field" }
+                },
+                "restoredFromId": {
+                    "type": "STRING",
+                    "allowNull": true,
+                    "caption": { "i18n": "msg_trctx_restored_from_field" }
+                },
+                "note": {
+                    "type": "TEXT",
+                    "allowNull": true,
+                    "caption": { "i18n": "msg_trctx_note_field" }
+                }
+            },
+            "options": {
+                "timestamps": true,
+                "indexes": [
+                    { "unique": true, "fields": ["version"] }
+                ]
+            }
         }
     ],
     "associations": [
