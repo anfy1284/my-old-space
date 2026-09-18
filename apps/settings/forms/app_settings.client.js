@@ -232,7 +232,31 @@ async function applySettings(ev, ctx) {
         window.location.reload();
         return;
     }
+
+    await refreshPersonalSnapshots();
     showAlert(__t('Settings saved'));
+}
+
+/**
+ * Перечитать то личное, что клиент держит снимком: список выключенных приложений
+ * и значения настроек уровня `user`.
+ *
+ * Оба снимка приезжают ОДИН раз при загрузке страницы (в бандл личное класть
+ * нельзя — он кэшируется по ключу «роль|язык»), и сразу после записи настроек они
+ * устарели. Без этого выключатель приложения срабатывал бы только после
+ * перезагрузки страницы — а настройка, которая «не сработала», читается как
+ * поломка. Перезагружать всю страницу ради этого не нужно: язык — особый случай,
+ * там переводятся сами бандлы.
+ */
+async function refreshPersonalSnapshots() {
+    if (!window.MySpace) return;
+    try {
+        if (MySpace.appAvailability) await MySpace.appAvailability.load();
+        if (MySpace.settings) await MySpace.settings.load();
+        window.dispatchEvent(new CustomEvent('app-settings-changed'));
+    } catch (e) {
+        console.warn('[settings] снимки не перечитаны:', e && e.message);
+    }
 }
 
 /** Стереть всё запомненное состояние интерфейса (кнопка администратора). */

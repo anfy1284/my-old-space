@@ -313,6 +313,431 @@ async function captureInterface(opts) {
 }
 
 // ─────────────────────────────────────────────────────────────────────
+// ЖИВОЕ ЗЕРКАЛО ИНТЕРФЕЙСА (MySpace.snapshot.mirror)
+//
+// Вторая копия того же дерева узлов — но не «замороженная» в картинку, а
+// обновляемая. Рядом со снимком, потому что задача общая (показать интерфейс
+// второй раз), а условия противоположные:
+//
+//   serializeInterface — копия, ОТВЯЗАННАЯ от страницы и от сервера: стили,
+//       значки и содержимое холстов вкачиваются внутрь запросами. Это то, что
+//       можно отправить другому человеку, и это же делает её дорогой.
+//   createInterfaceMirror — копия, ОСТАЮЩАЯСЯ в этом же документе: стили и
+//       картинки браузер уже загрузил, поэтому обновление стоит одного
+//       cloneNode. Это то, что можно показывать хозяину экрана живьём
+//       (приложение `magnifier` — экранная лупа).
+//
+// Копия живёт в ТЕНЕВОМ дереве (`attachShadow`), и это не украшение: у неё те
+// же `id` и те же классы, что у оригинала, и в общем документе
+// `document.getElementById`/`querySelectorAll` начали бы находить по два узла
+// на каждый — форма правила бы не свой контрол. Теневое дерево имена изолирует,
+// а наследуемые свойства (переменные палитры `:root`) через его границу
+// проходят, поэтому оформление остаётся прежним.
+//
+// Чего зеркало не умеет: оно показывает ДОКУМЕНТ, как и снимок, — курсора,
+// нативных выпадающих списков и чужих окон в нём нет.
+
+/**
+ * Свойства, заданные в оригинале на `<body>`.
+ *
+ * В теневом дереве правила `html, body { … }` не действуют: там нет ни `html`,
+ * ни `body` — есть корневой `<div>` зеркала. Без этого копия осталась бы без
+ * обоев рабочего стола и без базового шрифта.
+ */
+const MIRROR_HOST_STYLE_PROPS = [
+    'background-color', 'background-image', 'background-size', 'background-position',
+    'background-repeat', 'color', 'font-family', 'font-size', 'line-height'
+];
+
+/**
+ * Таблицы стилей страницы — в теневое дерево.
+ *
+ * Клонируются сами УЗЛЫ (`<link>` и `<style>`), а не текст правил: файл по
+ * ссылке браузер уже скачал, повторная загрузка идёт из кэша, и никаких
+ * ограничений на чтение `cssRules` (как в `collectStyleText`) здесь не
+ * возникает вовсе.
+ */
+function cloneDocumentStyles(shadow) {
+    for (const sheet of Array.from(document.styleSheets || [])) {
+        const node = sheet.ownerNode;
+        if (!node || typeof node.cloneNode !== 'function') continue;
+        shadow.appendChild(node.cloneNode(true));
+    }
+}
+
+/**
+ * Копия дерева узлов «как сейчас на экране».
+ *
+ * Ходим по оригиналу и копии ПАРАМИ — ровно как `serializeInterface`: значения
+ * полей, содержимое холстов и позиция прокрутки живут в свойствах, а не в
+ * разметке, и `cloneNode` их не переносит.
+ *
+ * @param {Element} host — что копируем
+ * @param {Element[]} excluded — узлы, которых в копии быть не должно
+ * @returns {{clone: Element, scrolls: Array<{node: Element, top: number, left: number}>}}
+ *          прокрутку выставляет вызывающий — ПОСЛЕ вставки в документ, до неё
+ *          у копии нет размеров и `scrollTop` молча остаётся нулём.
+ */
+function cloneLiveInterface(host, excluded) {
+    const clone = host.cloneNode(true);
+    const srcNodes = host.querySelectorAll('*');
+    const dstNodes = clone.querySelectorAll('*');
+    const scrolls = [];
+
+    const drop = (excluded || []).filter(Boolean);
+    if (drop.length) {
+        for (let i = 0; i < srcNodes.length; i++) {
+            if (drop.indexOf(srcNodes[i]) < 0) continue;
+            const dst = dstNodes[i];
+            if (dst && dst.parentNode) dst.parentNode.removeChild(dst);
+        }
+    }
+
+    for (let i = 0; i < srcNodes.length; i++) {
+        const src = srcNodes[i];
+        const dst = dstNodes[i];
+        if (!dst) break;
+        if (drop.length && !clone.contains(dst)) continue;   // вырезан вместе с поддеревом
+        const tag = (src.tagName || '').toLowerCase();
+
+        if (tag === 'canvas') {
+            // Нарисованное на холсте в разметку не попадает — переносим растр.
+            try {
+                dst.width = src.width;
+                dst.height = src.height;
+                const ctx = dst.getContext('2d');
+                if (ctx && src.width && src.height) ctx.drawImage(src, 0, 0);
+            } catch (e) { /* «запачканный» холст не отдаёт данные — оставляем пустым */ }
+        } else if (tag === 'input' || tag === 'textarea' || tag === 'select') {
+            freezeFieldValue(src, dst);
+        }
+
+        if (src.scrollTop || src.scrollLeft) {
+            scrolls.push({ node: dst, top: src.scrollTop, left: src.scrollLeft });
+        }
+    }
+
+    // Скрипты в копию не идут. Клонированный <script> браузер повторно не
+    // выполняет, но держать в зеркале мёртвый код незачем.
+    for (const s of Array.from(clone.querySelectorAll('script'))) {
+        if (s.parentNode) s.parentNode.removeChild(s);
+    }
+
+    return { clone, scrolls };
+}
+
+/**
+ * Живое зеркало интерфейса.
+ *
+ *   const mirror = MySpace.snapshot.mirror({ container, exclude: [overlay] });
+ *   mirror.start();      // следить за изменениями и обновляться
+ *   mirror.refresh();    // обновить немедленно
+ *   mirror.stop();       // перестать следить (копия остаётся как есть)
+ *   mirror.destroy();
+ *
+ * Обновляется не по таймеру «всегда», а по двум поводам сразу:
+ *   • изменение дерева (`MutationObserver`), ввод в поле и прокрутка —
+ *     не чаще `minIntervalMs`, иначе перерисовка списка била бы по кадру;
+ *   • редкий такт `heartbeatMs` — на то, что наблюдателю не видно вовсе:
+ *     рисование на `<canvas>` дерева узлов не меняет.
+ *
+ * ── Почему обновление ТОЧЕЧНОЕ, а не пересборкой ─────────────────────────
+ * Первая версия на каждый повод собирала копию заново (`cloneNode` всего
+ * дерева + вставка). Это давало РОВНЫЙ рывок раз в такт: часы в панели задач
+ * меняют текст раз в секунду, и вся копия — тысячи узлов — выбрасывалась и
+ * раскладывалась заново, хотя изменилось пять символов. Вынести работу в
+ * параллельный поток нельзя: DOM живёт только в главном, воркеру его не видно.
+ * Поэтому `sync` обходит оригинал и копию ПАРАМИ и правит только разошедшееся —
+ * текст, атрибуты, значения полей, растр холстов. Полная пересборка (`refresh`)
+ * осталась на два случая: первый показ и расхождение СТРУКТУРЫ (открылось окно) —
+ * и тогда пересобирается только тот узел, у которого дети не совпали.
+ *
+ * Чтение и запись разнесены по проходам намеренно: `scrollTop` оригинала — это
+ * чтение, требующее раскладки, и чередовать его с записью в копию значило бы
+ * заставлять браузер пересчитывать раскладку на каждом узле.
+ *
+ * @param {{container: Element, host?: Element, exclude?: Element|Element[],
+ *          minIntervalMs?: number, heartbeatMs?: number}} options
+ *        `container` — элемент, которому зеркало заводит теневое дерево;
+ *        `exclude` — узлы, которых в копии быть не должно (сам оверлей лупы:
+ *        иначе зеркало покажет лупу в лупе, а её собственные правки стиля
+ *        будут бесконечно объявлять копию устаревшей).
+ */
+function createInterfaceMirror(options) {
+    const o = options || {};
+    const container = o.container;
+    if (!container) throw new Error('snapshot.mirror: не задан container');
+    const host = o.host || document.body;
+    const excluded = (Array.isArray(o.exclude) ? o.exclude : (o.exclude ? [o.exclude] : [])).filter(Boolean);
+    const minIntervalMs = Number(o.minIntervalMs) > 0 ? Number(o.minIntervalMs) : 150;
+    // Такт стал дешёвым (точечная синхронизация вместо пересборки), поэтому он
+    // чаще: рисование на холсте догоняется заметнее, а стоит это долей миллисекунды.
+    const heartbeatMs = Number(o.heartbeatMs) > 0 ? Number(o.heartbeatMs) : 500;
+
+    const shadow = container.shadowRoot || container.attachShadow({ mode: 'open' });
+    cloneDocumentStyles(shadow);
+
+    const rootEl = document.createElement('div');
+    // Класс, а не набор inline-стилей: таблицы стилей страницы скопированы в
+    // теневое дерево, поэтому правило `.ms-mirror-root` здесь действует.
+    rootEl.className = 'ms-mirror-root';
+    shadow.appendChild(rootEl);
+
+    const excludedSet = new Set(excluded);
+
+    let observer = null;
+    let running = false;
+    let dirty = true;
+    let scrollDirty = true;
+    let scrolledBefore = new Set();   // узлы оригинала, у которых прокрутка была
+    let lastUpdate = 0;
+    let rafId = 0;
+
+    const ELEMENT_NODE = 1;
+    const TEXT_NODE = 3;
+    const COMMENT_NODE = 8;
+
+    /** Узел принадлежит исключённому поддереву (нашему же оверлею). */
+    function isExcluded(node) {
+        for (const ex of excluded) {
+            if (ex === node || (node && ex.contains && ex.contains(node))) return true;
+        }
+        return false;
+    }
+
+    function onMutations(records) {
+        for (const rec of records) {
+            if (isExcluded(rec.target)) continue;
+            dirty = true;
+            return;
+        }
+    }
+
+    function onInputEvent(ev) {
+        if (isExcluded(ev.target)) return;
+        dirty = true;
+    }
+
+    function onScrollEvent(ev) {
+        if (isExcluded(ev.target)) return;
+        dirty = true;
+        scrollDirty = true;
+    }
+
+    // ── Пересборка ───────────────────────────────────────────────────────
+
+    /** Свойства `<body>`, которых в теневом дереве иначе не будет. */
+    function applyHostStyle() {
+        const style = window.getComputedStyle(host);
+        for (const prop of MIRROR_HOST_STYLE_PROPS) rootEl.style.setProperty(prop, style.getPropertyValue(prop));
+        // background-attachment: fixed внутри преобразованного элемента ведёт
+        // себя непредсказуемо — обоям рабочего стола достаточно обычной привязки.
+        rootEl.style.setProperty('background-attachment', 'scroll');
+        rootEl.style.width = host.clientWidth + 'px';
+        rootEl.style.height = host.clientHeight + 'px';
+    }
+
+    /**
+     * Заново собрать ДЕТЕЙ одного узла. Дорого, поэтому зовётся только там, где
+     * структура разошлась, — а не на всё дерево из-за одного изменившегося текста.
+     */
+    function rebuildChildren(srcEl, dstEl) {
+        const built = cloneLiveInterface(srcEl, excluded);
+        dstEl.textContent = '';
+        while (built.clone.firstChild) dstEl.appendChild(built.clone.firstChild);
+        for (const s of built.scrolls) {
+            s.node.scrollTop = s.top;
+            s.node.scrollLeft = s.left;
+        }
+    }
+
+    /** Полная пересборка копии: первый показ и восстановление после сбоя. */
+    function refresh() {
+        applyHostStyle();
+        rebuildChildren(host, rootEl);
+        scrollDirty = false;
+        stamp();
+    }
+
+    // ── Точечное обновление ──────────────────────────────────────────────
+
+    /**
+     * Позиции прокрутки оригинала — ОТДЕЛЬНЫМ проходом, только чтение.
+     *
+     * `scrollTop` заставляет браузер посчитать раскладку; если чередовать такое
+     * чтение с записью в копию, пересчёт случится на каждом узле. Собираем
+     * заранее и только тогда, когда где-то действительно прокручивали.
+     */
+    function collectScrollPositions() {
+        const map = new Map();
+        const nodes = host.querySelectorAll('*');
+        for (let i = 0; i < nodes.length; i++) {
+            const el = nodes[i];
+            const top = el.scrollTop;
+            const left = el.scrollLeft;
+            if (top || left) map.set(el, { top, left });
+        }
+        // Список пролистали ОБРАТНО в начало: без нуля в копии осталась бы
+        // прокрутка, которой в оригинале уже нет. Ноль пишется только тем, у кого
+        // прокрутка была, — писать его всем значило бы трогать каждый узел.
+        for (const el of scrolledBefore) {
+            if (!map.has(el)) map.set(el, { top: 0, left: 0 });
+        }
+        scrolledBefore = new Set();
+        for (const entry of map) {
+            if (entry[1].top || entry[1].left) scrolledBefore.add(entry[0]);
+        }
+        return map;
+    }
+
+    /** Атрибуты: пишем только то, что разошлось. */
+    function syncAttributes(src, dst) {
+        const srcAttrs = src.attributes;
+        for (let i = 0; i < srcAttrs.length; i++) {
+            const attr = srcAttrs[i];
+            if (dst.getAttribute(attr.name) !== attr.value) dst.setAttribute(attr.name, attr.value);
+        }
+        const dstAttrs = dst.attributes;
+        if (dstAttrs.length === srcAttrs.length) return;
+        for (let i = dstAttrs.length - 1; i >= 0; i--) {
+            const name = dstAttrs[i].name;
+            if (!src.hasAttribute(name)) dst.removeAttribute(name);
+        }
+    }
+
+    /** Растр холста в разметку не попадает — переносим его на каждом обновлении. */
+    function syncCanvas(src, dst) {
+        try {
+            if (dst.width !== src.width) dst.width = src.width;
+            if (dst.height !== src.height) dst.height = src.height;
+            const ctx = dst.getContext('2d');
+            if (!ctx || !src.width || !src.height) return;
+            ctx.clearRect(0, 0, dst.width, dst.height);
+            ctx.drawImage(src, 0, 0);
+        } catch (e) { /* «запачканный» холст не отдаёт данные */ }
+    }
+
+    /**
+     * Один узел. Возвращает false, если узлы РАЗНОЙ природы — значит структура
+     * разошлась и этот участок надо пересобрать целиком.
+     */
+    function syncNode(src, dst, scrolls) {
+        if (src.nodeType !== dst.nodeType) return false;
+
+        if (src.nodeType === TEXT_NODE || src.nodeType === COMMENT_NODE) {
+            if (dst.data !== src.data) dst.data = src.data;
+            return true;
+        }
+        if (src.nodeType !== ELEMENT_NODE) return true;
+        if (src.nodeName !== dst.nodeName) return false;
+
+        syncAttributes(src, dst);
+
+        const tag = src.nodeName.toLowerCase();
+        if (tag === 'canvas') { syncCanvas(src, dst); return true; }
+        // У поля значение живёт в свойстве, а не в разметке; в детей <textarea>
+        // не идём — там лежит исходный текст, а не то, что набрано сейчас.
+        if (tag === 'input' || tag === 'textarea') { freezeFieldValue(src, dst); return true; }
+
+        if (scrolls) {
+            const pos = scrolls.get(src);
+            if (pos) { dst.scrollTop = pos.top; dst.scrollLeft = pos.left; }
+        }
+
+        syncChildren(src, dst, scrolls);
+        // Выбранный пункт проставляем ПОСЛЕ детей: синхронизация атрибутов
+        // пунктов иначе сняла бы с копии отметку `selected`.
+        if (tag === 'select') freezeFieldValue(src, dst);
+        return true;
+    }
+
+    /** Дети узла попарно; исключённые узлы оригинала пропускаются. */
+    function syncChildren(srcEl, dstEl, scrolls) {
+        let src = srcEl.firstChild;
+        let dst = dstEl.firstChild;
+        while (src) {
+            if (excludedSet.has(src)) { src = src.nextSibling; continue; }
+            if (!dst || !syncNode(src, dst, scrolls)) { rebuildChildren(srcEl, dstEl); return; }
+            src = src.nextSibling;
+            dst = dst.nextSibling;
+        }
+        if (dst) rebuildChildren(srcEl, dstEl);   // в копии остались лишние узлы
+    }
+
+    /** Догнать оригинал, ничего не пересобирая. */
+    function sync() {
+        if (!rootEl.firstChild) { refresh(); return; }
+        const scrolls = scrollDirty ? collectScrollPositions() : null;
+        scrollDirty = false;
+        syncChildren(host, rootEl, scrolls);
+        stamp();
+    }
+
+    function stamp() {
+        lastUpdate = (window.performance && performance.now) ? performance.now() : Date.now();
+        dirty = false;
+    }
+
+    function tick(now) {
+        if (!running) return;
+        rafId = requestAnimationFrame(tick);
+        const since = now - lastUpdate;
+        if ((dirty && since >= minIntervalMs) || since >= heartbeatMs) sync();
+    }
+
+    function start() {
+        if (running) return;
+        running = true;
+        if (!observer && window.MutationObserver) {
+            observer = new MutationObserver(onMutations);
+        }
+        if (observer) {
+            observer.observe(host, { subtree: true, childList: true, attributes: true, characterData: true });
+        }
+        // Набранное в поле и прокрутка дерево узлов не меняют — ловим событиями.
+        document.addEventListener('input', onInputEvent, true);
+        document.addEventListener('scroll', onScrollEvent, true);
+        refresh();
+        rafId = requestAnimationFrame(tick);
+    }
+
+    function stop() {
+        if (!running) return;
+        running = false;
+        if (observer) observer.disconnect();
+        document.removeEventListener('input', onInputEvent, true);
+        document.removeEventListener('scroll', onScrollEvent, true);
+        if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
+    }
+
+    /**
+     * Отпустить копию: наблюдатели сняты, дерево копии выброшено.
+     *
+     * Зеркало при этом остаётся РАБОЧИМ — `start()` заводит его снова (наблюдатель
+     * создаётся заново, копия собирается заново). Так потребителю, который
+     * показывает копию редкими короткими сеансами (лупа), не приходится держать
+     * второе дерево в памяти между ними: следующий показ всё равно собирает его с нуля.
+     */
+    function destroy() {
+        stop();
+        observer = null;
+        rootEl.textContent = '';
+    }
+
+    return {
+        /** Корень копии в теневом дереве — к нему применяют преобразования. */
+        element: rootEl,
+        start: start,
+        stop: stop,
+        /** Догнать оригинал точечно (обычный путь обновления). */
+        sync: sync,
+        /** Пересобрать копию целиком (первый показ, восстановление после сбоя). */
+        refresh: refresh,
+        destroy: destroy
+    };
+}
+
+// ─────────────────────────────────────────────────────────────────────
 // Иконки: выбор файла под нужный размер.
 //
 // Зачем в ядре. Иконку в интерфейс вставляли девять разных мест, и каждое
@@ -1300,6 +1725,7 @@ if (typeof window !== 'undefined') {
              *
              *   await MySpace.snapshot.serialize()  → { html, css, width, height }
              *   await MySpace.snapshot.capture()    → Blob (PNG)
+             *   MySpace.snapshot.mirror({ container })  → живая копия интерфейса
              *
              * ── Почему это ДВА метода, а не один ────────────────────────────
              * Снимка экрана средствами браузера мы не делаем намеренно: `getDisplayMedia`
@@ -1319,10 +1745,18 @@ if (typeof window !== 'undefined') {
              * на снимке не будет, а оформление возможно неточное — шрифт подставляется
              * системный, а всё, что браузер рисует мимо DOM (нативные выпадающие
              * списки), не воспроизводится.
+             *
+             * ── Третий метод: ЗЕРКАЛО ──────────────────────────────────────
+             * `mirror` — та же копия дерева узлов, но ЖИВАЯ и остающаяся в этом же
+             * документе: стили и картинки браузер уже загрузил, поэтому обновление
+             * стоит одного `cloneNode`, а не десятка запросов. Снимок показывают
+             * ДРУГОМУ человеку, зеркало — хозяину экрана, только крупнее (экранная
+             * лупа `apps/magnifier`). Подробности — у `createInterfaceMirror`.
              */
             snapshot: {
                 serialize: (root, opts) => serializeInterface(root, opts),
-                capture:   (opts) => captureInterface(opts)
+                capture:   (opts) => captureInterface(opts),
+                mirror:    (opts) => createInterfaceMirror(opts)
             },
 
             /**
@@ -1395,6 +1829,66 @@ if (typeof window !== 'undefined') {
 
                     /** Имена выключенных приложений (пусто, пока список не получен). */
                     disabledList() { return disabled ? Array.from(disabled) : []; }
+                };
+
+                return api;
+            })(),
+
+            /**
+             * ЛИЧНЫЕ НАСТРОЙКИ приложения, видимые клиенту.
+             *
+             *   MySpace.settings.get('magnifier', 'glassEffect', true)
+             *   await MySpace.settings.ready            // снимок получен
+             *   await MySpace.settings.load()           // перечитать (после формы настроек)
+             *
+             * Настройки читает и правит СЕРВЕР — это правило не меняется. Но есть
+             * приложения, у которых поведение на экране целиком задаётся настройкой, а
+             * окна нет вовсе (экранная лупа): спрашивать сервер в момент нажатия
+             * клавиши поздно. Поэтому личный снимок приезжает ОДНИМ запросом при
+             * загрузке страницы — тем же приёмом и по той же причине, что `state` и
+             * `appAvailability`: в бандл `/app/loadApps` личное класть нельзя, он
+             * кэшируется по ключу «роль|язык».
+             *
+             * Что приезжает: только уровень `user` и только `visibility: "user"` — то,
+             * что человек правит себе сам (см. `apps/settings/server.js#mySettings`).
+             * Всё, от чего зависят права, деньги или расчёты, читается на сервере и
+             * сюда не попадает: значение здесь — копия, и она может устареть.
+             */
+            settings: (function () {
+                let data = null;   // { приложение: { ключ: значение } } | null (не получено)
+
+                const api = {
+                    /** Снимок настроек получен (промис). */
+                    ready: Promise.resolve(),
+
+                    /** Запросить снимок. Зовётся ядром при старте; после правки настроек — формой. */
+                    load() {
+                        api.ready = callServerMethod('settings', 'mySettings', {})
+                            .then(snapshot => {
+                                data = (snapshot && typeof snapshot === 'object') ? snapshot : {};
+                                return data;
+                            })
+                            .catch(e => {
+                                console.warn('[MySpace.settings] снимок не получен:', e && e.message);
+                                return data || {};
+                            });
+                        return api.ready;
+                    },
+
+                    /**
+                     * Значение настройки. Пока снимок не получен (и если настройки нет)
+                     * возвращается `fallback` — объявленное умолчание приложение знает и
+                     * само, а ждать ответа сервера на каждое обращение нельзя.
+                     */
+                    get(appName, key, fallback) {
+                        const app = data && data[appName];
+                        if (!app || !(key in app) || app[key] === null || app[key] === undefined) {
+                            return fallback === undefined ? null : fallback;
+                        }
+                        return app[key];
+                    },
+
+                    getAll(appName) { return Object.assign({}, (data && data[appName]) || {}); }
                 };
 
                 return api;
@@ -1564,6 +2058,9 @@ if (typeof window !== 'undefined') {
     // Персональная доступность приложений — тем же приёмом и в то же время: трей
     // ждёт этот список, прежде чем рисовать значки.
     try { window.MySpace.appAvailability.load(); } catch (e) { console.warn('[MySpace.appAvailability] старт:', e && e.message); }
+    // Личные настройки, нужные клиентскому коду (уровень `user`, видимость `user`):
+    // приложению без окна спрашивать сервер в момент действия пользователя поздно.
+    try { window.MySpace.settings.load(); } catch (e) { console.warn('[MySpace.settings] старт:', e && e.message); }
 }
 
 class Form extends UIObject {

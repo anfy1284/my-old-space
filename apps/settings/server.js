@@ -19,6 +19,8 @@
 
 const globalRoot = require('../../drive_root/globalServerContext');
 const state = require('../../drive_root/settings/state');
+const settingsApi = require('../../drive_root/settings');
+const registry = require('../../drive_root/settings/registry');
 const appAvailability = require('../../drive_root/appAvailability');
 const log = require('../../drive_root/log');
 
@@ -43,6 +45,40 @@ module.exports = {
     disabledApps: async (params, sessionID) => {
         const user = await currentUser(sessionID);
         return appAvailability.disabledAppsForUser(user ? user.UID : null);
+    },
+
+    /**
+     * Личные настройки, которые нужны КЛИЕНТСКОМУ коду: { приложение: { ключ: значение } }.
+     *
+     * Есть приложения, у которых поведение на экране задаётся настройкой, а окна нет
+     * вовсе (экранная лупа `magnifier`): спросить сервер во время нажатия клавиши
+     * нельзя, а в бандл `/app/loadApps` личное не кладут — он кэшируется по ключу
+     * «роль|язык». Поэтому снимок приезжает отдельным запросом при загрузке страницы,
+     * ровно как состояние интерфейса и список выключенных приложений.
+     *
+     * Отдаётся только уровень `user` и только `visibility: "user"`: это настройки
+     * САМОГО человека, которые он и правит в форме. Значения уровня `system`, ключи
+     * поставщиков и всё, что объявлено админским, на клиент не уезжают — клиенту они
+     * не нужны, а утечка ключа настройкой не лечится.
+     */
+    mySettings: async (params, sessionID) => {
+        const user = await currentUser(sessionID);
+        if (!user) return {};
+        registry.ensureLoaded();
+        const out = {};
+        for (const entry of registry.listByScope('user')) {
+            const visible = entry.settings.filter(d => d.visibility === 'user');
+            if (!visible.length) continue;
+            try {
+                const values = await settingsApi.getAppSettings('user', user.UID, entry.app.name);
+                const appValues = {};
+                for (const decl of visible) appValues[decl.key] = values[decl.key];
+                out[entry.app.name] = appValues;
+            } catch (e) {
+                log.error('[settings] личные настройки', entry.app.name, e && e.message);
+            }
+        }
+        return out;
     },
 
     /**

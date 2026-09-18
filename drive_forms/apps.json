@@ -76,6 +76,10 @@
         {
             "name": "settings",
             "path": "/settings"
+        },
+        {
+            "name": "magnifier",
+            "path": "/magnifier"
         }
     ]
 }

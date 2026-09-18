@@ -63,6 +63,23 @@
             this.updateAll();
         },
 
+        /**
+         * Пересобрать значки: персональная доступность приложений изменилась.
+         *
+         * Список выключенных приложений приезжает снимком при загрузке страницы, и
+         * после правки настроек он перечитывается (`app-settings-changed`). Без
+         * пересборки выключатель приложения был бы виден только после перезагрузки
+         * страницы — значок остался бы стоять у выключенного.
+         */
+        rebuild: function () {
+            if (!this.container) return;
+            this.items.forEach(item => {
+                if (item.element && item.element.parentNode) item.element.parentNode.removeChild(item.element);
+            });
+            this.items = [];
+            this.addDeclaredItems();
+        },
+
         addItem: function (appName, cfg) {
             const el = document.createElement('div');
             el.style.position = 'relative';   // якорь для счётчика (см. setBadge)
@@ -173,4 +190,5 @@
     // сразу: так порядок перестаёт иметь значение.
     window.addEventListener('taskbar-ready', () => Tray.build());
     window.addEventListener('load', () => Tray.build());
+    window.addEventListener('app-settings-changed', () => Tray.rebuild());
 })();

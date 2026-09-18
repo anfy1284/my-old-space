@@ -1,0 +1,29 @@
+{
+    "app": {
+        "caption": { "i18n": "settings_app_magnifier" },
+        "icon": "/apps/general_icons/resources/public/16x16/search.png",
+        "order": 75
+    },
+    "settings": {
+        "enabled": {
+            "//": "Выключатель приложения целиком (config.json → enabledBySetting). Правит человек СЕБЕ: лупа никому не мешает, но перехватывает Alt и колесо, поэтому включается осознанно.",
+            "scope": "user",
+            "type": "boolean",
+            "default": false,
+            "visibility": "user",
+            "caption": { "i18n": "set_magnifier_enabled" },
+            "hint": { "i18n": "set_magnifier_enabled_hint" },
+            "order": 10
+        },
+        "glassEffect": {
+            "//": "Искажение по краям и скруглённые углы — «как настоящее стекло». Отдельной настройкой, а не в коде: эффект стоит кадров на слабой машине, и отказ от него не должен быть правкой кода.",
+            "scope": "user",
+            "type": "boolean",
+            "default": true,
+            "visibility": "user",
+            "caption": { "i18n": "set_magnifier_glass" },
+            "hint": { "i18n": "set_magnifier_glass_hint" },
+            "order": 20
+        }
+    }
+}

@@ -1,0 +1,32 @@
+{
+    "settings_app_magnifier": {
+        "en": "Magnifier",
+        "ru": "Лупа",
+        "de": "Lupe",
+        "pl": "Lupa"
+    },
+    "set_magnifier_enabled": {
+        "en": "Enable magnifier",
+        "ru": "Включить лупу",
+        "de": "Lupe einschalten",
+        "pl": "Włącz lupę"
+    },
+    "set_magnifier_enabled_hint": {
+        "en": "Hold the left Alt key to magnify the area under the mouse pointer. The wheel changes magnification, Ctrl + wheel changes the size of the magnifier.",
+        "ru": "Удерживайте левый Alt, чтобы увеличить участок экрана под указателем мыши. Колесо меняет увеличение, Ctrl + колесо — размер лупы.",
+        "de": "Halten Sie die linke Alt-Taste gedrückt, um den Bereich unter dem Mauszeiger zu vergrößern. Das Mausrad ändert die Vergrößerung, Strg + Mausrad die Größe der Lupe.",
+        "pl": "Przytrzymaj lewy klawisz Alt, aby powiększyć obszar pod wskaźnikiem myszy. Kółko zmienia powiększenie, Ctrl + kółko — rozmiar lupy."
+    },
+    "set_magnifier_glass": {
+        "en": "Glass effect",
+        "ru": "Эффект стекла",
+        "de": "Glaseffekt",
+        "pl": "Efekt szkła"
+    },
+    "set_magnifier_glass_hint": {
+        "en": "Rounded corners and distortion at the edges, like a real lens. Switch it off if the magnifier moves jerkily.",
+        "ru": "Скруглённые углы и искажение по краям, как у настоящего стекла. Выключите, если лупа движется рывками.",
+        "de": "Abgerundete Ecken und Verzerrung an den Rändern wie bei einer echten Linse. Ausschalten, wenn sich die Lupe ruckartig bewegt.",
+        "pl": "Zaokrąglone rogi i zniekształcenie przy krawędziach, jak w prawdziwej soczewce. Wyłącz, jeśli lupa porusza się skokowo."
+    }
+}

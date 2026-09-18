@@ -1,0 +1,12 @@
+{
+    "level": "app",
+    "autoStart": true,
+    "system": ["mySpace"],
+    "access": ["admin", "public", "user"],
+    "dependencies": {},
+
+    "//": "Экранная лупа. Приложение без окна и без значка: точка входа — удержание левого Alt. Поэтому ни tray, ни mainMenuCommands здесь нет, а autoStart обязателен — иначе client.js не попадёт в бандл и слушать клавишу будет некому.",
+
+    "//enabledBySetting": "Выключатель (drive_root/appAvailability.js). Лупа перехватывает клавишу и колесо мыши, поэтому по умолчанию выключена и включается человеком себе самому (visibility: user в settings.json).",
+    "enabledBySetting": { "app": "magnifier", "key": "enabled" }
+}

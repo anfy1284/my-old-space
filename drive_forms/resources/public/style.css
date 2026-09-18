@@ -1667,4 +1667,107 @@ input[type="checkbox"],
     white-space: pre-wrap;
 }
 
+/* ─── Экранная лупа (apps/magnifier) ──────────────────────────────────────
+   Оверлей поверх всего экрана: рамка обрезает увеличенную копию интерфейса,
+   слой линзы (шире рамки на запас) несёт искажение стекла, подпись и блик
+   лежат поверх и в увеличение не попадают. Размеры, скругление и сила
+   искажения считаются от размера лупы и потому задаются из кода. */
+.ui-magnifier {
+    position: fixed;
+    left: 0;
+    top: 0;
+    display: none;
+    overflow: hidden;
+    /* Поверх всего: окон, уведомлений, модальных форм. */
+    z-index: 2147483000;
+    /* Щелчки, наведение и выделение уходят в приложение ПОД лупой — без этого
+       лупа перехватывала бы мышь, а по заданию мышь работает как обычно. */
+    pointer-events: none;
+    user-select: none;
+    background: var(--color-mid);
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
+    /* Внутри рамки лежит копия всего интерфейса: без изоляции любое её
+       обновление тянуло бы за собой пересчёт раскладки страницы. Положение
+       задаётся преобразованием (см. place в apps/magnifier), поэтому
+       left/top остаются нулями. */
+    contain: layout paint;
+}
+
+.ui-magnifier-visible {
+    display: block;
+}
+
+.ui-magnifier-lens {
+    position: absolute;
+    overflow: hidden;
+}
+
+.ui-magnifier-stage {
+    position: absolute;
+    left: 0;
+    top: 0;
+    transform-origin: 0 0;
+}
+
+/* Корень живой копии интерфейса (MySpace.snapshot.mirror) — он лежит в ТЕНЕВОМ
+   дереве, и это правило действует там потому, что таблицы стилей страницы
+   скопированы внутрь вместе с ним.
+   `contain` здесь не украшение: без него правка узла в копии заставляет браузер
+   пересчитывать раскладку всей страницы, а копия — это второе дерево целиком.
+   Размеры копии задаёт код (они равны размеру окна), поэтому `size` не включаем. */
+.ms-mirror-root {
+    position: relative;
+    overflow: hidden;
+    contain: layout paint;
+}
+
+/* Блик и кромка стекла — только в режиме «эффект стекла». */
+.ui-magnifier-glare {
+    position: absolute;
+    left: 0;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    display: none;
+    border-radius: inherit;
+}
+
+/* Блик — тоже ТОЛЬКО по кромке: середина лупы остаётся чистой, иначе подсветка
+   поверх текста мешает ровно там, куда человек и смотрит. */
+.ui-magnifier-glassy .ui-magnifier-glare {
+    display: block;
+    background: radial-gradient(140% 110% at 50% 50%,
+        rgba(255, 255, 255, 0) 62%,
+        rgba(255, 255, 255, 0.10) 84%,
+        rgba(255, 255, 255, 0.22) 100%);
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.45),
+                inset 0 0 14px rgba(0, 0, 0, 0.30);
+}
+
+/* Текущее увеличение — на секунду после поворота колеса. */
+.ui-magnifier-label {
+    position: absolute;
+    right: 6px;
+    bottom: 6px;
+    padding: 2px 6px;
+    font-family: "MS Sans Serif", Tahoma, sans-serif;
+    font-size: 11px;
+    color: var(--color-text);
+    background: #ffffe1;
+    border: 1px solid var(--color-text);
+    opacity: 0;
+    transition: opacity 150ms linear;
+}
+
+.ui-magnifier-label-visible {
+    opacity: 1;
+}
+
+/* Определение фильтра искажения: сам по себе ничего не рисует. */
+.ui-magnifier-defs {
+    position: absolute;
+    width: 0;
+    height: 0;
+}
+
 
