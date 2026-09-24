@@ -1,0 +1,80 @@
+{
+    "dm_app_caption": {
+        "en": "Delete marked objects",
+        "ru": "Удаление помеченных объектов",
+        "de": "Markierte Objekte löschen",
+        "pl": "Usuwanie oznaczonych obiektów"
+    },
+    "dm_hint": {
+        "en": "Marking is reversible, deletion is not. Below: who refers to the selected object — double-click opens it.",
+        "ru": "Пометка обратима, удаление — нет. Внизу — кто ссылается на текущий объект; двойной щелчок открывает.",
+        "de": "Markierung ist umkehrbar, Löschen nicht. Unten: wer auf das gewählte Objekt verweist — Doppelklick öffnet es.",
+        "pl": "Oznaczenie można cofnąć, usunięcia nie. Poniżej: kto odwołuje się do wybranego obiektu — podwójne kliknięcie otwiera."
+    },
+    "dm_unmark_selected": {
+        "en": "Remove the mark",
+        "ru": "Снять пометку",
+        "de": "Markierung entfernen",
+        "pl": "Usuń oznaczenie"
+    },
+    "dm_col_kind": {
+        "en": "Kind",
+        "ru": "Вид",
+        "de": "Art",
+        "pl": "Rodzaj"
+    },
+    "dm_col_object": {
+        "en": "Object",
+        "ru": "Объект",
+        "de": "Objekt",
+        "pl": "Obiekt"
+    },
+    "dm_col_blockers": {
+        "en": "Referred to by",
+        "ru": "На него ссылаются",
+        "de": "Verweise darauf",
+        "pl": "Odwołania"
+    },
+    "dm_result": {
+        "en": "Deleted: {{deleted}}, could not be deleted: {{failed}}",
+        "ru": "Удалено: {{deleted}}, не удалось: {{failed}}",
+        "de": "Gelöscht: {{deleted}}, nicht gelöscht: {{failed}}",
+        "pl": "Usunięto: {{deleted}}, nie udało się: {{failed}}"
+    },
+    "dm_unmarked": {
+        "en": "The mark was removed from {{count}} object(s)",
+        "ru": "Пометка снята с объектов: {{count}}",
+        "de": "Markierung von {{count}} Objekt(en) entfernt",
+        "pl": "Usunięto oznaczenie z obiektów: {{count}}"
+    },
+    "dm_control": {
+        "en": "Check references",
+        "ru": "Контроль",
+        "de": "Verweise prüfen",
+        "pl": "Kontrola odwołań"
+    },
+    "dm_control_delete": {
+        "en": "Check and delete",
+        "ru": "Контроль и удаление",
+        "de": "Prüfen und löschen",
+        "pl": "Kontrola i usuwanie"
+    },
+    "dm_marked_caption": {
+        "en": "Marked for deletion",
+        "ru": "Помечены на удаление",
+        "de": "Zum Löschen markiert",
+        "pl": "Oznaczone do usunięcia"
+    },
+    "dm_refs_caption": {
+        "en": "Objects referring to the selected one",
+        "ru": "Объекты, ссылающиеся на текущий",
+        "de": "Objekte, die auf das gewählte verweisen",
+        "pl": "Obiekty odwołujące się do wybranego"
+    },
+    "dm_result_ok": {
+        "en": "Deleted: {{deleted}}",
+        "ru": "Удалено: {{deleted}}",
+        "de": "Gelöscht: {{deleted}}",
+        "pl": "Usunięto: {{deleted}}"
+    }
+}

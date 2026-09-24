@@ -86,9 +86,19 @@ function normalizeColumnsFromFields(fields, rows) {
     return fields.map(f => {
         if (typeof f === 'string') return { data: f, caption: f };
         const name = f.name || f.field || f.id || f.key;
-        const caption = f.caption || f.label || f.title || name;
+        // ЯВНО ЗАДАННОЕ `data` не перебиваем именем. Обычная колонка — это поле
+        // модели, и имя с данными у неё совпадают; но синтетическая колонка
+        // (состояние объекта) называется одним, а значение берёт из другого
+        // поля строки, и подмена оставляла ячейку пустой.
+        const data = (f.data !== undefined && f.data !== null && f.data !== '') ? f.data : name;
+        // ПУСТАЯ подпись — это подпись, а не её отсутствие: колонка-значок
+        // объявляет `caption: ""` намеренно, и подстановка имени поля рисовала
+        // бы в шапке «__entityState».
+        const caption = (f.caption !== undefined && f.caption !== null)
+            ? f.caption
+            : (f.label || f.title || name);
         // Preserve other metadata (width, properties, etc.) but ensure `data` and `caption` exist
-        const col = Object.assign({}, f, { data: name, caption: caption });
+        const col = Object.assign({}, f, { data: data, caption: caption });
         return col;
     });
 }
@@ -99,6 +109,17 @@ async function translateColumnsI18n(columns, sessionID) {
     for (const col of columns) {
         if (col && col.caption && typeof col.caption === 'object' && col.caption.i18n) {
             try { col.caption = await tForSession(col.caption.i18n, sessionID); } catch (e) {}
+        }
+        // Подсказки значков (`iconTitles`) — такие же `{ i18n }`, и переводить их
+        // надо здесь же: значок без подписи узнаётся не сразу, и подсказка —
+        // единственное, чем колонка себя объясняет.
+        if (col && col.iconTitles && typeof col.iconTitles === 'object') {
+            for (const k of Object.keys(col.iconTitles)) {
+                const v = col.iconTitles[k];
+                if (v && typeof v === 'object' && v.i18n) {
+                    try { col.iconTitles[k] = await tForSession(v.i18n, sessionID); } catch (e) {}
+                }
+            }
         }
         // Подписи допустимых значений (`options` поля модели) — той же природы, что
         // и caption колонки. Без перевода ячейка показала бы ключ i18n вместо слова,
@@ -323,6 +344,34 @@ function registerDynamicTableMethods(appName, config = {}) {
                 }
                 fields = head.concat(fields);
             }
+            // РЕГИСТР: подставляем представление регистратора и показываем его
+            // вместо идентификатора. Полиморфная ссылка (`recorderTable` +
+            // `recorderUID`) внешнего ключа не имеет, и обычная подстановка
+            // представлений до неё не достаёт (drive_root/db/registerForms.js).
+            try {
+                const registerForms = require('../drive_root/db/registerForms');
+                await registerForms.decorateRows(tableName, rows, sessionID);
+                fields = registerForms.remapRecorderColumn(tableName, fields);
+            } catch (e) {
+                console.error(`[${appName}/getDynamicTableData] регистратор не подставлен:`,
+                    e && e.message || e);
+            }
+
+            // ПЕРВАЯ КОЛОНКА — состояние объекта одним значком, как в классических учётных системах: пометка
+            // на удаление или состояние проведения. Добавляет ЯДРО, а не лейаут
+            // приложения: состояние объекта обязано выглядеть одинаково в любом
+            // журнале (drive_root/db/entityStateColumn.js).
+            //
+            // Добавляется ПОСЛЕ запроса данных, а не до: колонка синтетическая,
+            // поля с таким именем в модели нет, и попав в список атрибутов
+            // выборки, она роняла запрос — список открывался пустым.
+            try {
+                fields = require('../drive_root/db/entityStateColumn').prepend(tableName, fields);
+            } catch (e) {
+                console.error(`[${appName}/getDynamicTableData] колонка состояния не добавлена:`,
+                    e && e.message || e);
+            }
+
             const columns = normalizeColumnsFromFields(fields, rows);
             await translateColumnsI18n(columns, sessionID);
             try { console.log(`[${appName}/getDynamicTableData] normalized columns=`, columns.map(c => ({ data: c.data, caption: c.caption }))); } catch(e) {}

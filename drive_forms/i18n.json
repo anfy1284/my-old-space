@@ -83,6 +83,12 @@
         "de": "Datum",
         "pl": "Data"
     },
+    "document_seq_field": {
+        "en": "Moment",
+        "ru": "Момент",
+        "de": "Zeitpunkt",
+        "pl": "Moment"
+    },
     "name_field": {
         "en": "Name",
         "ru": "Наименование",
@@ -101,7 +107,6 @@
         "de": "Fertig",
         "pl": "Gotowe"
     },
-
     "msgfeed_load_older": {
         "en": "Older messages",
         "ru": "Сообщения раньше",
@@ -257,5 +262,563 @@
         "ru": "Убрать вложение",
         "de": "Anhang entfernen",
         "pl": "Usuń załącznik"
+    },
+    "posting_state_field": {
+        "en": "Posting",
+        "ru": "Проведение",
+        "de": "Verbuchung",
+        "pl": "Księgowanie"
+    },
+    "posting_state_not_posted": {
+        "en": "Not posted",
+        "ru": "Не проведён",
+        "de": "Nicht verbucht",
+        "pl": "Niezaksięgowany"
+    },
+    "posting_state_queued": {
+        "en": "Queued",
+        "ru": "В очереди",
+        "de": "In Warteschlange",
+        "pl": "W kolejce"
+    },
+    "posting_state_posted": {
+        "en": "Posted",
+        "ru": "Проведён",
+        "de": "Verbucht",
+        "pl": "Zaksięgowany"
+    },
+    "posting_state_error": {
+        "en": "Posting failed",
+        "ru": "Ошибка проведения",
+        "de": "Verbuchung fehlgeschlagen",
+        "pl": "Błąd księgowania"
+    },
+    "posting_cmd_post": {
+        "en": "Post",
+        "ru": "Провести",
+        "de": "Verbuchen",
+        "pl": "Zaksięguj"
+    },
+    "posting_cmd_unpost": {
+        "en": "Unpost",
+        "ru": "Распровести",
+        "de": "Verbuchung aufheben",
+        "pl": "Wycofaj księgowanie"
+    },
+    "posting_cmd_post_and_close": {
+        "en": "Post and close",
+        "ru": "Провести и закрыть",
+        "de": "Verbuchen und schließen",
+        "pl": "Zaksięguj i zamknij"
+    },
+    "posting_notify_title": {
+        "en": "Posting",
+        "ru": "Проведение",
+        "de": "Verbuchung",
+        "pl": "Księgowanie"
+    },
+    "posting_notify_error_title": {
+        "en": "Posting failed",
+        "ru": "Ошибка проведения",
+        "de": "Verbuchung fehlgeschlagen",
+        "pl": "Błąd księgowania"
+    },
+    "posting_notify_posted": {
+        "en": "Document posted",
+        "ru": "Документ проведён",
+        "de": "Beleg verbucht",
+        "pl": "Dokument zaksięgowany"
+    },
+    "posting_notify_unposted": {
+        "en": "Document unposted",
+        "ru": "Документ распроведён",
+        "de": "Verbuchung aufgehoben",
+        "pl": "Księgowanie wycofane"
+    },
+    "posting_notify_failed": {
+        "en": "The document could not be posted",
+        "ru": "Документ не удалось провести",
+        "de": "Der Beleg konnte nicht verbucht werden",
+        "pl": "Nie udało się zaksięgować dokumentu"
+    },
+    "posting_notify_group_ok": {
+        "en": "Posted: {{count}}",
+        "ru": "Проведено: {{count}}",
+        "de": "Verbucht: {{count}}",
+        "pl": "Zaksięgowano: {{count}}"
+    },
+    "posting_notify_group_result": {
+        "en": "Posted: {{ok}}, failed: {{failed}}",
+        "ru": "Проведено: {{ok}}, ошибок: {{failed}}",
+        "de": "Verbucht: {{ok}}, Fehler: {{failed}}",
+        "pl": "Zaksięgowano: {{ok}}, błędów: {{failed}}"
+    },
+    "posting_refuse_not_postable": {
+        "en": "This document is not posted",
+        "ru": "Этот документ не проводится",
+        "de": "Dieser Beleg wird nicht verbucht",
+        "pl": "Ten dokument nie jest księgowany"
+    },
+    "posting_refuse_unpost_denied": {
+        "en": "Unposting is not allowed for this document",
+        "ru": "Распроведение этого документа запрещено",
+        "de": "Das Aufheben der Verbuchung ist für diesen Beleg nicht erlaubt",
+        "pl": "Wycofanie księgowania tego dokumentu jest zabronione"
+    },
+    "posting_refuse_no_selection": {
+        "en": "No documents selected",
+        "ru": "Не выбрано ни одного документа",
+        "de": "Keine Belege ausgewählt",
+        "pl": "Nie wybrano żadnego dokumentu"
+    },
+    "posting_busy_form": {
+        "en": "The document is being posted...",
+        "ru": "Документ проводится...",
+        "de": "Der Beleg wird verbucht…",
+        "pl": "Dokument jest księgowany..."
+    },
+    "notif_ttl_field": {
+        "en": "Auto-hide, seconds",
+        "ru": "Автоскрытие, секунд",
+        "de": "Automatisch ausblenden, Sekunden",
+        "pl": "Auto-ukrycie, sekundy"
+    },
+    "register_period_field": {
+        "en": "Period",
+        "ru": "Период",
+        "de": "Periode",
+        "pl": "Okres"
+    },
+    "register_seq_field": {
+        "en": "Moment",
+        "ru": "Момент",
+        "de": "Zeitpunkt",
+        "pl": "Moment"
+    },
+    "register_recorder_table_field": {
+        "en": "Recorder type",
+        "ru": "Вид регистратора",
+        "de": "Belegart",
+        "pl": "Typ rejestratora"
+    },
+    "register_recorder_field": {
+        "en": "Recorder",
+        "ru": "Регистратор",
+        "de": "Beleg",
+        "pl": "Rejestrator"
+    },
+    "register_line_no_field": {
+        "en": "Line",
+        "ru": "Строка",
+        "de": "Zeile",
+        "pl": "Wiersz"
+    },
+    "register_sign_field": {
+        "en": "Sign",
+        "ru": "Знак",
+        "de": "Vorzeichen",
+        "pl": "Znak"
+    },
+    "pq_document_table_field": {
+        "en": "Document type",
+        "ru": "Вид документа",
+        "de": "Belegart",
+        "pl": "Typ dokumentu"
+    },
+    "pq_document_field": {
+        "en": "Document",
+        "ru": "Документ",
+        "de": "Beleg",
+        "pl": "Dokument"
+    },
+    "pq_date_field": {
+        "en": "Date",
+        "ru": "Дата",
+        "de": "Datum",
+        "pl": "Data"
+    },
+    "pq_seq_field": {
+        "en": "Moment",
+        "ru": "Момент",
+        "de": "Zeitpunkt",
+        "pl": "Moment"
+    },
+    "pq_action_field": {
+        "en": "Action",
+        "ru": "Действие",
+        "de": "Aktion",
+        "pl": "Akcja"
+    },
+    "pq_requested_by_field": {
+        "en": "Requested by",
+        "ru": "Инициатор",
+        "de": "Veranlasst von",
+        "pl": "Zlecający"
+    },
+    "pq_organization_field": {
+        "en": "Organization",
+        "ru": "Организация",
+        "de": "Organisation",
+        "pl": "Organizacja"
+    },
+    "pq_by_human_field": {
+        "en": "Awaiting an answer",
+        "ru": "Ждут ответа",
+        "de": "Antwort erwartet",
+        "pl": "Oczekuje odpowiedzi"
+    },
+    "pq_attempts_field": {
+        "en": "Attempts",
+        "ru": "Попыток",
+        "de": "Versuche",
+        "pl": "Próby"
+    },
+    "pq_next_attempt_field": {
+        "en": "Next attempt",
+        "ru": "Следующая попытка",
+        "de": "Nächster Versuch",
+        "pl": "Następna próba"
+    },
+    "pq_last_error_field": {
+        "en": "Last error",
+        "ru": "Последняя ошибка",
+        "de": "Letzter Fehler",
+        "pl": "Ostatni błąd"
+    },
+    "pq_last_error_at_field": {
+        "en": "Failed at",
+        "ru": "Когда",
+        "de": "Zeitpunkt",
+        "pl": "Kiedy"
+    },
+    "pq_started_at_field": {
+        "en": "Taken at",
+        "ru": "Взят в работу",
+        "de": "In Arbeit seit",
+        "pl": "Podjęto"
+    },
+    "pq_prev_state_field": {
+        "en": "State before queuing",
+        "ru": "Состояние до постановки",
+        "de": "Status vor Warteschlange",
+        "pl": "Stan przed kolejką"
+    },
+    "posting_queue_cancelled": {
+        "en": "The document was removed from the posting queue",
+        "ru": "Документ снят с очереди проведения",
+        "de": "Der Beleg wurde aus der Verbuchungswarteschlange entfernt",
+        "pl": "Dokument usunięto z kolejki księgowania"
+    },
+    "posting_refuse_running": {
+        "en": "The document is being posted right now — please wait",
+        "ru": "Документ проводится прямо сейчас — дождитесь окончания",
+        "de": "Der Beleg wird gerade verbucht — bitte warten",
+        "pl": "Dokument jest właśnie księgowany — proszę czekać"
+    },
+    "presentation_field": {
+        "en": "Name",
+        "ru": "Наименование",
+        "de": "Bezeichnung",
+        "pl": "Nazwa"
+    },
+    "posting_err_unknown_table": {
+        "en": "Unknown document type",
+        "ru": "Неизвестный вид документа",
+        "de": "Unbekannte Belegart",
+        "pl": "Nieznany rodzaj dokumentu"
+    },
+    "posting_err_no_handler": {
+        "en": "No posting handler is registered for this document type",
+        "ru": "Для этого вида документа не зарегистрирован обработчик проведения",
+        "de": "Für diese Belegart ist keine Verbuchungsroutine registriert",
+        "pl": "Dla tego rodzaju dokumentu nie zarejestrowano procedury księgowania"
+    },
+    "posting_err_unpost_from_state": {
+        "en": "The posting cannot be undone in this state",
+        "ru": "В этом состоянии распроведение невозможно",
+        "de": "In diesem Zustand kann die Verbuchung nicht aufgehoben werden",
+        "pl": "W tym stanie nie można wycofać księgowania"
+    },
+    "pq_last_error_key_field": {
+        "en": "Reason code",
+        "ru": "Код причины",
+        "de": "Ursachencode",
+        "pl": "Kod przyczyny"
+    },
+    "pq_last_error_vars_field": {
+        "en": "Reason details",
+        "ru": "Подробности причины",
+        "de": "Ursachendetails",
+        "pl": "Szczegóły przyczyny"
+    },
+    "The document is queued for posting": {
+        "en": "The document is queued for posting",
+        "ru": "Документ в очереди на проведение",
+        "de": "Der Beleg steht in der Warteschlange zur Verbuchung",
+        "pl": "Dokument oczekuje w kolejce na księgowanie"
+    },
+    "The document is queued for unposting": {
+        "en": "The document is queued for unposting",
+        "ru": "Документ в очереди на отмену проведения",
+        "de": "Der Beleg steht in der Warteschlange zum Aufheben der Verbuchung",
+        "pl": "Dokument oczekuje w kolejce na wycofanie księgowania"
+    },
+    "The document is being posted right now": {
+        "en": "The document is being posted right now",
+        "ru": "Документ проводится прямо сейчас",
+        "de": "Der Beleg wird gerade verbucht",
+        "pl": "Dokument jest właśnie księgowany"
+    },
+    "The posting is being undone right now": {
+        "en": "The posting is being undone right now",
+        "ru": "Отмена проведения выполняется прямо сейчас",
+        "de": "Die Verbuchung wird gerade aufgehoben",
+        "pl": "Księgowanie jest właśnie wycofywane"
+    },
+    "Remove from queue": {
+        "en": "Remove from queue",
+        "ru": "Снять с очереди",
+        "de": "Aus der Warteschlange nehmen",
+        "pl": "Usuń z kolejki"
+    },
+    "The document could not be posted": {
+        "en": "The document could not be posted",
+        "ru": "Не удалось провести документ",
+        "de": "Der Beleg konnte nicht verbucht werden",
+        "pl": "Nie udało się zaksięgować dokumentu"
+    },
+    "The posting could not be undone": {
+        "en": "The posting could not be undone",
+        "ru": "Не удалось отменить проведение документа",
+        "de": "Die Verbuchung konnte nicht aufgehoben werden",
+        "pl": "Nie udało się wycofać księgowania dokumentu"
+    },
+    "Show reason": {
+        "en": "Show reason",
+        "ru": "Показать причину",
+        "de": "Grund anzeigen",
+        "pl": "Pokaż przyczynę"
+    },
+    "Why the posting failed": {
+        "en": "Why the posting failed",
+        "ru": "Почему проведение не удалось",
+        "de": "Warum die Verbuchung fehlgeschlagen ist",
+        "pl": "Dlaczego księgowanie się nie powiodło"
+    },
+    "Details": {
+        "en": "Details",
+        "ru": "Подробности",
+        "de": "Details",
+        "pl": "Szczegóły"
+    },
+    "deletion_mark_field": {
+        "en": "Deletion mark",
+        "ru": "Пометка на удаление",
+        "de": "Löschmarkierung",
+        "pl": "Znacznik usunięcia"
+    },
+    "pq_then_mark_field": {
+        "en": "Mark for deletion afterwards",
+        "ru": "Пометить на удаление после",
+        "de": "Danach zur Löschung markieren",
+        "pl": "Następnie oznacz do usunięcia"
+    },
+    "deletion_refuse_state": {
+        "en": "A document in this state cannot be deleted, so it cannot be marked for deletion either",
+        "ru": "Документ в этом состоянии удалению не подлежит — значит, и пометить его нельзя",
+        "de": "Ein Beleg in diesem Zustand darf nicht gelöscht und daher auch nicht markiert werden",
+        "pl": "Dokument w tym stanie nie podlega usunięciu, więc nie można go oznaczyć"
+    },
+    "deletion_refuse_posted": {
+        "en": "The document is posted and its posting cannot be undone",
+        "ru": "Документ проведён, и отменить его проведение нельзя",
+        "de": "Der Beleg ist verbucht und die Verbuchung kann nicht aufgehoben werden",
+        "pl": "Dokument jest zaksięgowany i księgowania nie można wycofać"
+    },
+    "deletion_needs_unpost": {
+        "en": "The posting has to be undone first",
+        "ru": "Сначала нужно отменить проведение документа",
+        "de": "Die Verbuchung muss zuerst aufgehoben werden",
+        "pl": "Najpierw trzeba wycofać księgowanie"
+    },
+    "record_not_found": {
+        "en": "The record was not found",
+        "ru": "Запись не найдена",
+        "de": "Der Datensatz wurde nicht gefunden",
+        "pl": "Nie znaleziono rekordu"
+    },
+    "Mark this record for deletion?": {
+        "en": "Mark this record for deletion?",
+        "ru": "Пометить запись на удаление?",
+        "de": "Diesen Datensatz zur Löschung markieren?",
+        "pl": "Oznaczyć ten rekord do usunięcia?"
+    },
+    "Remove the deletion mark from this record?": {
+        "en": "Remove the deletion mark from this record?",
+        "ru": "Снять с записи пометку на удаление?",
+        "de": "Löschmarkierung von diesem Datensatz entfernen?",
+        "pl": "Usunąć znacznik usunięcia z tego rekordu?"
+    },
+    "The document is posted. Undo the posting and mark it for deletion?": {
+        "en": "The document is posted. Undo the posting and mark it for deletion?",
+        "ru": "Документ проведён. Отменить проведение и пометить на удаление?",
+        "de": "Der Beleg ist verbucht. Verbuchung aufheben und zur Löschung markieren?",
+        "pl": "Dokument jest zaksięgowany. Wycofać księgowanie i oznaczyć do usunięcia?"
+    },
+    "Nothing is selected": {
+        "en": "Nothing is selected",
+        "ru": "Ничего не выбрано",
+        "de": "Nichts ausgewählt",
+        "pl": "Nic nie wybrano"
+    },
+    "Permanently delete the selected objects? This cannot be undone.": {
+        "en": "Permanently delete the selected objects? This cannot be undone.",
+        "ru": "Удалить выбранные объекты безвозвратно? Отменить это будет нельзя.",
+        "de": "Ausgewählte Objekte endgültig löschen? Das kann nicht rückgängig gemacht werden.",
+        "pl": "Usunąć wybrane obiekty bezpowrotnie? Tej operacji nie można cofnąć."
+    },
+    "Could not be deleted": {
+        "en": "Could not be deleted",
+        "ru": "Не удалось удалить",
+        "de": "Konnte nicht gelöscht werden",
+        "pl": "Nie udało się usunąć"
+    },
+    "How should this record be deleted?": {
+        "en": "How should this record be deleted?",
+        "ru": "Как удалить эту запись?",
+        "de": "Wie soll dieser Datensatz gelöscht werden?",
+        "pl": "Jak usunąć ten rekord?"
+    },
+    "Mark for deletion": {
+        "en": "Mark for deletion",
+        "ru": "Пометить на удаление",
+        "de": "Zur Löschung markieren",
+        "pl": "Oznacz do usunięcia"
+    },
+    "Delete permanently": {
+        "en": "Delete permanently",
+        "ru": "Удалить сразу",
+        "de": "Endgültig löschen",
+        "pl": "Usuń trwale"
+    },
+    "Delete this record permanently? This cannot be undone.": {
+        "en": "Delete this record permanently? This cannot be undone.",
+        "ru": "Удалить запись безвозвратно? Отменить это будет нельзя.",
+        "de": "Diesen Datensatz endgültig löschen? Das kann nicht rückgängig gemacht werden.",
+        "pl": "Usunąć ten rekord bezpowrotnie? Tej operacji nie można cofnąć."
+    },
+    "Direct deletion is not allowed for this object": {
+        "en": "Direct deletion is not allowed for this object",
+        "ru": "Этот объект нельзя удалить сразу — только через пометку",
+        "de": "Dieses Objekt kann nicht direkt gelöscht werden",
+        "pl": "Tego obiektu nie można usunąć bezpośrednio"
+    },
+    "Confirm": {
+        "en": "Confirm",
+        "ru": "Подтверждение",
+        "de": "Bestätigung",
+        "pl": "Potwierdzenie"
+    },
+    "Cancel": {
+        "en": "Cancel",
+        "ru": "Отмена",
+        "de": "Abbrechen",
+        "pl": "Anuluj"
+    },
+    "deletion_refuse_direct_off": {
+        "en": "Direct deletion is not allowed for this object: other records may refer to it",
+        "ru": "Этот объект нельзя удалить сразу: на него могут ссылаться другие записи",
+        "de": "Dieses Objekt kann nicht direkt gelöscht werden: andere Datensätze können darauf verweisen",
+        "pl": "Tego obiektu nie można usunąć bezpośrednio: inne rekordy mogą się do niego odwoływać"
+    },
+    "deletion_refuse_mark_off": {
+        "en": "This object is not marked for deletion — it is deleted directly",
+        "ru": "Этот объект не помечается на удаление — он удаляется сразу",
+        "de": "Dieses Objekt wird nicht zur Löschung markiert — es wird direkt gelöscht",
+        "pl": "Ten obiekt nie jest oznaczany do usunięcia — usuwa się go od razu"
+    },
+    "reg_period_field": {
+        "en": "Period",
+        "ru": "Период",
+        "de": "Periode",
+        "pl": "Okres"
+    },
+    "reg_recorder_field": {
+        "en": "Recorder",
+        "ru": "Регистратор",
+        "de": "Beleg",
+        "pl": "Rejestrator"
+    },
+    "reg_line_field": {
+        "en": "Line",
+        "ru": "Строка",
+        "de": "Zeile",
+        "pl": "Wiersz"
+    },
+    "reg_caption_default": {
+        "en": "Register",
+        "ru": "Регистр",
+        "de": "Register",
+        "pl": "Rejestr"
+    },
+    "mv_caption": {
+        "en": "Document movements",
+        "ru": "Движения документа",
+        "de": "Belegbewegungen",
+        "pl": "Ruchy dokumentu"
+    },
+    "mv_no_registers": {
+        "en": "This document does not write to any register",
+        "ru": "Этот документ не пишет ни в один регистр",
+        "de": "Dieser Beleg schreibt in kein Register",
+        "pl": "Ten dokument nie zapisuje do żadnego rejestru"
+    },
+    "reg_moment_label": {
+        "en": "Moment",
+        "ru": "Момент",
+        "de": "Zeitpunkt",
+        "pl": "Moment"
+    },
+    "mv_command": {
+        "en": "Movements",
+        "ru": "Движения",
+        "de": "Bewegungen",
+        "pl": "Ruchy"
+    },
+    "Close": {
+        "en": "Close",
+        "ru": "Закрыть",
+        "de": "Schließen",
+        "pl": "Zamknij"
+    },
+    "Select all": {
+        "en": "Select all",
+        "ru": "Выделить все",
+        "de": "Alle auswählen",
+        "pl": "Zaznacz wszystko"
+    },
+    "Clear selection": {
+        "en": "Clear selection",
+        "ru": "Снять выделение",
+        "de": "Auswahl aufheben",
+        "pl": "Wyczyść zaznaczenie"
+    },
+    "Invert selection": {
+        "en": "Invert selection",
+        "ru": "Инвертировать выделение",
+        "de": "Auswahl umkehren",
+        "pl": "Odwróć zaznaczenie"
+    },
+    "Selected": {
+        "en": "Selected",
+        "ru": "Выделено",
+        "de": "Ausgewählt",
+        "pl": "Zaznaczono"
+    },
+    "Selection": {
+        "en": "Selection",
+        "ru": "Выбор",
+        "de": "Auswahl",
+        "pl": "Wybór"
     }
 }

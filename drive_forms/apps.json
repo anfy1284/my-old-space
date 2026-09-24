@@ -80,6 +80,10 @@
         {
             "name": "magnifier",
             "path": "/magnifier"
+        },
+        {
+            "name": "deleteMarked",
+            "path": "/deleteMarked"
         }
     ]
 }

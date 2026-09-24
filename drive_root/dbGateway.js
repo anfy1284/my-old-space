@@ -244,6 +244,60 @@ async function execute(request) {
 }
 
 /**
+ * ВЫПОЛНИТЬ БЛОК В ОДНОЙ ТРАНЗАКЦИИ (ТЗ §9.3).
+ *
+ * До этого `options.transaction` только пропускался насквозь: каждый вызов обязан был
+ * тащить транзакцию за собой руками, и стоило пропустить один — атомарность исчезала
+ * молча. Проведение документа этого не переживёт: движения и состояние документа
+ * обязаны лечь вместе или не лечь вовсе.
+ *
+ * Транзакция кладётся и в `options.transaction` (её ждёт Sequelize), и в `context` —
+ * из контекста её берут middleware и прикладной код, которым нужно выполнить
+ * вложенный запрос в той же транзакции, не получая её параметром через пять этажей.
+ *
+ * ВЛОЖЕННОСТЬ: если транзакция уже идёт (`ctx.transaction`), новая НЕ открывается —
+ * блок выполняется в существующей. Иначе вложенный вызов коммитил бы кусок работы
+ * внешнего, и «одна транзакция — один документ» перестало бы быть правдой.
+ *
+ * @param {Function} fn — async (tx) => result; внутри зовите `execute` с
+ *   `options.transaction: tx` (или пользуйтесь `withTransaction` ниже)
+ * @param {Object} [outerContext] — контекст вызова; если в нём уже есть транзакция,
+ *   используется она
+ * @returns {Promise<any>} результат `fn`
+ */
+async function transaction(fn, outerContext) {
+    if (typeof fn !== 'function') throw new Error('[dbGateway] transaction(fn) requires a function');
+    if (outerContext && outerContext.transaction) {
+        return await fn(outerContext.transaction);
+    }
+    const sequelize = require('./db/sequelize_instance');
+    const tx = await sequelize.transaction();
+    try {
+        const result = await fn(tx);
+        await tx.commit();
+        return result;
+    } catch (e) {
+        try { await tx.rollback(); } catch (e2) { /* уже откатилась */ }
+        throw e;
+    }
+}
+
+/**
+ * Запрос, выполняемый в транзакции `tx`. Мелкая, но обязательная вещь: без неё
+ * каждый вызов внутри блока повторял бы одну и ту же раскладку `options`/`context`,
+ * и однажды кто-нибудь её не повторил бы.
+ * @param {Object} tx — транзакция Sequelize
+ * @param {Object} request — обычный запрос `execute`
+ * @returns {Promise<any>}
+ */
+async function executeIn(tx, request) {
+    return await execute(Object.assign({}, request, {
+        options: Object.assign({}, request.options, { transaction: tx }),
+        context: Object.assign({}, request.context, { transaction: tx })
+    }));
+}
+
+/**
  * Очистить все middleware (для тестов или перезагрузки).
  */
 function clearMiddleware(level) {
@@ -254,6 +308,27 @@ function clearMiddleware(level) {
     }
     _cachedChain = null; // 5.1
 }
+
+// ── Регистр пишет только проведение ──────────────────────────────────────────
+// Движение принадлежит документу-регистратору, и снимает его ядро одним DELETE по
+// регистратору. Строка, положенная в регистр мимо проведения, регистратора не имеет —
+// удалить её будет нечем и некому, а в остатке она останется навсегда. Поэтому запрет
+// не договорённость в инструкции, а проверка: право выдаётся токеном, который живёт
+// в памяти механизма проведения и наружу не уезжает (drive_root/db/registers.js).
+use('root', async function registerWriteGuard(request, next) {
+    const { operation, table } = request;
+    if (operation !== 'create' && operation !== 'update' && operation !== 'delete') {
+        return await next(request);
+    }
+    const registers = require('./db/registers');
+    if (!registers.isRegisterTable(table)) return await next(request);
+    if (registers.mayWrite(request)) return await next(request);
+
+    const e = new Error(`[dbGateway] Прямая запись в регистр "${table}" запрещена:`
+        + ' движения пишет только проведение документа.');
+    e.errorKey = 'register_direct_write_denied';
+    throw e;
+});
 
 // ── Неизменность проведённого документа (GoBD) ───────────────────────────────
 // Регистрируется ПЕРВЫМ на уровне 'root': отказ должен случиться до того, как
@@ -281,6 +356,27 @@ use('root', async function immutableMiddleware(request, next) {
         } else {
             await immutable.check(request, globalCtx, t);
         }
+    }
+    return await next(request);
+});
+
+// ── Дата запрета редактирования (GoBD-Festschreibung) ────────────────────────
+// Стоит рядом с неизменностью и сразу ПОСЛЕ неё: оба отказа про «этот документ
+// трогать нельзя», и порядок между ними неважен, но оба обязаны случиться ДО
+// журнала и хуков. Проверяется ДАТА ДОКУМЕНТА, а не дата правки.
+use('root', async function closingDateMiddleware(request, next) {
+    const { operation } = request;
+    if (operation === 'update' || operation === 'delete' || operation === 'create') {
+        const globalCtx = require('./globalServerContext');
+        const closingDate = require('./db/closingDate');
+        const sessionID = request.context && request.context.sessionID;
+        const t = async (key) => {
+            try {
+                const forms = require('../drive_forms/globalServerContext');
+                return await forms.tForSession(key, sessionID);
+            } catch (e) { return null; }
+        };
+        await closingDate.check(request, globalCtx, t);
     }
     return await next(request);
 });
@@ -348,6 +444,68 @@ use('root', async function entityHooksMiddleware(request, next) {
     return await next(request);
 });
 
+// ── Сохранение документа → очередь проведения ────────────────────────────────
+// Два разных следствия одного действия человека, и оба обязаны случиться ПОСЛЕ
+// успешной записи (запись не прошла — проводить нечего):
+//
+//   1. режим `auto` — документ уходит в очередь при КАЖДОМ сохранении. Команд и
+//      слова «провести» в интерфейсе нет, но всё остальное работает одинаково:
+//      документ может остаться непроведённым, и об этом скажет та же галочка в
+//      журнале и то же уведомление;
+//   2. любой режим — сохранение СБРАСЫВАЕТ разрежение повторов. Исправил сбойный
+//      документ — попытка происходит сразу, а не через пять минут. Это и есть
+//      «действие человека сбрасывает разрежение» (§8).
+//
+// Служебная запись самого механизма (состояние проведения) сюда не попадает:
+// иначе проведение ставило бы документ в очередь бесконечно.
+use('root', async function postingEnqueueMiddleware(request, next) {
+    const { operation, table } = request;
+    if (operation !== 'create' && operation !== 'update') return await next(request);
+
+    const result = await next(request);
+
+    try {
+        if (require('./db/coreWrite').isGranted(request)) return result;
+
+        const globalCtx = require('./globalServerContext');
+        const posting = require('./db/posting');
+        const modelName = globalCtx.getModelNameForTable(table);
+        const Model = modelName ? globalCtx.modelsDB[modelName] : null;
+        const cfg = Model && posting.readConfig(Model);
+        if (!cfg) return result;
+
+        const uid = (request.data && request.data.UID)
+            || (request.where && (request.where.UID || request.where.uid));
+        if (!uid || typeof uid !== 'string') return result;
+
+        const postingQueue = require('./db/postingQueue');
+        const already = await postingQueue.rowOf(table, uid);
+        if (cfg.mode !== 'auto' && !already) return result;   // ручной режим: ждём команды
+
+        const user = await (async () => {
+            try {
+                const u = await globalCtx.getUserBySessionID(request.context && request.context.sessionID);
+                return (u && u.UID) || null;
+            } catch (e) { return null; }
+        })();
+
+        await postingQueue.enqueue({
+            table, uid,
+            action: already ? already.action : posting.ACTION.POST,
+            requestedBy: user,
+            byHuman: true,
+            sessionID: request.context && request.context.sessionID
+        });
+        postingQueue.kick().catch(() => { /* подберёт страхующий тик */ });
+    } catch (e) {
+        // Сохранение уже состоялось. Не поставить документ в очередь — плохо, но
+        // отменять из-за этого запись пользователя нельзя: документ подберёт
+        // страхующий проход, как только очередь до него доберётся.
+        console.error('[dbGateway] Постановка в очередь проведения не выполнена:', e && e.message || e);
+    }
+    return result;
+});
+
 // ── Сторно выставлен → исходный документ отменён ─────────────────────────────
 // Сторно открывается несохранённой формой и живёт черновиком, пока его не
 // выставят; исходный документ обязан оставаться действующим до этого момента и
@@ -368,6 +526,8 @@ use('root', async function stornoIssueMiddleware(request, next) {
 module.exports = {
     use,
     execute,
+    executeIn,
+    transaction,
     clearMiddleware,
     LEVELS
 };

@@ -8,40 +8,15 @@ const { Client } = require('pg');
 const projectRoot = process.env.PROJECT_ROOT;
 console.log(`[createDB] Received PROJECT_ROOT from environment: ${projectRoot || 'NOT SET'}`);
 
-// 1. Load basic settings (dialect selector)
-let baseDbSettings = { dialect: 'sqlite' }; // Default to sqlite
-
-if (projectRoot) {
-  const projectBaseDbSettingsPath = path.join(projectRoot, 'dbSettings.json');
-  if (fs.existsSync(projectBaseDbSettingsPath)) {
-    try {
-      baseDbSettings = JSON.parse(fs.readFileSync(projectBaseDbSettingsPath, 'utf8'));
-    } catch (e) {
-      console.warn(`[createDB] Error parsing project dbSettings.json: ${e.message}. Using default.`);
-    }
-  }
-}
-
-// 2. Load dialect-specific settings
-const dialect = baseDbSettings.dialect || 'sqlite';
-const configFileName = `dbSettings.${dialect}.json`;
-let dbSettings = dialect === 'sqlite'
-  ? { dialect: 'sqlite', storage: path.join(projectRoot || __dirname, 'database.sqlite') }
-  : {};
-
-if (projectRoot) {
-  const projectConfigPath = path.join(projectRoot, configFileName);
-  if (fs.existsSync(projectConfigPath)) {
-    console.log(`[createDB] Using ${dialect} settings from project root: ${projectConfigPath}`);
-    try {
-      dbSettings = JSON.parse(fs.readFileSync(projectConfigPath, 'utf8'));
-    } catch (e) {
-      console.error(`[createDB] Error parsing ${configFileName}: ${e.message}`);
-    }
-  } else {
-    console.log(`[createDB] Project ${configFileName} not found. Using defaults for ${dialect}.`);
-  }
-}
+// Настройки подключения решает ОДИН модуль — `drive_root/db/dbSettings.js`.
+// Раньше этот файл читал их от `PROJECT_ROOT`, а `sequelize_instance.js` — от
+// рабочего каталога процесса. Пока каталоги совпадают, разницы не видно; стоит
+// разойтись — и МИГРАЦИЯ идёт в одну базу, а СЕРВЕР работает с другой, причём обе
+// операции «успешны» и ни одна не жалуется. Поймано на попытке прогнать проверку
+// на клоне базы: схема уехала в боевую, а приложение осталось без таблиц.
+const dbSettingsResolver = require('./dbSettings');
+const { dialect, settings: dbSettings } = dbSettingsResolver.resolve();
+console.log(`[createDB] База: ${dbSettingsResolver.describe()}`);
 
 const dbConfig = require('./db.json');
 const emptyValues = require('./emptyValues');

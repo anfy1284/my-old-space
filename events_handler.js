@@ -13,6 +13,9 @@
 
 const { injectEntityNumbers } = require('./drive_root/db/entityNumber');
 const { injectEntityDates } = require('./drive_root/db/entityDate');
+const { injectEntityMoments } = require('./drive_root/db/entityMoment');
+const { injectPostingStates } = require('./drive_root/db/posting');
+const { injectDeletionMarks, applyReferenceRule } = require('./drive_root/db/deletionMark');
 const { injectEntityNames } = require('./drive_root/db/entityName');
 const { injectEmptyDefaults } = require('./drive_root/db/emptyValues');
 const { injectIndexNames } = require('./drive_root/db/indexNames');
@@ -32,11 +35,26 @@ module.exports = {
         if (!Array.isArray(mergedModelsDef)) return;
         const n = injectEntityNumbers(mergedModelsDef);
         const d = injectEntityDates(mergedModelsDef);
+        // Момент времени `(date, seq)`: без него документы одного дня
+        // неупорядочиваемы, а на этом порядке стоит очередь проведения и остаток
+        // регистра «на момент» (drive_root/db/entityMoment.js).
+        const mo = injectEntityMoments(mergedModelsDef);
+        // Состояние проведения — только тем документам, что объявили `posting`.
+        // Документу без проведения это поле не значит ничего, и вечно пустая
+        // колонка «проведён» в его журнале сбивала бы с толку.
+        const ps = injectPostingStates(mergedModelsDef);
+        // Пометка на удаление — у КАЖДОЙ сущности, и у справочников тоже:
+        // удаление разделено на «пометить» и «удалить помеченные»
+        // (drive_root/db/deletionMark.js).
+        const dm = injectDeletionMarks(mergedModelsDef);
+        // На объект, на который МОЖЕТ ссылаться другая таблица, прямое удаление
+        // запрещается — решает структура базы, а не объявление приложения.
+        const dr = applyReferenceRule(mergedModelsDef);
         // «name» (представление) — полноценное поле модели, а не колонка,
         // навешиваемая после миграции. Иначе перестройка таблицы теряет
         // представления всех записей: см. drive_root/db/entityName.js.
         const nm = injectEntityNames(mergedModelsDef);
-        console.log(`[my-old-space:events_handler] "number" + autonumber injected into ${n} entity model(s), "date" into ${d} document(s), "name" into ${nm} model(s).`);
+        console.log(`[my-old-space:events_handler] "number" + autonumber injected into ${n} entity model(s), "date" into ${d} document(s), "seq" (moment) into ${mo} document(s), "postingState" into ${ps}, "deletionMark" into ${dm} (прямое удаление закрыто у ${dr}), "name" into ${nm} model(s).`);
 
         // Пустые значения по типам вместо NULL (NULL остаётся только у
         // полей-ссылок). enforceNotNull пока выключен намеренно: ограничение
@@ -78,6 +96,25 @@ module.exports = {
             // Настройки без дефолтов работают (значение берётся из объявления), поэтому
             // сорванный засев не повод не пустить систему.
             console.error('[my-old-space:events_handler] settings seed failed:', e && e.message || e);
+        }
+
+        // Момент времени документов (ТЗ §4). Три вещи, которые обязаны быть верны
+        // ПОСЛЕ миграции и ДО первой записи документа:
+        //   1. последовательность `document_moment_seq` существует;
+        //   2. счётчик поднят до максимума, уже лежащего в данных, — иначе после
+        //      восстановления копии новые документы получат занятые моменты, и
+        //      порядок сломается молча, без единой ошибки;
+        //   3. строки без момента (существовавшие до механизма, приехавшие RAW при
+        //      восстановлении, засеянные сырым SQL) его получают.
+        try {
+            const entityMoment = require('./drive_root/db/entityMoment');
+            const r = await entityMoment.prepare(sequelize);
+            console.log(`[my-old-space:events_handler] document moment: sequence at ${r.sequence},`
+                + ` ${r.filled} row(s) backfilled across ${r.tables || 0} document table(s).`);
+        } catch (e) {
+            // Без момента документы неупорядочиваемы — это ломает учёт, а не украшение.
+            // Но старт системы валить нельзя: без него не починить и саму базу.
+            console.error('[my-old-space:events_handler] document moment prepare failed:', e && e.message || e);
         }
     }
 };

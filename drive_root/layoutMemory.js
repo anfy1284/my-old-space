@@ -126,7 +126,7 @@ function makePrefix(appName, mode, tableName) {
  * @param {string|object}   [opts.appCaption] — Человекочитаемое имя формы/приложения.
  *   Строка или объект { i18n: 'key' } — резолвится сервером при выдаче.
  */
-async function saveLayout({ appName, mode, tableName, roles, layout, extraButtons, events, clientScript, formIcon, appCaption, recordCaption, listIcon, windowState }) {
+async function saveLayout({ appName, mode, tableName, roles, layout, extraButtons, events, clientScript, formIcon, appCaption, recordCaption, listIcon, windowState, formKind }) {
     if (!appName || !tableName || (!Array.isArray(layout) && !Array.isArray(extraButtons))) {
         throw new Error('[layoutMemory.saveLayout] appName, tableName and layout (Array) are required (or extraButtons for an auto-generated form)');
     }
@@ -136,7 +136,7 @@ async function saveLayout({ appName, mode, tableName, roles, layout, extraButton
     // пустому массиву, а `undefined` сломал бы разбор записи в getLayoutForUser).
     const storedLayout = Array.isArray(layout) ? layout : [];
     for (const role of roleList) {
-        await memoryStore.set(NAMESPACE, makeKey(appName, effectiveMode, tableName, role), { layout: storedLayout, extraButtons: Array.isArray(extraButtons) ? extraButtons : null, events: events || null, clientScript: clientScript || null, formIcon: formIcon || null, appCaption: appCaption || null, recordCaption: recordCaption || null, listIcon: listIcon || null, windowState: windowState || null });
+        await memoryStore.set(NAMESPACE, makeKey(appName, effectiveMode, tableName, role), { layout: storedLayout, extraButtons: Array.isArray(extraButtons) ? extraButtons : null, events: events || null, clientScript: clientScript || null, formIcon: formIcon || null, appCaption: appCaption || null, recordCaption: recordCaption || null, listIcon: listIcon || null, windowState: windowState || null, formKind: formKind || null });
     }
     // Register prefix so hot-path can skip tables with no layouts at all
     _registeredPrefixes.add(makePrefix(appName, effectiveMode, tableName));

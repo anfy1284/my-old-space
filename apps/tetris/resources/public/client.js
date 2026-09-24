@@ -592,7 +592,7 @@
                 this.playArea.style.position = 'relative';
                 this.playArea.style.backgroundColor = '#000000';
                 this.playArea.style.flexShrink = '0';
-                // Утопленная рамка Win95
+                // Утопленная ретро-рамка
                 this.playArea.style.borderTop = '2px solid #808080';
                 this.playArea.style.borderLeft = '2px solid #808080';
                 this.playArea.style.borderRight = '2px solid #ffffff';

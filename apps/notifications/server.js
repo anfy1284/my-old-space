@@ -58,6 +58,10 @@ function toClient(row) {
         icon: row.icon || null,
         isRead: !!row.isRead,
         createdAt: row.createdAt,
+        // Сколько секунд держать на экране; 0 — до закрытия пользователем.
+        ttl: Number(row.ttl) || 0,
+        // Эфемерное в базе не лежит: у него нет UID, и закрывать его нечего.
+        ephemeral: !!row.ephemeral,
         // handler отсутствует, если приложение не объявляло обработчиков или
         // уведомление поставлено без них — такое уведомление просто не кликается.
         handler: (scriptUID && row.handlerFn)
@@ -86,13 +90,46 @@ function toClient(row) {
  * @param {string} [params.icon]   — ссылка на иконку
  * @param {{fn: string, fnParams?: object}} [params.onClick] — ИМЯ функции
  *        приложения, которую позвать по клику, и её параметры
+ * @param {number} [params.ttl] — через сколько секунд уведомление гаснет само;
+ *        0 (умолчание) — висит до закрытия пользователем
+ * @param {boolean} [params.ephemeral] — НЕ писать в таблицу: уйдёт только в
+ *        открытые окна получателя и нигде не останется
  * @returns {Promise<object|null>} — уведомление в клиентском виде
+ *
+ * ── Почему появились ttl и ephemeral ──────────────────────────────────────────
+ * Проведение документов сообщает об успехе КАЖДОГО документа. При активной работе
+ * это тысячи «проведено» в день, и таблица уведомлений превратилась бы в свалку,
+ * в которой единственное важное сообщение — об ОШИБКЕ — утонуло бы.
+ * Отсюда правило асимметрии: успех — эфемерный и с тайм-аутом, ошибка — с записью
+ * и без тайм-аута, до прочтения. Иначе единственный канал сообщения об ошибке
+ * исчезает сам собой.
  */
 async function notify(params) {
-    const { userId, appName, title, text, icon, onClick } = params || {};
+    const { userId, appName, title, text, icon, onClick, ttl, ephemeral } = params || {};
     if (!userId || !appName || !text) {
         log.error('[notifications] notify: нужны userId, appName и text');
         return null;
+    }
+
+    // Эфемерное уведомление не пишется в базу вовсе. Получателя нет на месте —
+    // сообщение пропадает, и это правильно: «проведено» вчера никому не нужно.
+    if (ephemeral) {
+        const view = {
+            UID: null, appName, title: title || '', text: String(text),
+            icon: icon || null, isRead: false, createdAt: new Date().toISOString(),
+            ttl: Number(ttl) || 0, ephemeral: true,
+            handler: null
+        };
+        try {
+            const scriptUID = notificationHandlers.getScriptUID(appName);
+            if (scriptUID && onClick && onClick.fn) {
+                view.handler = { scriptUID, fn: onClick.fn, fnParams: (onClick.fnParams || {}) };
+            }
+            sendSessionEventToUser(userId, { type: 'notification', notification: view });
+        } catch (e) {
+            log.error('[notifications] push (ephemeral):', e && e.message);
+        }
+        return view;
     }
 
     const data = {
@@ -103,7 +140,8 @@ async function notify(params) {
         icon: icon || null,
         handlerFn: (onClick && onClick.fn) ? String(onClick.fn) : null,
         handlerParams: (onClick && onClick.fnParams) ? onClick.fnParams : null,
-        isRead: false
+        isRead: false,
+        ttl: Number(ttl) || 0
     };
 
     let row;

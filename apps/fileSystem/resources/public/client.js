@@ -55,7 +55,7 @@
     filePanel.style.display = 'flex';
     filePanel.style.flexDirection = 'column';
     filePanel.style.overflow = 'hidden'; // Prevent outer scroll 
-    filePanel.style.backgroundColor = '#d4d0c8'; // Win98 background gray
+    filePanel.style.backgroundColor = '#d4d0c8'; // retro background gray
 
     // Address Bar Row
     const addressRow = document.createElement('div');
@@ -190,7 +190,7 @@
     // File list
     const fileList = document.createElement('div');
     fileList.style.flex = '1';
-    fileList.style.border = '2px inset #ffffff'; // Win98 inset style often uses light/dark combination, standard inset is fine
+    fileList.style.border = '2px inset #ffffff'; // retro inset style often uses light/dark combination, standard inset is fine
     fileList.style.backgroundColor = '#ffffff'; // White background required
     fileList.style.padding = '5px';
     fileList.style.boxSizing = 'border-box';

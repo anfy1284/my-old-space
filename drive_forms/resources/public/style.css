@@ -103,7 +103,7 @@
   height: auto;
 }
 
-/* Uniform textbox height (Win95 controls are a single fixed height).
+/* Uniform textbox height (retro-style controls are a single fixed height).
    The inner white box gets a deterministic height so the presence of an
    embedded "…"/"▾" button can't make a field taller than a plain one —
    all children (input + buttons) stretch into the same box height. */
@@ -222,9 +222,9 @@ html, body {
   --color-text: #000000;
 }
 
-/* Win95/Win98 style form group container */
+/* Retro-style form group container */
 
-/* Group (fieldset) styled like Win95/98 */
+/* Group (fieldset) in retro style */
 .ui-group {
   box-sizing: border-box;
   padding: 8px;
@@ -439,11 +439,11 @@ td.ui-cell-readonly .ui-input-container > button { display: none !important; }
    шириной по своему тексту, а не втрое выше соседей из-за переноса на три строки. */
 .ui-button { background-color: var(--color-mid); border-top:2px solid var(--color-light); border-left:2px solid var(--color-light); border-right:2px solid #808080; border-bottom:2px solid #808080; font-family: MS Sans Serif, sans-serif; font-size:11px; cursor:default; outline:none; box-sizing:border-box; display:inline-flex; align-items:center; justify-content:center; white-space: nowrap; }
 
-/* Default form button (layout flag "default": true) — Win95 marks the Enter-default
+/* Default form button (layout flag "default": true) — the retro style marks the Enter-default
    button with a heavier dark outline inside the raised border. */
 .ui-button.ui-default-button { outline: 1px solid #000; outline-offset: -3px; }
 
-/* Недоступная кнопка (Button.setEnabled(false)) — Win95 рисует подпись серым с
+/* Недоступная кнопка (Button.setEnabled(false)) — ретро-стиль рисует подпись серым с
    белым «эхом» на пиксель ниже-правее; рамка остаётся выпуклой, кнопка не нажимается. */
 .ui-button.ui-button-disabled { color: #808080; text-shadow: 1px 1px 0 var(--color-light); }
 .ui-button.ui-button-disabled img { opacity: 0.4; }
@@ -451,7 +451,7 @@ td.ui-cell-readonly .ui-input-container > button { display: none !important; }
 /* Залипшая кнопка (Button.setPressed) — включённый режим в панели инструментов.
    САМИ РАМКИ здесь не задаются: Button пишет рельеф инлайновыми стилями по цветам
    из client_config (см. _applyRelief), и правило отсюда до них не дотянулось бы.
-   Остаётся только сдвиг содержимого на пиксель — так Win95 показывает нажатое. */
+   Остаётся только сдвиг содержимого на пиксель — так ретро-стиль показывает нажатое. */
 .ui-button.ui-button-sticky-on {
   padding-top: 1px; padding-left: 1px;
 }
@@ -581,6 +581,19 @@ input[type="checkbox"],
   background-color: #cdeeff !important;
 }
 
+/* Выделение нескольких строк (Ctrl/Shift). Активная строка и выделенная — разные
+   вещи: активная говорит «эту строку можно править», выделенные — «над этими
+   выполнить команду». Поэтому и цвета разные, а активная выделенная строка видна
+   как активная (её правило объявлено позже и перекрывает). */
+.ui-dynamictable table tbody tr.ui-table-row.ui-row-selected {
+  background-color: #b8d8f0 !important;
+}
+.ui-dynamictable table tbody tr.ui-table-row.ui-row-selected.active {
+  background-color: #cdeeff !important;
+  outline: 1px dotted #000080;
+  outline-offset: -1px;
+}
+
 /* Чекбокс-ячейка таблицы: квадратная, галочка строго по центру (без пустого
    поля сбоку). Класс td.ui-cell-checkbox выставляется в renderCellElement. */
 .ui-dynamictable td.ui-cell-checkbox { text-align: center; padding: 4px 2px; }
@@ -622,6 +635,23 @@ input[type="checkbox"],
    связанных записей нет (RelatedLinks прячет себя сам). */
 .ui-related-links { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 1px 6px; min-height: 20px; }
 .ui-related-links-caption { white-space: nowrap; }
+
+/* Блок состояния проведения (class PostingStatusBlock, type: "postingQueueLine").
+   Две строки одного сюжета — «что с документом сейчас» и «почему не получилось» —
+   стоят вместе, под командной панелью. Цвет несёт смысл: жёлтый — ждём, красный —
+   не вышло; это те же тона, что у строк журнала (ui-tone-yellow / ui-tone-red),
+   чтобы состояние узнавалось одинаково в списке и в карточке. */
+.ui-posting-status { display: flex; flex-direction: column; gap: 2px; margin: 2px 0; }
+.ui-posting-status > div { border: 1px solid; padding: 2px 6px; min-height: 22px; }
+.ui-posting-status-queue { background-color: #faf1c8; border-color: #c9b458; }
+/* Кнопка прижата вправо в ОБЕИХ строках: строка читается как «состояние …
+   действие», и кнопки стоят в одной колонке, а не вразнобой по длине текста. */
+.ui-posting-status-queue .ui-button,
+.ui-posting-status-error .ui-button { margin-left: auto; }
+.ui-posting-status-error { background-color: #f6d3d3; border-color: #bf7a7a; color: #7a1212; }
+/* Фраза набрана жирным — её одна, и она главная в строке. Самого текста ошибки
+   здесь нет: он открывается кнопкой, в диалоге просмотра (showTextView). */
+.ui-posting-status-label { font-weight: bold; }
 .ui-related-link { color: #0000cc; text-decoration: underline; cursor: pointer; white-space: nowrap; }
 .ui-related-link:hover { color: #cc0000; }
 
@@ -664,7 +694,7 @@ input[type="checkbox"],
   outline: none;
 }
 
-/* Windows 95/98 Retro Scrollbar Style */
+/* Retro Scrollbar Style */
 
 /* Базовые настройки для Firefox */
 * {
@@ -679,7 +709,7 @@ input[type="checkbox"],
   background-color: #efefef;
 }
 
-/* Трек (дорожка) - имитация точечного узора Win95 через шахматный градиент */
+/* Трек (дорожка) - имитация точечного ретро-узора через шахматный градиент */
 ::-webkit-scrollbar-track {
   background-color: #efefef;
   background-image: url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAGXRFWHRTb2Z0d2FyZQBBZG9iZSBJbWFnZVJlYWR5ccllPAAAABZJREFUeNpi2r9//38gYGAEESAAEGAAasgD9R79X9MAAAAASUVORK5CYII=");
@@ -739,7 +769,7 @@ input[type="checkbox"],
   background-color: var(--color-mid);
 }
 
-/* --- Tabs Win95 --- */
+/* --- Tabs (retro) --- */
 .ui-tabs {
     display: flex;
     flex-direction: column;
@@ -836,7 +866,7 @@ input[type="checkbox"],
 .ui-tabs-fill .ui-tabs-pane { flex: 1 1 auto; min-height: 0; }
 .ui-tabs-fill .ui-tabs-pane > * { flex: 1 1 auto; min-height: 0; }
 
-/* --- Non-blocking global busy indicator (Win95 «running» progress bar) --- */
+/* --- Non-blocking global busy indicator (ретро-индикатор «бегущая дорожка») --- */
 /* Тонкая плашка по центру сверху: бегущий прогрессбар, не блокирующий ввод
    (pointer-events:none). Появляется при открытии окон и генерации счёта. */
 .mos-busy {
@@ -856,7 +886,7 @@ input[type="checkbox"],
     font-family: 'MS Sans Serif', sans-serif;
     font-size: 11px;
     color: var(--color-text);
-    /* Win95 raised (outset) border */
+    /* ретро-рамка (приподнятая) */
     border: 1px solid var(--color-mid);
     box-shadow:
         inset 1px 1px 0px var(--color-light),
@@ -872,7 +902,7 @@ input[type="checkbox"],
     text-overflow: ellipsis;
 }
 
-/* Trough — утопленная рамка как у Win95 progress bar */
+/* Trough — утопленная рамка как у ретро-полосы прогресса */
 .mos-busy-bar {
     position: relative;
     height: 16px;
@@ -882,7 +912,7 @@ input[type="checkbox"],
     box-shadow: inset 1px 1px 0px #000000, inset -1px -1px 0px var(--color-light);
 }
 
-/* Бегущий блок из сегментов (классический marquee Win95) */
+/* Бегущий блок из сегментов (классический ретро-marquee) */
 .mos-busy-bar-fill {
     position: absolute;
     top: 1px;
@@ -920,7 +950,7 @@ input[type="checkbox"],
     resize: none;
 }
 
-/* Полоса прогресса — тот же Win95-жёлоб, что и у глобального индикатора */
+/* Полоса прогресса — тот же ретро-жёлоб, что и у глобального индикатора */
 .ui-progress {
     position: relative;
     height: 16px;
@@ -1147,7 +1177,7 @@ input[type="checkbox"],
    Лента переписки — элемент лейаута `messageFeed` (класс MessageFeed)
 
    Раскладка: прокручиваемая лента занимает всё свободное место, поле ввода
-   прижато книзу и не сжимается. Пузыри — плоские рамки Win95, свои справа.
+   прижато книзу и не сжимается. Пузыри — плоские ретро-рамки, свои справа.
    ═══════════════════════════════════════════════════════════════════════════ */
 .ui-msgfeed {
     position: relative;
@@ -1604,22 +1634,35 @@ input[type="checkbox"],
 }
 
 /* Кнопка «Очистить все сообщения» — наверху области, появляется при наведении.
-   visibility, а не display: иначе появление кнопки сдвигало бы весь стек. */
+   Не `display`: появление кнопки сдвигало бы весь стек.
+
+   И НЕ `visibility` — на этом она была НЕНАЖИМАЕМОЙ. Область прозрачна и мышь не
+   ловит (`pointer-events: none`), поэтому `:hover` у неё возникает только пока
+   курсор на КАРТОЧКЕ. Кнопка же висит НАД карточками: стоит двинуть мышь к ней —
+   карточка теряется, `:hover` пропадает, кнопка исчезает раньше, чем до неё
+   доедешь. Сама себя удержать она не могла: скрытый `visibility` не получает
+   событий мыши и не может быть наведён.
+
+   Поэтому прозрачность вместо скрытия: кнопка всё время на месте и ловит мышь,
+   а невидима она лишь визуально — и собственный `:hover` её удерживает. */
 .mos-notify-clear {
     position: sticky;
     top: 0;
     align-self: flex-end;
     flex-shrink: 0;
-    visibility: hidden;
+    opacity: 0;
+    transition: opacity 0.12s linear;
     pointer-events: auto;
     z-index: 1;
 }
 
-.mos-notify-area:hover .mos-notify-clear {
-    visibility: visible;
+.mos-notify-area:hover .mos-notify-clear,
+.mos-notify-clear:hover,
+.mos-notify-clear:focus-within {
+    opacity: 1;
 }
 
-/* Карточка уведомления — приподнятая панель Win95.
+/* Карточка уведомления — приподнятая утопленная ретро-панель.
    Жёсткой чёрной кромки нет намеренно: карточки висят поверх рабочего стола
    стопкой, и у каждой обводка складывалась в решётку из чёрных линий. Объём даёт
    светлая/тёмная фаска плюс мягкая тень. */
@@ -1770,4 +1813,28 @@ input[type="checkbox"],
     height: 0;
 }
 
+/* Статусная строка таблицы: состояние — ПОД таблицей, а не на панели команд.
+   Так устроены списки учётных систем и файловые менеджеры; там же потом встанут
+   итоги по колонкам. Вдавленная рамка — как у строки состояния окна. */
+.ui-table-statusbar {
+    flex: 0 0 auto;
+    min-height: 18px;
+    padding: 2px 6px;
+    background-color: #c0c0c0;
+    border-top: 1px solid #ffffff;
+    border-left: 2px solid #808080;
+    border-right: 2px solid #ffffff;
+    border-bottom: 2px solid #ffffff;
+    font-family: 'MS Sans Serif', sans-serif;
+    font-size: 11px;
+    color: #000000;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+.ui-table-selcount { white-space: nowrap; }
 
+/* Колонка отметок: квадратная, по центру, без лишнего поля. */
+td.ui-cell-selection { text-align: center; }
+input.ui-select-mark { margin: 0; cursor: pointer; }

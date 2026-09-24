@@ -1026,18 +1026,41 @@ class UIObject {
     }
 
     // Helper to style elements
+    /**
+     * Поставить контрол в заданное место диалога.
+     *
+     * КОНТРОЛ С КОНТЕЙНЕРОМ РАЗМЕЩАЕТСЯ КОНТЕЙНЕРОМ, а не своим внутренним
+     * элементом. Поля ввода (`FormInput`) заворачиваются в контейнер-флекс
+     * (подпись + само поле), и если позиционировать абсолютно ВНУТРЕННЕЕ поле, то
+     * контейнер остаётся в потоке пустой коробкой шириной 100%, а поле считает
+     * свои проценты уже от области содержимого — правый край уезжает за неё ровно
+     * на отступ. Так в диалоге просмотра текста появлялась горизонтальная полоса
+     * прокрутки, а следом за ней (она отъедает высоту) и вертикальная.
+     */
     static styleElement(element, x, y, w, h, fSize) {
-        if (element && typeof element.getElement === 'function') {
-            const el = element.getElement();
-            if (el) {
-                el.style.position = 'absolute';
-                el.style.left = x + 'px';
-                el.style.top = y + 'px';
-                el.style.width = w + 'px';
-                el.style.height = h + 'px';
-                el.style.fontSize = fSize + 'px';
-            }
+        if (!element || typeof element.getElement !== 'function') return;
+        const el = element.getElement();
+        if (!el) return;
+        const box = (element.containerElement && element.containerElement !== el
+            && element.containerElement.contains && element.containerElement.contains(el))
+            ? element.containerElement : el;
+        box.style.position = 'absolute';
+        box.style.left = x + 'px';
+        box.style.top = y + 'px';
+        box.style.width = w + 'px';
+        box.style.height = h + 'px';
+        box.style.boxSizing = 'border-box';
+        if (box !== el) {
+            // Поле занимает контейнер целиком: место назначено контейнеру, и
+            // делить его не с кем.
+            box.style.alignItems = 'stretch';
+            el.style.position = 'relative';
+            el.style.left = '';
+            el.style.top = '';
+            el.style.width = '100%';
+            el.style.height = '100%';
         }
+        el.style.fontSize = fSize + 'px';
     }
 
     setParent(parent) {
@@ -1133,12 +1156,37 @@ class FormInput extends UIObject {
     // само поле не печатают». Поле выбора записи и список состояний как раз таковы:
     // текст не набирается, но значение меняется кнопкой выбора или выпадающим
     // списком. `locked` закрывает и их: так выглядит поле проведённого документа.
+    // ОТПИРАНИЕ обязано возвращать ровно то, что было. До появления ВРЕМЕННОГО
+    // замка (документ проводится) замок был односторонним — закрытый документ
+    // назад не открывается, — и `setLocked(false)` просто ничего не делал: поле
+    // оставалось `disabled`. Теперь запоминаем, что погасили МЫ, и снимаем только
+    // это: иначе отпирание включило бы кнопку, которую выключил `enabledWhen`, или
+    // поле, объявленное `readOnly` в лейауте.
     setLocked(locked) {
-        this.locked = !!locked;
+        const next = !!locked;
+        if (next && !this.locked) {
+            this._preLock = {
+                readOnly: (typeof this.readOnly === 'boolean') ? this.readOnly : null,
+                elReadOnly: null, elDisabled: null
+            };
+            try {
+                const el = this.element;
+                if (el) {
+                    this._preLock.elReadOnly = !!el.readOnly;
+                    this._preLock.elDisabled = !!el.disabled;
+                }
+            } catch (e) {}
+        }
+        this.locked = next;
         if (this.locked && typeof this.setReadOnly === 'function') {
             try { this.setReadOnly(true); } catch (e) {}
         }
+        if (!this.locked && this._preLock && typeof this.setReadOnly === 'function'
+            && this._preLock.readOnly !== null) {
+            try { this.setReadOnly(this._preLock.readOnly); } catch (e) {}
+        }
         this._applyLocked();
+        if (!this.locked) this._preLock = null;
     }
 
     /** Применить `locked` к уже отрисованному элементу. Наследники дополняют. */
@@ -1147,8 +1195,11 @@ class FormInput extends UIObject {
         if (!el) return;
         try {
             const tag = (el.tagName || '').toLowerCase();
-            if (tag === 'input' || tag === 'textarea') { if (this.locked) el.readOnly = true; }
-            else if (this.locked) el.disabled = true;
+            if (tag === 'input' || tag === 'textarea') {
+                if (this.locked) el.readOnly = true;
+                else if (this._preLock) el.readOnly = !!this._preLock.elReadOnly;
+            } else if (this.locked) el.disabled = true;
+            else if (this._preLock) el.disabled = !!this._preLock.elDisabled;
         } catch (e) {}
         // Погашенное поле обязано объяснять себя: иначе форма выглядит сломанной.
         // Текст — тот же, что в отказе базы, чтобы объяснение и запрет не разошлись.
@@ -1432,7 +1483,7 @@ if (typeof window !== 'undefined') {
 
         function genId(name) { return name + '-' + Date.now() + '-' + (++_idCounter); }
 
-        // --- Non-blocking global busy indicator (Win95 «running» progress bar) ---
+        // --- Non-blocking global busy indicator (ретро-индикатор «бегущая дорожка») ---
         // Показывает бегущий прогрессбар при длительных асинхронных операциях
         // (открытие окна, генерация счёта), не блокируя интерфейс. Ref-counted:
         // несколько одновременных операций ведут общий стек токенов.
@@ -1588,7 +1639,7 @@ if (typeof window !== 'undefined') {
              *
              * Зачем в ядре. В этой системе незаполненная дата хранится НЕ как
              * NULL, а как заведомо ранняя дата `0001-01-01` (правило «у каждого
-             * типа своё пустое», как в 1С): фреймворк сам проставляет её
+             * типа своё пустое», как в классических учётных системах): фреймворк сам проставляет её
              * умолчанием каждому необязательному полю-дате. Клиент, проверяющий
              * заполненность через `if (value)`, всегда получает «дата есть» — и
              * рисует пользователю `00:53` там, где сообщений не было вовсе.
@@ -3130,7 +3181,7 @@ class Form extends UIObject {
 
     // Перерисовывает иконку кнопки максимизации в соответствии с состоянием окна.
     //  isMaximized=false → глиф "развернуть" (одно окно с заголовком);
-    //  isMaximized=true  → глиф "восстановить" (два перекрывающихся окна, как в Win95).
+    //  isMaximized=true  → глиф "восстановить" (два перекрывающихся окна, как в ретро-стиль).
     // Когда максимизация запрещена (lockAspectRatio) — глиф рисуется приглушённым цветом.
     _updateMaximizeIcon() {
         if (!this.btnMaximizeCanvas) return;
@@ -3581,26 +3632,11 @@ Form.prototype.doAction = function(action, params) {
                         return;
                     }
                     const tableName = this.dbTable || (params && params.tableName) || '';
-                    if (typeof window.showConfirm === 'function') {
-                        // showConfirm(message, onOk, onCancel): onOk вызывается БЕЗ аргументов
-                        // при подтверждении. Раньше тут стоял `if (res === 'yes')` — res всегда
-                        // undefined, поэтому удаление молча не выполнялось.
-                        window.showConfirm(__t('Are you sure you want to delete this record?'), async () => {
-                            try {
-                                const result = await callServerMethod('uniForm', 'deleteRecord', {
-                                    tableName: tableName,
-                                    recordId:  row.UID
-                                });
-                                if (result && result.ok) {
-                                    // Список обновится сам через SSE (deleteRecord шлёт
-                                    // notifyTableChange). Явный refresh здесь убран — иначе
-                                    // список перерисовывался дважды (мелькание).
-                                } else {
-                                    if (typeof showAlert === 'function') showAlert(__t('Delete error: ') + ((result && result.error) || __t('unknown error')));
-                                }
-                            } catch(e) { console.error(e); }
-                        });
-                    }
+                    // Вопрос и действие выбирает сервер: у сущности это ПОМЕТКА на
+                    // удаление, у технической таблицы — удаление. Список обновится
+                    // сам через SSE (notifyTableChange), поэтому явного refresh нет:
+                    // с ним список перерисовывался дважды и мигал.
+                    deleteOrMarkRecord(tableName, row.UID);
                 } catch (e) { console.error('[Form] recordDelete error:', e); }
                 return;
             }
@@ -3657,6 +3693,11 @@ window.callServer = async function(uid, fn, fnParams) {
     return data.result;
 };
 
+// Команды, остающиеся живыми у формы, запертой на время проведения. Кнопка
+// «Отменить проведение» обязана работать: иначе документ, застрявший в очереди,
+// нельзя вынуть из неё из его же формы.
+const POSTING_ALLOWED_COMMANDS = ['unpost', 'postingInfo'];
+
 class DataForm extends Form {
     constructor(appName) {
         super();
@@ -3679,6 +3720,9 @@ class DataForm extends Form {
         this._suppressFormChange = false; // защита от рекурсии при программном изменении данных
         this._prefilled = null;    // реестр программно заполненных значений (formSpec.prefilled)
         this._lock = null;         // замок проведённого документа (formSpec.lock)
+        this._postingPhase = null;  // 'queued' | 'posting' | null — приписка в заголовке
+        this._postingLocked = null; // кого заперли МЫ (чтобы снять ровно это)
+        this._postingWatch = false; // опрос окончания проведения уже идёт
     }
 
     // Override setTitle to keep track of the base (non-modified) title
@@ -3706,6 +3750,11 @@ class DataForm extends Form {
     setModified(val) {
         // Не выставляем modified=true пока идёт программное обновление полей (refresh после сохранения)
         if (val && this._suppressModified) return;
+        // У ЖУРНАЛА и ОБРАБОТКИ нет собственных данных, значит нет и понятия
+        // «несохранённые изменения». Галочка в списке помеченных объектов — не
+        // правка записи, а выбор на одно нажатие, и звёздочка в заголовке
+        // обещала бы кнопку «Сохранить», которой там нет.
+        if (val && this._isRecordForm === false) return;
         const wasModified = this._modified;
         this._modified = !!val;
         // Заголовок приводится в соответствие ВСЕГДА, а не только на переходе
@@ -3715,9 +3764,15 @@ class DataForm extends Form {
         // `_modified` в обход этого метода, окно без базового заголовка),
         // оставалась висеть на уже записанной в базу форме.
         const shown = super.getTitle() || '';
-        if (!this._originalTitle) this._originalTitle = shown.replace(/ \*$/, '');
-        const want = this._modified ? (this._originalTitle + ' *') : this._originalTitle;
-        if (want !== shown) super.setTitle(want);
+        if (!this._originalTitle) this._originalTitle = shown.replace(/ \*$/, '').replace(/ — .*$/, '');
+        // Идёт проведение — заголовок собирает _applyPostingTitle: он знает и про
+        // фазу, и про звёздочку. Иначе приписка «проводится» слетала бы на первом
+        // же изменении формы.
+        if (this._postingPhase) { this._applyPostingTitle(); }
+        else {
+            const want = this._modified ? (this._originalTitle + ' *') : this._originalTitle;
+            if (want !== shown) super.setTitle(want);
+        }
         // Общее событие формы «при изменении»: дёргаем клиентский обработчик
         // events.onChange (form-level) при любом изменении данных формы. Дебаунс
         // схлопывает серию изменений; _suppressFormChange защищает от рекурсии
@@ -3762,6 +3817,12 @@ class DataForm extends Form {
     setControlEnabled(name, enabled) {
         const c = this.getControl(name);
         if (!c || typeof c.setEnabled !== 'function') return false;
+        // Замок сильнее доступности. Пока документ проводится, форма заперта
+        // целиком, и `enabledWhen` не вправе вернуть к жизни то, что заперто:
+        // условие доступности говорит «действие применимо», а замок — «сейчас
+        // нельзя вообще». Без этой проверки любой пересчёт `enabledWhen`
+        // (смена значения, активация строки) дырявил бы замок.
+        if (enabled && this._postingLocked && this._postingLocked.indexOf(name) !== -1) return false;
         try { c.setEnabled(!!enabled); return true; } catch (e) { return false; }
     }
 
@@ -3833,6 +3894,276 @@ class DataForm extends Form {
         return (L.editable || []).indexOf(name) === -1;
     }
 
+    // ── ДОКУМЕНТ ПРОВОДИТСЯ: временный замок формы ───────────────────────────
+    //
+    // Зачем он нужен, хотя «поправил — снова уйдёт в очередь». Во-первых, у
+    // документа может быть правило «проведённый не редактируется» (у счёта оно
+    // обязано быть), и тогда окно правки закрывается ровно в момент проведения —
+    // то есть неизвестно когда. Во-вторых, и это хуже: пользователь успел
+    // изменить реквизит, но не успел сохранить, а документ уже провёлся по СТАРЫМ
+    // данным. Он видит на экране одно, в учёте другое, и ничто ему об этом не
+    // говорит. Поэтому на время очереди и проведения форма запирается целиком.
+    //
+    // Замок ИЕРАРХИЧЕН и ставится на форму, а не на каждый элемент: перечислять
+    // поля значило бы завести второй список, который разойдётся с первым. Таблицы
+    // запирают свои ячейки сами (`setLocked` → `updateAllRowsReadOnly`).
+    //
+    // ИСКЛЮЧЕНИЕ — «Отменить проведение»: единственная кнопка, которая обязана
+    // остаться живой, иначе документ, застрявший в очереди, нельзя вынуть из неё
+    // из его же формы. При нажатии сервер ПЕРЕПРОВЕРЯЕТ допустимость: документ мог
+    // провестись за те секунды, пока пользователь вёл мышь, и доступность кнопки
+    // на экране успела соврать.
+    //
+    // Снятие замка возвращает ровно то, что было: контролы, запертые постоянным
+    // замком (`applyRecordLock`), остаются запертыми — мы помним, кого заперли сами.
+
+    /**
+     * Команды, которым позволено работать при запертой проведением форме.
+     * Объявлено константой модуля, а не статикой класса: обращение к статике по
+     * имени класса ломается при переименовании молча — исключение ловится
+     * внешним try, и замок просто не ставится.
+     */
+    get postingAllowedCommands() { return POSTING_ALLOWED_COMMANDS; }
+
+    /**
+     * Включить или снять замок проведения.
+     * @param {string|null} phase — `'queued'` | `'posting'` | `null` (снять)
+     */
+    setPostingBusy(phase, action) {
+        const on = phase === 'queued' || phase === 'posting';
+        // Строку «в очереди» ПОКАЗЫВАЕМ здесь — чтобы она появилась сразу по
+        // нажатию кнопки, не дожидаясь первого ответа сервера. А вот ПРЯТАТЬ её
+        // здесь нельзя: замок и очередь — разные вещи. Неудачное проведение
+        // снимает замок (документ надо чинить, значит правит его), но строка
+        // очереди остаётся: по ТЗ §10.4 попытка повторится, и снять документ с
+        // очереди — осознанное действие пользователя, а не побочный эффект.
+        // Состав строки ведёт `_applyPostingStatus` по ответу сервера.
+        try { if (on && this._postingStatus) this._postingStatus.update(phase, action); } catch (e) {}
+        if (!on) {
+            if (this._postingLocked) {
+                const names = this._postingLocked;
+                // Снимаем список ДО возврата: `setEnabled` ниже проходит через
+                // `setControlEnabled`, а тот отказывает, пока имя в списке.
+                this._postingLocked = null;
+                for (const name of names) {
+                    const ctrl = this.controlsMap[name];
+                    if (!ctrl) continue;
+                    if (typeof ctrl.setLocked === 'function') {
+                        try { ctrl.setLocked(false); } catch (e) {}
+                    } else if (typeof ctrl.setEnabled === 'function') {
+                        // Кнопке возвращаем доступность, а окончательное слово —
+                        // за `enabledWhen` ниже: у проведённого документа «Провести»
+                        // обязана остаться погашенной.
+                        try { ctrl.setEnabled(true); } catch (e) {}
+                    }
+                }
+            }
+            this._postingPhase = null;
+            this._applyPostingTitle();
+            try { this.refreshEnabledWhen(); } catch (e) {}
+            return;
+        }
+
+        const first = !this._postingLocked;
+        this._postingPhase = phase;
+        if (first) {
+            this._postingLocked = [];
+            const allowed = POSTING_ALLOWED_COMMANDS;
+            for (const name in this.controlsMap) {
+                if (!Object.prototype.hasOwnProperty.call(this.controlsMap, name)) continue;
+                if (name.indexOf('__r') !== -1) continue;        // ячейки ТЧ — забота таблицы
+                const ctrl = this.controlsMap[name];
+                if (!ctrl) continue;
+                // «Отменить проведение» остаётся живой: иначе документ, застрявший
+                // в очереди, нельзя вынуть из неё из его же формы.
+                if (allowed.indexOf(ctrl.__documentCommand) !== -1) continue;
+
+                if (typeof ctrl.setLocked === 'function') {
+                    // Уже запертое постоянным замком не трогаем: иначе снятие замка
+                    // проведения «отперло» бы выставленный документ.
+                    if (ctrl.locked === true || ctrl.isLocked === true) continue;
+                    try { ctrl.setLocked(true); this._postingLocked.push(name); } catch (e) {}
+                    continue;
+                }
+                // КНОПКИ замка не имеют — у них только `setEnabled`. Пропустить их
+                // значило бы оставить «Провести» нажимаемой у документа, который уже
+                // проводится: постановка идемпотентна, вреда нет, но форма при этом
+                // обещает действие, которого не делает.
+                if (typeof ctrl.setEnabled === 'function') {
+                    const wasDisabled = !!(ctrl.element && ctrl.element.disabled);
+                    if (wasDisabled) continue;
+                    try { ctrl.setEnabled(false); this._postingLocked.push(name); } catch (e) {}
+                }
+            }
+        }
+        this._applyPostingTitle();
+    }
+
+    /**
+     * Подпись и смысл стандартной кнопки «ОК» формы ЗАПИСИ.
+     *
+     * Слово «ОК» не говорит, что кнопка делает, а делает она «сохранить и
+     * закрыть». У документа, который ПРОВОДЯТ вручную, она означает больше:
+     * закончить работу с документом — значит провести его, а не просто закрыть
+     * окно. Отсюда два варианта подписи, и оба СТАТИЧНЫ:
+     *
+     *   - документ проводится вручную → «<команда проведения> и закрыть»
+     *     (подпись потабличная: у счёта «Выставить и закрыть»);
+     *   - все остальные формы записи → «Сохранить и закрыть».
+     *
+     * Подпись НЕ ЗАВИСИТ от состояния документа намеренно. Кнопка, которая
+     * переименовывается под руками — то «Провести и закрыть», то «Сохранить и
+     * закрыть», — заставляет читать её перед каждым нажатием; повторное
+     * проведение при этом законная операция, а не ошибка. Иконка не меняется
+     * никогда: кнопку узнают по месту и значку.
+     *
+     * В СПИСКЕ и в форме ВЫБОРА «ОК» значит другое («выбрать», «закрыть»), и там
+     * кнопка не трогается — отсюда проверка `isRecordForm`.
+     */
+    _refreshOkButton() {
+        const btn = this._okButton;
+        if (!btn) return;
+        if (!this._isRecordForm) return;
+        const postCaption = (this._postingCaptions || {}).postAndClose;
+        const text = postCaption || __t('Save and close');
+        this._okAction = postCaption ? 'okPost' : 'ok';
+        try {
+            if (typeof btn.setCaption === 'function') btn.setCaption(text);
+            else if (btn.element) btn.element.textContent = text;
+        } catch (e) {}
+        try { btn.onClick = () => { try { this.doAction(this._okAction || 'ok'); } catch (e) {} }; } catch (e) {}
+    }
+
+    /** Приписка к заголовку окна: «в очереди» / «проводится». */
+    _applyPostingTitle() {
+        const base = (this._originalTitle || super.getTitle() || '').replace(/ \*$/, '');
+        const text = this._postingPhase === 'posting'
+            ? __t('posting…')
+            : (this._postingPhase === 'queued' ? __t('queued for posting…') : '');
+        const want = text ? (base + ' — ' + text) : base;
+        try { super.setTitle(this._modified ? (want + ' *') : want); } catch (e) {}
+    }
+
+    /**
+     * Показать причину неудачного проведения в пометке формы.
+     * Причина живёт в строке очереди, а не в документе (§6.2 ТЗ): писать её в
+     * документ значило бы трогать его на каждой неудачной попытке.
+     */
+    async _refreshPostingStatus() {
+        if (!this._postingStatus) return null;
+        const uidEntry = this._dataMap && this._dataMap['UID'];
+        const uid = uidEntry && uidEntry.value;
+        const table = this.dbTable || '';
+        if (!uid || !table) return null;
+        try {
+            const res = await window.callServer('document.actions', 'postingInfo', { table, uid });
+            this._applyPostingStatus(res);
+            return res;
+        } catch (e) { return null; }
+    }
+
+    /**
+     * Показать блок состояния по ответу `postingInfo`.
+     * Одна точка, где блок наполняется: иначе строка очереди и причина начинают
+     * жить каждая своей жизнью и расходятся — на экране «в очереди» у документа,
+     * которого в очереди уже нет.
+     */
+    _applyPostingStatus(res) {
+        const blk = this._postingStatus;
+        if (!blk) return;
+        try {
+            blk.update((res && res.phase) || null, res && res.queueAction);
+            blk.setReason((res && res.info && res.info.error) || '');
+        } catch (e) {}
+    }
+
+    /**
+     * Дождаться окончания проведения, показывая фазу.
+     *
+     * Опросом, а не подпиской: проведение ведёт ДРУГОЙ процесс (форкнутый воркер
+     * планировщика), событий от него в этой вкладке нет, а строка очереди —
+     * общий и уже существующий источник правды о состоянии. Тот же приём, что у
+     * `scheduler/engine.waitForRun`.
+     */
+    async watchPosting() {
+        const uidEntry = this._dataMap && this._dataMap['UID'];
+        const uid = uidEntry && uidEntry.value;
+        const table = this.dbTable || '';
+        if (!uid || !table) return;
+        if (this._postingWatch) return;                 // уже следим
+        this._postingWatch = true;
+
+        const POLL_MS = 1500;
+        const DEADLINE_MS = 10 * 60 * 1000;             // дольше — это уже не «подождите»
+        const started = Date.now();
+        try {
+            for (;;) {
+                let res = null;
+                try { res = await window.callServer('document.actions', 'postingInfo', { table, uid }); }
+                catch (e) { break; }                     // сервер недоступен — не держим форму
+                if (!res || res.error) break;
+
+                // Блок состояния наполняется на КАЖДОМ обороте: пока идёт
+                // проведение, это единственный источник того, что видно на форме.
+                this._applyPostingStatus(res);
+
+                // Неудача заканчивает ожидание, даже если строка очереди осталась.
+                // Документ сейчас НЕ проводится — он ждёт следующей попытки, и
+                // правильное следующее действие человека — починить его. Держать
+                // форму запертой до десятиминутного потолка значило бы запретить
+                // ровно то, ради чего он её открыл.
+                const failed = res.state === 'error';
+                if (res.phase && !failed) {
+                    this.setPostingBusy(res.phase, res.queueAction);
+                } else {
+                    // Строки очереди нет — проведение закончилось (успехом или
+                    // отказом). Замок снимаем и перечитываем запись: состояние,
+                    // движения и замок неизменности могли измениться.
+                    this.setPostingBusy(null);
+                    // Состояние проведения — и в контрол (если он на форме есть), и
+                    // В ДАННЫЕ ФОРМЫ. Контрола у служебного реквизита нет, а
+                    // `enabledWhen`/`visibleWhen` читают значение через
+                    // `getControlValue`, который берёт его из данных: без этой
+                    // записи кнопки после проведения остались бы в прежнем виде.
+                    try {
+                        if (res.stateField && res.state) {
+                            this.setControlValue(res.stateField, res.state);
+                            if (this._dataMap) {
+                                if (this._dataMap[res.stateField]) this._dataMap[res.stateField].value = res.state;
+                                else this._dataMap[res.stateField] = { name: res.stateField, value: res.state };
+                            }
+                            this._postingState = res.state;
+                        }
+                    } catch (e) {}
+                    // Состояние ДОКУМЕНТА — через тот же setControlValue: он сам
+                    // защёлкивает постоянный замок неизменности, когда документ
+                    // закрылся (`applyRecordLock`). Перечитывать форму целиком
+                    // незачем: изменилось ровно это.
+                    try {
+                        if (res.statusField && res.status !== null && res.status !== undefined) {
+                            this.setControlValue(res.statusField, res.status);
+                        }
+                    } catch (e) {}
+                    try { this.refreshEnabledWhen(); } catch (e) {}
+                    // Form-level событие «проведение закончилось» (events.onPostingFinished).
+                    // Нужно приложению, у которого за проведением следует ЕГО действие:
+                    // счёт печатается из архивной копии, а копия появляется только
+                    // после выставления. Ядру про печать знать незачем, приложению про
+                    // очередь — тоже, поэтому между ними событие, а не общий код.
+                    try {
+                        const b = this._formEvents && this._formEvents.onPostingFinished;
+                        if (b && !b.serverScript) this.callClientBinding(b, [{ state: res.state, status: res.status }]);
+                    } catch (e) { console.error('[DataForm] onPostingFinished handler error:', e); }
+                    break;
+                }
+                if (Date.now() - started > DEADLINE_MS) { this.setPostingBusy(null); break; }
+                await new Promise(r => setTimeout(r, POLL_MS));
+            }
+        } finally {
+            this._postingWatch = false;
+        }
+    }
+
     /**
      * Запереть форму по новому состоянию записи. Отпирания нет: закрытый документ
      * назад не открывается, а перерисовка формы сама построит её по новому spec.
@@ -3885,6 +4216,8 @@ class DataForm extends Form {
     //   "enabledWhen": { "currentRow": "backupFilesTable" }
     //   "enabledWhen": { "currentRow": "backupFilesTable", "where": { "missing": false } }
     //   "enabledWhen": { "rowsIn": "backupFilesTable" }        // в таблице есть хоть одна строка
+    //   "enabledWhen": { "selection": "journal" }              // выделена хотя бы одна строка
+    //   "enabledWhen": { "selection": "journal", "minSelected": 2 }
     //   "enabledWhen": { "field": "status", "in": ["draft"] }  // по значению поля записи
     //   "enabledWhen": { "field": "status", "notIn": ["cancelled"] }
     //   "enabledWhen": { "unlocked": true }                    // документ ещё не проведён
@@ -3958,10 +4291,18 @@ class DataForm extends Form {
         if (decl.unlocked === true) return !(this._lock && this._lock.closed);
         if (decl.locked === true) return !!(this._lock && this._lock.closed);
 
-        const tableName = decl.currentRow || decl.rowsIn || decl.table;
+        const tableName = decl.selection || decl.currentRow || decl.rowsIn || decl.table;
         const tbl = this.getControl(tableName);
         if (!tbl) return false;
         if (decl.rowsIn) return (tbl.getRows() || []).length > 0;
+        // Доступность по ВЫДЕЛЕНИЮ: `{ "selection": "journal" }` — выделена хотя бы
+        // одна строка; `minSelected` — не меньше указанного числа. Отдельно от
+        // `currentRow`, потому что это разные вопросы: «на какой строке стоим» и
+        // «над чем выполнить команду».
+        if (decl.selection) {
+            const ids = (typeof tbl.selectedIds === 'function') ? tbl.selectedIds(decl.idField) : [];
+            return ids.length >= (Number(decl.minSelected) || 1);
+        }
         const row = tbl.currentRow;
         if (!row) return false;
         const where = decl.where;
@@ -3981,6 +4322,49 @@ class DataForm extends Form {
     // сохранить несохранённое, позвать ядровой серверный скрипт `document.actions`,
     // показать результат. Приложению остаётся кнопка в лейауте — ни строчки
     // клиентского кода (сервер: drive_root/db/documentCommands.js).
+    /**
+     * Команда документа НАД ВЫДЕЛЕНИЕМ списка: `"command": "postMany",
+     * "selectionFrom": "journal"`.
+     *
+     * Отдельный путь от `runDocumentCommand`, потому что это другая работа: там
+     * одна запись и её нужно сначала сохранить, здесь список чужих записей, ни
+     * одна из которых на форме не правится. Ответ — один на всю пачку: его
+     * собирает проход очереди, а не клиент.
+     */
+    async runSelectionCommand(command, tableControlName, confirmText) {
+        const tbl = this.getControl(tableControlName);
+        if (!tbl || typeof tbl.selectedIds !== 'function') {
+            if (typeof showAlert === 'function') showAlert(__t('Please select a record'));
+            return;
+        }
+        const uids = tbl.selectedIds('UID');
+        if (!uids.length) {
+            if (typeof showAlert === 'function') showAlert(__t('Please select a record'));
+            return;
+        }
+        const table = tbl.tableName || this.dbTable || '';
+        if (confirmText !== false && typeof showConfirm === 'function') {
+            const ok = await showConfirm(confirmText || __t('Execute the command?'));
+            if (!ok) return;
+        }
+
+        const busy = (window.MySpace && window.MySpace.showBusy) ? window.MySpace.showBusy(__t('Please wait…')) : null;
+        let res;
+        try {
+            res = await window.callServer('document.actions', command, { table, uids });
+        } finally {
+            if (busy != null && window.MySpace && window.MySpace.hideBusy) window.MySpace.hideBusy(busy);
+        }
+        if (!res || res.error) {
+            if (typeof showAlert === 'function') showAlert(__t('Error: ') + ((res && res.error) || ''));
+            return;
+        }
+        // Итог придёт уведомлением, когда очередь дойдёт до документов. Показывать
+        // здесь «поставлено в очередь: 20» незачем — состояние видно в самом журнале.
+        try { tbl.clearSelection(); } catch (e) {}
+        try { if (typeof tbl.refresh === 'function') await tbl.refresh(); } catch (e) {}
+    }
+
     async runDocumentCommand(command, confirmText) {
         const uidEntry = this._dataMap && this._dataMap['UID'];
         const uid = uidEntry && uidEntry.value;
@@ -3996,7 +4380,11 @@ class DataForm extends Form {
         // файле — не функция, а маркер, который заменяется при выдаче файла
         // регуляркой по ЛИТЕРАЛУ; с переменной он доживает до браузера и падает
         // с «__t is not defined».
-        if (typeof showConfirm === 'function') {
+        // `"confirm": false` на кнопке — команда без переспроса. Нужно проведению:
+        // сторно и «недействителен» необратимы и переспроса стоят, а «провести» —
+        // обычное действие, и лишний диалог на каждое нажатие только приучает
+        // жать «да» не глядя, обесценивая переспрос там, где он важен.
+        if (confirmText !== false && typeof showConfirm === 'function') {
             const ok = await showConfirm(confirmText || __t('Execute the command?'));
             if (!ok) return;
         }
@@ -4055,10 +4443,55 @@ class DataForm extends Form {
         // Состояние исходного документа сервер уже сменил — показываем это сразу,
         // не дожидаясь повторного открытия окна.
         if (res.sourceState && res.stateField) {
-            try { this.setControlValue(res.stateField, res.sourceState); } catch (e) {}
+            try {
+                this.setControlValue(res.stateField, res.sourceState);
+                if (this._dataMap) {
+                    if (this._dataMap[res.stateField]) this._dataMap[res.stateField].value = res.sourceState;
+                    else this._dataMap[res.stateField] = { name: res.stateField, value: res.sourceState };
+                }
+                this._postingState = res.sourceState;
+                this.refreshEnabledWhen();
+            } catch (e) {}
+        }
+
+        // Документ ушёл в очередь: форма запирается целиком (кроме «Отменить
+        // проведение») и ждёт окончания, показывая фазу в заголовке. Ждать здесь
+        // же, а не «когда-нибудь», обязательно: иначе пользователь правит поля,
+        // документ проводится по старым данным, и на экране одно, а в учёте другое.
+        if (res.queued) {
+            this.setPostingBusy('queued', command === 'unpost' ? 'unpost' : 'post');
+            this.watchPosting();
+        }
+        // Сняли с очереди — замок больше не нужен, ждать нечего.
+        if (command === 'cancelQueue') {
+            this.setPostingBusy(null);
+            try { this.refreshEnabledWhen(); } catch (e) {}
+            // Строки очереди больше нет — блок обязан это показать, иначе форма
+            // продолжает обещать повторную попытку, которой не будет.
+            try { await this._refreshPostingStatus(); } catch (e) {}
+        }
+        // Команда попросила открыть окно (движения документа). Что именно
+        // открывать, решает СЕРВЕР: он знает объявление документа, клиент — нет.
+        if (res.open && res.open.appName && window.MySpace && typeof window.MySpace.open === 'function') {
+            try { await window.MySpace.open(res.open.appName, res.open.params || {}); }
+            catch (e) { console.error('[runDocumentCommand] окно не открылось:', e && e.message); }
         }
         if (res.html && window.MySpace && typeof window.MySpace.open === 'function') {
             await window.MySpace.open('printPreview', { html: res.html, autoPrint: true });
+        }
+
+        // «Провести и закрыть»: результат придёт уведомлением, держать окно незачем.
+        // Закрываем ПОСЛЕ всего остального — в том числе после показа состояния,
+        // чтобы порядок не зависел от того, успел ли пользователь моргнуть.
+        if (res.closeForm) {
+            try {
+                // Несохранённого уже нет — команда сохраняет форму до вызова, —
+                // поэтому переспроса «отменить изменения?» быть не должно.
+                this._modified = false;
+                this.close();
+            } catch (e) {
+                console.error('[runDocumentCommand] форма не закрылась', e);
+            }
         }
     }
 
@@ -4082,8 +4515,39 @@ class DataForm extends Form {
                 } catch (e) {}
             }
         }
+        // Кнопка «ОК», выполняющая КОМАНДУ проведения, повторяет доступность этой
+        // команды. Подпись у неё статична (решение владельца), но статичной
+        // подписи не следует статичная доступность: у недействительного счёта
+        // «Ausstellen» погашена, а «Ausstellen und schließen» оставалась живой —
+        // нажатие уходило на сервер и возвращалось отказом «переход не
+        // допускается». Кнопка обязана гаснуть вместе со своей командой.
+        try { this._mirrorOkButtonAvailability(); } catch (e) {}
         // Тон записи пересчитывается на тех же поводах: смена состояния, загрузка данных.
         try { this.applyRecordTone(); } catch (e) {}
+    }
+
+    /**
+     * Погасить «ОК», когда команда, которую он выполняет, недоступна.
+     *
+     * Доступность берётся у САМОЙ КОМАНДНОЙ КНОПКИ, а не вычисляется заново:
+     * второй вычислитель того же условия разошёлся бы с первым в тот день, когда
+     * условие поменяют в лейауте.
+     */
+    _mirrorOkButtonAvailability() {
+        const btn = this._okButton;
+        if (!btn || this._okAction !== 'okPost') return;
+        let source = null;
+        for (const name in this.controlsMap) {
+            if (!Object.prototype.hasOwnProperty.call(this.controlsMap, name)) continue;
+            const c = this.controlsMap[name];
+            if (c && c.__documentCommand === 'postAndClose') { source = c; break; }
+            if (c && c.__documentCommand === 'post' && !source) source = c;
+        }
+        if (!source || !source.element) return;
+        const on = !source.element.disabled;
+        if (typeof btn.setEnabled === 'function') {
+            try { btn.setEnabled(on); } catch (e) {}
+        }
     }
 
     /**
@@ -4962,16 +5426,20 @@ class DataForm extends Form {
                 const cmdBarEl = document.createElement('div');
                 cmdBarEl.classList.add('ui-toolbar');
                 // Компенсируем padding contentArea (10px) — тулбар должен быть вплотную
-                // к верхнему и боковым краям формы, как в Win95-диалогах.
+                // к верхнему и боковым краям формы, как в классических диалогах рабочего стола.
                 cmdBarEl.style.margin = '-10px -10px 5px -10px';
                 contentArea.appendChild(cmdBarEl);
 
                 const hiddenCmdBtns = Array.isArray(item.hiddenButtons) ? item.hiddenButtons : [];
 
+                // На форме, которую целиком нельзя править, «Отмена» называется не
+                // тем словом: отменять нечего, окно просто закрывают. Признак
+                // ставит сервер по замку (`applyReadOnlyButtons`).
+                const cancelCaption = item.cancelAsClose ? __t('Close') : __t('Cancel');
                 const stdCmdButtons = [
                     { id: 'ok',     caption: __t('OK'),     icon: '/apps/general_icons/resources/public/16x16/select.png',  action: 'ok' },
                     { id: 'save',   caption: __t('Save'),   icon: '/apps/general_icons/resources/public/16x16/save.png',    action: 'save' },
-                    { id: 'cancel', caption: __t('Cancel'), icon: '/apps/general_icons/resources/public/16x16/cancel.png',  action: 'cancel' }
+                    { id: 'cancel', caption: cancelCaption, icon: '/apps/general_icons/resources/public/16x16/cancel.png',  action: 'cancel' }
                 ];
 
                 const formSelfCmd = this;
@@ -4981,6 +5449,15 @@ class DataForm extends Form {
                     btn.Draw(cmdBarEl);
                     const action = btnDef.action;
                     btn.onClick = () => { try { formSelfCmd.doAction(action); } catch(e) {} };
+                    // «ОК» у ПРОВОДИМОГО документа переименовывается и меняет смысл:
+                    // «закончить с документом» — это провести и закрыть, а не просто
+                    // закрыть окно. Подпись потабличная («Выставить и закрыть» у счёта),
+                    // иконка остаётся прежней. Кнопку запоминаем: подпись зависит от
+                    // состояния и обязана меняться вместе с ним.
+                    if (btnDef.id === 'ok') {
+                        this._okButton = btn;
+                        this._refreshOkButton();
+                    }
                 }
 
                 // Дополнительные (приложение-специфичные) кнопки
@@ -5033,9 +5510,22 @@ class DataForm extends Form {
                         const cmdName = exBtn.command;
                         // Сервер уже перевёл `confirm` (translateLayoutI18n). Если
                         // почему-то не перевёл — показываем ключ, а не «[object Object]».
-                        const cmdConfirm = (exBtn.confirm && typeof exBtn.confirm === 'object')
-                            ? (exBtn.confirm.i18n || null) : (exBtn.confirm || null);
-                        btn.onClick = () => { formCmd.runDocumentCommand(cmdName, cmdConfirm); };
+                        const cmdConfirm = (exBtn.confirm === false)
+                            ? false
+                            : ((exBtn.confirm && typeof exBtn.confirm === 'object')
+                                ? (exBtn.confirm.i18n || null) : (exBtn.confirm || null));
+                        // `selectionFrom` — команда над ВЫДЕЛЕНИЕМ названной таблицы
+                        // (групповое проведение из журнала). Без него — обычная
+                        // команда над записью формы.
+                        const cmdSelection = exBtn.selectionFrom || null;
+                        // Метка на контроле: замок проведения оставляет живыми
+                        // кнопки перечисленных команд (POSTING_ALLOWED_COMMANDS).
+                        // Имя кнопки для этого не годится — его выбирает автор
+                        // лейаута, а правило про КОМАНДУ.
+                        try { btn.__documentCommand = cmdName; } catch (e) {}
+                        btn.onClick = cmdSelection
+                            ? () => { formCmd.runSelectionCommand(cmdName, cmdSelection, cmdConfirm); }
+                            : () => { formCmd.runDocumentCommand(cmdName, cmdConfirm); };
                     }
                     // Подключаем события (events.onClick, top-level onXxx) через стандартный механизм
                     try {
@@ -5081,7 +5571,7 @@ class DataForm extends Form {
             }
             case 'relatedList': {
                 // «Список связанных документов» в форме записи (аналог «Структуры
-                // подчинённости» в 1С): read-only DynamicTable другой таблицы,
+                // подчинённости» в учётных системах): read-only DynamicTable другой таблицы,
                 // отфильтрованная по связи с текущей записью. Живёт на SSE dataChanged
                 // (унаследовано от DynamicTable, с дебаунсом и очисткой в destroy) и
                 // дополнительно следит за таблицей-связкой (extraWatchTables).
@@ -5139,7 +5629,7 @@ class DataForm extends Form {
                         columnOverrides: props.columnOverrides || null,
                         hiddenButtons: props.hiddenButtons || [],
                         // Список связанных документов ведёт текущую строку сам (как список
-                        // 1С): сразу после загрузки активна первая. Иначе действия «над
+                        // учётных систем): сразу после загрузки активна первая. Иначе действия «над
                         // выбранной строкой» стоят выключенными, пока пользователь не
                         // догадается кликнуть, а на форме с одной строкой это выглядит
                         // как неработающая кнопка.
@@ -5186,7 +5676,13 @@ class DataForm extends Form {
                         // ({ startedAt: { showTime: true } }), см. DynamicTable.
                         if (properties && properties.columnOverrides) dtConf.columnOverrides = properties.columnOverrides;
                         dtConf.rowHeight = dtConf.rowHeight || 25;
-                        dtConf.multiSelect = dtConf.multiSelect || false;
+                        // Выделение нескольких строк: список документов включает его
+                        // умолчанием — команда над выделением там и нужна. Форма
+                        // выбора записи его не получает: там выбирают ОДНУ запись, и
+                        // выделенные десять означали бы вопрос без ответа.
+                        dtConf.multiSelect = (this.selectMode === true)
+                            ? false
+                            : (dtConf.multiSelect === undefined ? true : dtConf.multiSelect === true);
                         // Умолчание — ТОЛЬКО ПРОСМОТР. Раньше умолчанием было
                         // «редактируемо», но правка при этом никуда не сохранялась: список
                         // выглядел редактируемым и молча терял ввод. Из двух вариантов
@@ -5430,8 +5926,29 @@ class DataForm extends Form {
                     // покажет её, если условие выполнено, и пометка не мигнёт на чужом документе.
                     if (item.visibleWhen) line.setHidden(true);
                     { const ctrlKey = item.name || item.data; if (ctrlKey) this.controlsMap[ctrlKey] = line; }
+                    // Пометка, привязанная к СОСТОЯНИЮ ПРОВЕДЕНИЯ, показывает ПРИЧИНУ
+                    // неудачи, а не слово «Проведение»: текста ошибки в документе нет,
+                    // он лежит в строке очереди и запрашивается по требованию
+                    // (drive_root/db/documentCommands.js#postingInfo). Форма запомнит
+                    // эту пометку и заполнит её, когда причина станет известна.
+                    if (item.data === 'postingState') this._postingErrorLine = line;
                 } catch (e) {
                     console.error('[infoLine] render error:', e);
+                }
+                break;
+            }
+            case 'postingQueueLine': {
+                // Блок состояния проведения. Элемент вставляет ЯДРО (uniForm
+                // generateFormSpec) в лейаут любого проводимого документа —
+                // приложение его не объявляет и объявлять не должно.
+                try {
+                    const blk = new PostingStatusBlock(contentArea, properties || {});
+                    blk.setForm(this);
+                    blk.Draw(contentArea);
+                    { const ctrlKey = item.name || '__postingQueue'; this.controlsMap[ctrlKey] = blk; }
+                    this._postingStatus = blk;
+                } catch (e) {
+                    console.error('[postingQueueLine] render error:', e);
                 }
                 break;
             }
@@ -5648,6 +6165,17 @@ class DataForm extends Form {
         try { this.refreshEnabledWhen(); } catch (e) {}
         // Форма полностью отрисована — с этого момента разрешаем form-level onChange.
         this._formReady = true;
+        // Документ был в очереди уже при открытии формы: запираем её и ждём
+        // окончания. Делается ПОСЛЕ отрисовки — запирать нечего, пока контролов нет.
+        if (this._pendingPostingWatch) {
+            this._pendingPostingWatch = false;
+            // Действие ещё неизвестно — его назовёт первый же `postingInfo`
+            // внутри `watchPosting`; до него строка говорит про проведение.
+            try { this.setPostingBusy('queued'); this.watchPosting(); } catch (e) {}
+        }
+        // Документ открыт в состоянии «ошибка проведения» — причина нужна сразу,
+        // иначе пометка стоит без объяснения.
+        if (this._postingState === 'error') { try { this._refreshPostingStatus(); } catch (e) {} }
         // Form-level событие «форма готова» (events.onReady в saveLayout). Нужно там,
         // где стартовое состояние формы вычисляется клиентом: показать/скрыть поля по
         // режиму, заполнить справочную строку. Раньше для этого приходилось
@@ -5692,6 +6220,18 @@ class DataForm extends Form {
                 try { this._formEvents = both.events || null; } catch (e) { this._formEvents = null; }
                 try { this._prefilled = both.prefilled || null; } catch (e) { this._prefilled = null; }
                 try { this._lock = both.lock || null; } catch (e) { this._lock = null; }
+                // Документ мог уже стоять в очереди, когда форму открыли (её закрыли
+                // и открыли снова, проведение идёт со вчера). Замок обязан быть на
+                // месте с первой секунды, а не после нажатия кнопки.
+                // Состояние проведения приходит ОТДЕЛЬНЫМ полем спецификации, а не
+                // в данных формы: служебному реквизиту в данных автоформы не место
+                // (drive_root/db/serviceFields.js), а знать его форме надо.
+                try {
+                    this._postingState = both.postingState || null;
+                    this._postingCaptions = both.postingCaptions || null;
+                    this._isRecordForm = !!both.isRecordForm;
+                    if (both.postingState === 'queued') this._pendingPostingWatch = true;
+                } catch (e) {}
                 try { this._rowTones = Array.isArray(both.rowTones) ? both.rowTones : null; } catch (e) { this._rowTones = null; }
                 try { this._windowState = both.windowState || null; } catch (e) {}
                 // Apply app caption (human-readable translated name) and icon
@@ -5818,6 +6358,14 @@ class DataForm extends Form {
             }
             return;
         }
+        // «Провести и закрыть» под стандартной кнопкой «ОК» проводимого документа.
+        // Сохранение внутри: команда всегда работает с тем, что лежит в базе, а не
+        // с тем, что на экране (см. runDocumentCommand).
+        if (action === 'okPost') {
+            await this.runDocumentCommand('postAndClose', false);
+            return;
+        }
+
         if (action === 'ok') {
             if (!this._modified) {
                 // Изменений нет — просто закрываем
@@ -6384,7 +6932,7 @@ class Button extends UIObject {
 }
 
 // ── SplitButton ────────────────────────────────────────────────────────────────────────────────
-// Кнопка с выпадающим меню (Win95-стиль, как тулбары Office 97): основной сегмент
+// Кнопка с выпадающим меню (ретро-стиль, как тулбары Office 97): основной сегмент
 // (icon+caption, свой onClick) + узкий сегмент со стрелкой «▾» (отдельная 3D-рамка),
 // открывающий попап-меню. Общий контрол без прикладной логики (печать с вариантами,
 // экспорт в форматы, «открыть/создать документ» и т.п.).
@@ -7305,7 +7853,7 @@ class TextBox extends FormInput {
                 } catch (e) {}
             });
 
-            // If listMode is enabled, add a small Win95-style button at right to open prepared list
+            // If listMode is enabled, add a small retro-style button at right to open prepared list
             try {
                 // remove stale button/popup if present and mode disabled
                 // (запертое поле — тот же случай: список остаётся ради подписи, кнопка уходит)
@@ -7331,7 +7879,7 @@ class TextBox extends FormInput {
                         // Use CSS class for static styling; unified size handled by CSS
                         try { btn.classList.add('input-field-button'); } catch (e) {}
                         btn.textContent = '▾';
-                        // Win95-style raised button colors are provided globally by client config
+                        // retro-style raised button colors are provided globally by client config
 
                         // handlers
                         btn.addEventListener('click', (ev) => {
@@ -10091,7 +10639,7 @@ class RadioButton extends UIObject {
             this.circle.style.height = '12px';
             this.circle.style.borderRadius = '50%';
             this.circle.style.backgroundColor = '#ffffff';
-            // Win98 radio border simulation with CSS borders (tricky for circle)
+            // Retro radio border simulation with CSS borders (tricky for circle)
             // Simplified: solid border + box shadow
             this.circle.style.boxShadow = 'inset 1px 1px 2px rgba(0,0,0,0.5)';
             this.circle.style.border = '1px solid #808080';
@@ -10155,7 +10703,7 @@ class RadioButton extends UIObject {
  *
  * ── Вид: кружки или ЗАЛИПАЮЩИЕ КНОПКИ ───────────────────────────────────────
  * `"appearance": "buttons"` рисует те же варианты залипающими кнопками — выбранная
- * остаётся вдавленной, как переключатель вида в панели инструментов Win95. Это тот
+ * остаётся вдавленной, как переключатель вида в панели инструментов ретро-стиль. Это тот
  * же самый выбор одного из нескольких, а не другой контрол: заводить рядом второй
  * класс значило бы иметь две реализации «выбрать ровно один вариант» и однажды их
  * рассогласовать. В панели инструментов кружки неуместны — там кнопки, а смысл
@@ -10480,6 +11028,183 @@ class AlertForm extends ModalForm {
             if (this.okButton && this.okButton.element) this.okButton.element.focus();
         }, 50);
     }
+}
+
+/**
+ * Диалог ПРОСМОТРА ТЕКСТА — `showTextView(title, text)`.
+ *
+ * Третий в семействе рядом с `showAlert` и `showConfirm` и устроен так же:
+ * модальное окно, размер по содержимому, одна кнопка «ОК». Отличие одно и оно
+ * же причина существования — текст лежит в многострочном поле ТОЛЬКО ДЛЯ ЧТЕНИЯ,
+ * которое прокручивается и из которого можно выделить и скопировать.
+ *
+ * `showAlert` для такого не годится: он рисует текст подписью, растёт вместе с
+ * ним и на длинном тексте занимает весь экран. Длинные тексты у нас бывают
+ * ровно там, где их надо кому-то переслать, — причина неудачного проведения,
+ * ответ внешнего сервиса, текст исключения.
+ *
+ * Окно НЕ изменяемого размера — как остальные диалоги семейства: одинаковое
+ * поведение важнее, чем возможность растянуть именно это окно.
+ */
+class TextViewForm extends ModalForm {
+    constructor(title, text, onOk) {
+        super(title || __t('Details'), 420, 260);
+        this.text = (text === null || text === undefined) ? '' : String(text);
+        this.onOk = onOk;
+    }
+
+    Draw(container) {
+        super.Draw(container);
+
+        const PAD = 10, GAP = 12, FONT = 12;
+        const btnWidth = 80, btnHeight = 26;
+        const viewW = (typeof window !== 'undefined' ? window.innerWidth : 800);
+        const viewH = (typeof window !== 'undefined' ? window.innerHeight : 600);
+
+        // Ширина — по семейству: широкое окно для длинного текста, но не во весь
+        // экран. Высота считается по тексту тем же пробником, что у showAlert,
+        // и упирается в потолок — дальше поле прокручивается само.
+        const width = Math.max(360, Math.min(640, viewW - 80));
+        this.setWidth(width);
+        const titleH = this.titleBar ? (this.titleBar.offsetHeight || 22) : 22;
+        const textW = width - PAD * 2;
+        let textH = AlertForm._measureTextHeight(this.text, textW - 8, FONT) + 8;
+        const maxFormH = Math.max(200, viewH - Form.topOffset - Form.bottomOffset - 40);
+        const maxTextH = maxFormH - titleH - PAD * 2 - GAP - btnHeight;
+        if (textH > maxTextH) textH = maxTextH;
+        if (textH < 80) textH = 80;
+        const formH = titleH + PAD * 2 + textH + GAP + btnHeight;
+        this.setHeight(formH);
+
+        // Поле — штатный многострочный контрол, а не самодельная textarea:
+        // иначе у него не будет ни вдавленной ретро-рамки, ни шрифта формы.
+        const box = new MultilineTextBox(this.contentArea, { readOnly: true, wrap: 'soft' });
+        box.setText(this.text);
+        box.Draw(this.contentArea);
+        try { box.setReadOnly(true); } catch (e) {}
+        UIObject.styleElement(box, PAD, PAD, textW, textH, FONT);
+
+        const btnOk = new Button(this.contentArea);
+        btnOk.setCaption(__t('OK'));
+        btnOk.Draw(this.contentArea);
+        btnOk.onClick = () => {
+            this.close();
+            try { if (typeof this.onOk === 'function') this.onOk(); } catch (e) { console.error('TextViewForm onOk callback error', e); }
+        };
+        UIObject.styleElement(btnOk, (width - btnWidth) / 2, PAD + textH + GAP, btnWidth, btnHeight, 12);
+
+        try { this.updatePositionOnResize(); } catch (e) {}
+        this.okButton = btnOk;
+        this.textControl = box;
+        setTimeout(() => {
+            try { if (this.okButton && this.okButton.element) this.okButton.element.focus(); } catch (e) {}
+        }, 50);
+    }
+}
+
+/**
+ * Показать длинный текст в модальном окне только для чтения.
+ * @param {string} title — заголовок окна
+ * @param {string} text  — сам текст
+ * @param {function} [onOk]
+ */
+function showTextView(title, text, onOk) {
+    const f = new TextViewForm(title, text, onOk);
+    f.Draw(document.body);
+    return f;
+}
+
+if (typeof window !== 'undefined') {
+    window.showTextView = showTextView;
+}
+
+/**
+ * Диалог ВЫБОРА — `showChoice(message, options, onPick)`.
+ *
+ * Четвёртый в семействе рядом с `showAlert`, `showConfirm` и `showTextView`, и
+ * устроен так же. Отличие одно: кнопок не две («да»/«нет»), а сколько нужно, и
+ * каждая возвращает свой ключ.
+ *
+ * Заведён под вопрос «как именно удалить»: пометить или удалить сразу — это не
+ * «да/нет», а два разных действия с разными последствиями, и `showConfirm` тут
+ * пришлось бы выворачивать наизнанку («ОК значит пометить, Отмена значит…?»).
+ *
+ * @param {string} message
+ * @param {Array<{key: string, caption: string, icon?: string}>} options
+ * @param {function(string|null)} onPick — ключ нажатой кнопки либо null (отказ)
+ */
+class ChoiceForm extends ModalForm {
+    constructor(message, options, onPick) {
+        super(__t('Confirm'), 380, 160);
+        this.message = message;
+        this.options = Array.isArray(options) ? options : [];
+        this.onPick = onPick;
+    }
+
+    Draw(container) {
+        super.Draw(container);
+
+        const PAD = 12, GAP = 14, FONT = 13, BTN_H = 26, BTN_GAP = 8;
+        const viewW = (typeof window !== 'undefined' ? window.innerWidth : 800);
+
+        // Ширина — по самой длинной кнопке и по тексту: кнопки в один ряд, и
+        // перенос их на вторую строку выглядел бы как другой диалог.
+        const btnW = [];
+        for (const o of this.options) {
+            btnW.push(Math.max(90, 26 + String(o.caption || '').length * 7));
+        }
+        const rowW = btnW.reduce((a, b) => a + b, 0) + BTN_GAP * Math.max(0, btnW.length - 1);
+        const width = Math.max(380, Math.min(viewW - 60, Math.max(rowW + PAD * 2, 380)));
+        this.setWidth(width);
+
+        const titleH = this.titleBar ? (this.titleBar.offsetHeight || 22) : 22;
+        const textW = width - PAD * 2;
+        const textH = AlertForm._measureTextHeight(this.message, textW, FONT);
+        const formH = titleH + PAD * 2 + textH + GAP + BTN_H;
+        this.setHeight(formH);
+
+        const lbl = new Label(this.contentArea);
+        lbl.setText(this.message);
+        lbl.Draw(this.contentArea);
+        if (lbl.element) {
+            lbl.element.style.whiteSpace = 'pre-wrap';
+            lbl.element.style.wordWrap = 'break-word';
+        }
+        UIObject.styleElement(lbl, PAD, PAD, textW, textH, FONT);
+
+        let x = (width - rowW) / 2;
+        const y = PAD + textH + GAP;
+        this.buttons = [];
+        this.options.forEach((o, i) => {
+            const b = new Button(this.contentArea);
+            b.setCaption(o.caption || o.key);
+            if (o.icon) b.setIcon(o.icon);
+            b.Draw(this.contentArea);
+            b.onClick = () => {
+                this.close();
+                try { if (typeof this.onPick === 'function') this.onPick(o.key); }
+                catch (e) { console.error('ChoiceForm onPick error', e); }
+            };
+            UIObject.styleElement(b, x, y, btnW[i], BTN_H, 12);
+            x += btnW[i] + BTN_GAP;
+            this.buttons.push(b);
+        });
+
+        try { this.updatePositionOnResize(); } catch (e) {}
+        setTimeout(() => {
+            try { if (this.buttons[0] && this.buttons[0].element) this.buttons[0].element.focus(); } catch (e) {}
+        }, 50);
+    }
+}
+
+function showChoice(message, options, onPick) {
+    const f = new ChoiceForm(message, options, onPick);
+    f.Draw(document.body);
+    return f;
+}
+
+if (typeof window !== 'undefined') {
+    window.showChoice = showChoice;
 }
 
 class ConfirmForm extends ModalForm {
@@ -10850,6 +11575,110 @@ if (typeof window !== 'undefined') {
     window.showAlert = showAlert;
 }
 
+/**
+ * Нажатие «Удалить» в списке.
+ *
+ * Два вызова на одно нажатие, и это намеренно. Сначала `dryRun` — сервер
+ * отвечает, ЧТО произойдёт: пометить, снять пометку, удалить (техническая
+ * таблица) или сначала распровести. Только после этого показывается вопрос, и
+ * вопрос этот — про то, что на самом деле случится.
+ *
+ * Считать ответ на клиенте нельзя: правило «кого можно удалить» объявлено один
+ * раз, в `entityConfig.immutable`, и вторая его копия в браузере разошлась бы с
+ * первой в тот день, когда изменится объявление.
+ *
+ * @param {string} tableName
+ * @param {string} recordId
+ * @param {function} [onDone] — вызывается после успешного действия
+ * @param {string} [force] — `'direct'`: удалить сразу, не спрашивая о способе
+ *        (Shift+Del). Сам факт удаления всё равно переспрашивается.
+ */
+async function deleteOrMarkRecord(tableName, recordId, onDone, force) {
+    if (!tableName || !recordId) {
+        if (typeof showAlert === 'function') showAlert(__t('Please select a record to delete'));
+        return;
+    }
+    let probe;
+    try {
+        probe = await callServerMethod('uniForm', 'deleteRecord',
+            { tableName: tableName, recordId: recordId, dryRun: true });
+    } catch (e) {
+        console.error('[deleteOrMarkRecord] dryRun error:', e);
+        return;
+    }
+    if (!probe || probe.ok === false) {
+        // Отказ виден сразу и целиком: «выставленный счёт удалению не подлежит».
+        if (typeof showAlert === 'function') {
+            showAlert((probe && probe.error) || __t('unknown error'));
+        }
+        return;
+    }
+
+    const action = probe.action || null;          // что сделает пометка
+    const canDirect = probe.direct === true;      // разрешено ли удалить сразу
+
+    // Выполнить выбранный способ.
+    const run = async (mode) => {
+        try {
+            const res = await callServerMethod('uniForm', 'deleteRecord', {
+                tableName: tableName, recordId: recordId,
+                mode: mode,
+                // Согласие на распроведение передаётся ЯВНО: сервер не запускает
+                // учётную операцию по нажатию «удалить», пока его не попросили.
+                unpostFirst: action === 'unpostThenMark'
+            });
+            if (res && res.ok) {
+                if (typeof onDone === 'function') onDone(res);
+            } else if (typeof showAlert === 'function') {
+                showAlert((res && res.error) || __t('unknown error'));
+            }
+        } catch (e) { console.error('[deleteOrMarkRecord] error:', e); }
+    };
+
+    const markQuestion = action === 'unmark' ? __t('Remove the deletion mark from this record?')
+        : action === 'mark' ? __t('Mark this record for deletion?')
+        : action === 'unpostThenMark' ? __t('The document is posted. Undo the posting and mark it for deletion?')
+        : __t('Are you sure you want to delete this record?');
+
+    // Прямое удаление затребовано явно (Shift+Del) — не спрашиваем, каким
+    // способом, но переспрашиваем сам факт: действие необратимо.
+    if (force === 'direct') {
+        if (!canDirect) { showAlert(probe.markRefusal || __t('Direct deletion is not allowed for this object')); return; }
+        window.showConfirm(__t('Delete this record permanently? This cannot be undone.'), () => run('direct'));
+        return;
+    }
+
+    // Доступны ОБА способа — выбирает человек. Выбрать за него нечем: пометка и
+    // немедленное удаление различаются последствиями, а не удобством.
+    if (canDirect && action && action !== 'unmark') {
+        showChoice(__t('How should this record be deleted?'), [
+            { key: 'mark', caption: __t('Mark for deletion'),
+              icon: '/apps/general_icons/resources/public/16x16/deletion_mark.png' },
+            { key: 'direct', caption: __t('Delete permanently'),
+              icon: '/apps/general_icons/resources/public/16x16/delete.png' },
+            { key: 'cancel', caption: __t('Cancel') }
+        ], (key) => {
+            if (key === 'mark') run('mark');
+            else if (key === 'direct') {
+                window.showConfirm(__t('Delete this record permanently? This cannot be undone.'), () => run('direct'));
+            }
+        });
+        return;
+    }
+
+    // Способ один — обычный переспрос.
+    if (typeof window.showConfirm !== 'function') return;
+    if (!action && canDirect) {
+        window.showConfirm(__t('Delete this record permanently? This cannot be undone.'), () => run('direct'));
+        return;
+    }
+    window.showConfirm(markQuestion, () => run('mark'));
+}
+
+if (typeof window !== 'undefined') {
+    window.deleteOrMarkRecord = deleteOrMarkRecord;
+}
+
 function loadResource(src, type = 'script', callback) {
     let el;
     if (type === 'script') {
@@ -10910,7 +11739,7 @@ function loadHTMLContent(src, callback) {
 }
 
 // CheckBox class for boolean values
-// Контрол выбора цвета — Win95-обёртка над нативным <input type="color"> + hex-подпись.
+// Контрол выбора цвета — ретро-обёртка над нативным <input type="color"> + hex-подпись.
 // Используется через inputType:'color' в db.json (автоформы) либо type:'color' в лейауте.
 // Хранит/возвращает строку вида '#rrggbb'.
 class Color extends FormInput {
@@ -11621,10 +12450,10 @@ class DatePicker extends FormInput {
     }
 }
 
-// ── Всплывающая подсказка Win95 на произвольном элементе ──────────────────
+// ── Всплывающая подсказка ретро-стиль на произвольном элементе ──────────────────
 // Своя подсказка, а НЕ атрибут `title`: нативную подсказку рисует сам браузер,
 // её нет в DOM (её не видно ни на скриншоте, ни автоматизации), она приходит
-// с большой задержкой и выглядит чужеродно рядом с Win95-интерфейсом. Внешний
+// с большой задержкой и выглядит чужеродно рядом с ретро-интерфейсом. Внешний
 // вид — тот же жёлтый прямоугольник, что у Button.showTooltip.
 // Используется для колонок таблицы с `col.tooltip` (заголовок + ячейки).
 function attachHoverTip(el, text) {
@@ -11687,6 +12516,12 @@ class Table extends UIObject {
         this.element = null;
         // If visibleRows === 0 => show all rows (no fixed height). If >0 => body height = visibleRows * rowHeight
         this.visibleRows = (typeof properties.visibleRows === 'number') ? (properties.visibleRows | 0) : 0;
+        // ОБЪЯВЛЕННАЯ высота — отдельно от рабочей. `visibleRows` у динамического
+        // списка означает другое («сколько строк грузить») и по ходу работы
+        // перезаписывается измеренной высотой; объявление же в лейауте не
+        // меняется никогда, и минимум высоты должен считаться по нему.
+        this.declaredRows = (typeof properties.visibleRows === 'number' && properties.visibleRows > 0)
+            ? (properties.visibleRows | 0) : 0;
         this.rowHeight = (typeof properties.rowHeight === 'number') ? (properties.rowHeight | 0) : (properties.rowHeight ? parseInt(properties.rowHeight,10) || 25 : 25);
         // Resize state for column resizing
         this.resizeState = { isResizing: false, columnIndex: null, startX: 0, startWidth: 0 };
@@ -11705,11 +12540,54 @@ class Table extends UIObject {
         this.autoPickSingleRef = (properties.autoPickSingleRef !== false);
         // Признак табличной части — выставляется автоматически в Draw() из _dataMap
         this.isTabularSection = false;
-        this.currentFilters = [];
+        // ОТБОР, ОБЪЯВЛЕННЫЙ В ЛЕЙАУТЕ: `properties.filters`. Нужен везде, где
+        // список показывает не всю таблицу, а её срез по известному заранее
+        // условию — движения ЭТОГО документа, брони ЭТОГО клиента. Без него
+        // каждый такой список требовал бы клиентского кода, который после
+        // отрисовки зовёт `setFilter`, то есть успевает сходить на сервер
+        // дважды: сперва за всей таблицей, потом за срезом.
+        //
+        //   "initialFilter": [ { "field": "recorderUID", "value": "…",
+        //                        "operator": "=", "visibility": "hidden" } ]
+        //
+        // Имя парное к `initialSort` и УЖЕ существовало у динамической таблицы —
+        // второе имя рядом («filters») я успел завести, не поискав; оно убрано.
+        //
+        // `visibility: "hidden"` — отбор есть, но в панели не показывается и
+        // сниматься пользователем не должен: это не его выбор, а смысл окна.
+        this.currentFilters = Array.isArray(properties.initialFilter)
+            ? properties.initialFilter.map(f => ({
+                field: f.field,
+                caption: f.caption || f.field,
+                operator: f.operator || '=',
+                value: f.value,
+                type: f.type || 'server',
+                visibility: f.visibility || 'visible',
+                enabled: f.enabled !== false
+            })).filter(f => f.field)
+            : [];
         // Голубая подсветка активной строки. По умолчанию включена; лейаут может
         // отключить её через properties.highlightActiveRow = false (например, для ТЧ,
         // где активная строка не несёт визуального смысла). Зебра при этом сохраняется.
         this.highlightActiveRow = (properties.highlightActiveRow !== false);
+        // ── ВЫДЕЛЕНИЕ НЕСКОЛЬКИХ СТРОК ───────────────────────────────────────
+        // Ctrl — добавить/убрать строку, Shift — интервал от точки опоры, обычный
+        // клик — ровно одна строка. Механизм был начат давно (Shift+стрелки уже
+        // помечали строки классом `range-selected`), но остался половиной: класс
+        // никем не читался и в CSS его не было, мышь не участвовала, а спросить
+        // «что выделено» было нечем. Групповое проведение (ТЗ §12.3) — первый
+        // потребитель, которому нужен ответ на этот вопрос.
+        //
+        // Активная строка и выделение — РАЗНЫЕ вещи: активная одна и определяет,
+        // какую строку можно править, выделенных может быть много и они говорят,
+        // над чем выполнить команду. Смешать их значило бы либо править сразу
+        // двадцать строк, либо не уметь выделить больше одной.
+        this.multiSelect = properties.multiSelect === true;
+        // Явный выбор строк как работа формы: колонка отметок + кнопки панели +
+        // счётчик в статусной строке. По умолчанию ВЫКЛЮЧЕН.
+        this.selectionColumn = properties.selectionColumn === true;
+        this._selectedRows = new Set();   // реальные индексы в массиве данных
+        this._anchorRow = null;           // точка опоры интервального выделения
     }
 
     // Обрабатывает действие тулбара внутри таблицы.
@@ -11761,6 +12639,22 @@ class Table extends UIObject {
     }
 
     doToolbarAction(action) {
+        // «Открыть» РАЗНОРОДНОГО списка. Обычно кнопку обрабатывает форма: она
+        // знает свою таблицу и свою текущую запись. Но если строка называет свою
+        // таблицу сама (`__table`), формы недостаточно — записи в списке из
+        // разных таблиц. Тогда открывает таблица, тем же путём, что и двойной
+        // щелчок.
+        if (action === 'recordOpen') {
+            try {
+                const rows = (typeof this.data_getRows === 'function') ? this.data_getRows(this.dataKey) : [];
+                const idx = this._activeRowIndex;
+                const row = (Array.isArray(rows) && idx !== null && idx !== undefined) ? rows[idx] : null;
+                if (row && row.__table && typeof this.onSelectOrOpen === 'function') {
+                    this.onSelectOrOpen(idx);
+                    return true;
+                }
+            } catch (e) { console.error('[Table] recordOpen error:', e); }
+        }
         // «Обновить» списка: перечитать данные с сервера. Кнопка ставится только
         // у таблиц, умеющих refresh (DynamicTable), — см. dynamicOnly в тулбаре.
         if (action === 'listRefresh') {
@@ -11858,6 +12752,15 @@ class Table extends UIObject {
     setRowsData(rows) {
         const next = Array.isArray(rows) ? rows : [];
         const entry = this.appForm && this.appForm._dataMap && this.appForm._dataMap[this.dataKey];
+        // ВЫДЕЛЕНИЕ СНИМАЕТСЯ ВМЕСТЕ СО СТРОКАМИ. Оно хранится НОМЕРАМИ строк, а
+        // строки здесь заменяются целиком: после перечитывания номер 3 — уже
+        // другой объект. Сохранённое выделение означало бы, что следующая команда
+        // выполнится над не тем, что отмечено на экране.
+        try {
+            if (this._selectedRows) this._selectedRows.clear();
+            this._anchorRow = null;
+            if (typeof this._afterSelectionChanged === 'function') this._afterSelectionChanged();
+        } catch (e) {}
 
         if (entry && Array.isArray(entry.value) && typeof this._invokeRenderBodyRows === 'function') {
             entry.value.length = 0;
@@ -11878,6 +12781,213 @@ class Table extends UIObject {
             this.element = null;
             try { this.Draw(parent); } catch (e) { console.error('[Table] setRowsData redraw:', e); }
         }
+    }
+
+    // ── Выделение нескольких строк: состояние принадлежит таблице ────────────
+
+    /**
+     * Индексы выделенных строк (по возрастанию).
+     * Выделение пусто — возвращается активная строка: «команда над выделением»
+     * при одной подсвеченной строке обязана работать без предварительного Ctrl.
+     */
+    get selectedRowIndexes() {
+        if (this._selectedRows && this._selectedRows.size) {
+            return Array.from(this._selectedRows).sort((a, b) => a - b);
+        }
+        const idx = this.currentRowIndex;
+        return idx >= 0 ? [idx] : [];
+    }
+
+    /** Данные выделенных строк. Незагруженные плейсхолдеры отбрасываются. */
+    get selectedRows() {
+        const rows = this.data_getRows(this.dataKey) || [];
+        return this.selectedRowIndexes
+            .map(i => rows[i])
+            .filter(r => r && typeof r === 'object' && r.loaded !== false && Object.keys(r).length);
+    }
+
+    /**
+     * Идентификаторы выделенных строк — то, что нужно серверной команде.
+     * @param {string} [idField='UID']
+     * @returns {Array<string>}
+     */
+    selectedIds(idField) {
+        const f = idField || 'UID';
+        return this.selectedRows.map(r => r[f]).filter(v => v !== undefined && v !== null && v !== '');
+    }
+
+    /** Снять выделение (оставив активную строку как есть). */
+    clearSelection() {
+        if (this._selectedRows) this._selectedRows.clear();
+        this._anchorRow = null;
+        this._afterSelectionChanged();
+    }
+
+    /**
+     * Выделить ВСЕ строки.
+     *
+     * «Все» — это все ЗАГРУЖЕННЫЕ строки: список виртуальный, и дальше первой
+     * сотни данных на клиенте нет. Обещать «все двадцать тысяч» кнопка не вправе —
+     * команда получила бы ровно те же загруженные, и расхождение вскрылось бы
+     * на первой же большой таблице.
+     */
+    selectAll() {
+        if (!this.multiSelect) return;
+        if (!this._selectedRows) this._selectedRows = new Set();
+        const rows = this.data_getRows(this.dataKey) || [];
+        for (let i = 0; i < rows.length; i++) {
+            const r = rows[i];
+            if (r && typeof r === 'object' && r.loaded !== false && Object.keys(r).length) {
+                this._selectedRows.add(i);
+            }
+        }
+        this._afterSelectionChanged();
+    }
+
+    /** Инвертировать выделение по загруженным строкам. */
+    invertSelection() {
+        if (!this.multiSelect) return;
+        if (!this._selectedRows) this._selectedRows = new Set();
+        const rows = this.data_getRows(this.dataKey) || [];
+        for (let i = 0; i < rows.length; i++) {
+            const r = rows[i];
+            if (!(r && typeof r === 'object' && r.loaded !== false && Object.keys(r).length)) continue;
+            if (this._selectedRows.has(i)) this._selectedRows.delete(i);
+            else this._selectedRows.add(i);
+        }
+        this._afterSelectionChanged();
+    }
+
+    /** Переключить выделение ОДНОЙ строки (пробел). */
+    toggleRowSelection(rowIndex) {
+        if (!this.multiSelect) return;
+        if (!this._selectedRows) this._selectedRows = new Set();
+        if (this._selectedRows.has(rowIndex)) this._selectedRows.delete(rowIndex);
+        else this._selectedRows.add(rowIndex);
+        this._anchorRow = rowIndex;
+        this._afterSelectionChanged();
+    }
+
+    /**
+     * Общий хвост любой правки выделения: перекрасить строки, пересчитать
+     * доступность команд, обновить счётчик на панели.
+     *
+     * Одна точка намеренно: раньше `_paintSelection` и `refreshEnabledWhen`
+     * звались вразнобой, и кнопка «Провести выделенные» оставалась серой после
+     * выделения клавиатурой.
+     */
+    _afterSelectionChanged() {
+        this._paintSelection();
+        try {
+            if (this.appForm && typeof this.appForm.refreshEnabledWhen === 'function') {
+                this.appForm.refreshEnabledWhen();
+            }
+        } catch (e) {}
+        this._updateSelectionCount();
+    }
+
+    /** Сколько выделено — в статусной строке ПОД таблицей. */
+    _updateSelectionCount() {
+        const el = this._selCountEl;
+        if (!el) return;
+        const n = (this._selectedRows && this._selectedRows.size) || 0;
+        el.textContent = n ? (__t('Selected') + ': ' + n) : '';
+    }
+
+    /**
+     * Обновить выделение по клику/нажатию клавиши.
+     * @param {number} rowIndex — реальный индекс строки в данных
+     * @param {object} mods — `{ ctrl, shift }`
+     */
+    _applySelection(rowIndex, mods) {
+        if (!this.multiSelect) return;
+        if (!this._selectedRows) this._selectedRows = new Set();
+        const ctrl = !!(mods && mods.ctrl);
+        const shift = !!(mods && mods.shift);
+
+        if (shift && this._anchorRow !== null) {
+            // Интервал ЗАМЕНЯЕТ выделение, а не добавляется к нему: так ведёт
+            // себя любой список, и «накопить» интервалы можно через Ctrl+Shift,
+            // но это отдельное поведение, которого никто не просил.
+            this._selectedRows.clear();
+            const a = Math.min(this._anchorRow, rowIndex);
+            const b = Math.max(this._anchorRow, rowIndex);
+            for (let i = a; i <= b; i++) this._selectedRows.add(i);
+        } else if (ctrl) {
+            if (this._selectedRows.has(rowIndex)) this._selectedRows.delete(rowIndex);
+            else this._selectedRows.add(rowIndex);
+            this._anchorRow = rowIndex;
+        } else if (this.readOnly && !this.selectionColumn) {
+            // ТАБЛИЦА НЕ РЕДАКТИРУЕТСЯ И ОТМЕТОК НЕТ — щелчок по любой ячейке
+            // выбирает строку: править нечего, а другого способа показать выбор
+            // у такой таблицы и нет. Ведёт себя как обычный список: выбор
+            // заменяется нажатой строкой, Ctrl добавляет, Shift берёт интервал.
+            //
+            // КОЛОНКА ОТМЕТОК ОТМЕНЯЕТ ЭТО ПРАВИЛО: если отметки есть, щелчок
+            // мимо них не вправе снимать уже расставленные — человек их ставил
+            // руками, а промахнуться по строке легко.
+            this._selectedRows.clear();
+            this._selectedRows.add(rowIndex);
+            this._anchorRow = rowIndex;
+        } else {
+            // ТАБЛИЦА РЕДАКТИРУЕМАЯ — щелчок по ячейке означает «правлю эту
+            // ячейку», и трогать выбор он не вправе: иначе попытка исправить
+            // число снимает отметки, которые человек расставлял до этого.
+            // Выбор здесь делается только отметкой в первой колонке, пробелом,
+            // Ctrl/Shift-щелчком или кнопками панели.
+            this._anchorRow = rowIndex;
+            return;
+        }
+        this._afterSelectionChanged();
+    }
+
+    /**
+     * Привести к текущему выбору и подсветку, и ОТМЕТКИ в первой колонке, и
+     * отметку «все» в шапке. Одно состояние — три отображения, и расходиться им
+     * нельзя: расхождение здесь означает, что человек видит одно, а команда
+     * получает другое.
+     */
+    _syncSelectionMarks() {
+        try {
+            const body = this.bodyContainer || this.element;
+            if (body) {
+                const boxes = body.querySelectorAll('td.ui-cell-selection input.ui-select-mark');
+                for (const cb of boxes) {
+                    const tr = cb.closest ? cb.closest('tr') : null;
+                    if (!tr) continue;
+                    const idx = (tr._dtIndex !== undefined) ? tr._dtIndex : tr._dataIndex;
+                    if (idx === undefined || idx === null) continue;
+                    const on = !!(this._selectedRows && this._selectedRows.has(idx));
+                    if (cb.checked !== on) cb.checked = on;
+                }
+            }
+        } catch (e) {}
+    }
+
+    /** Перекрасить строки по текущему выделению. */
+    _paintSelection() {
+        try { this._syncSelectionMarks(); } catch (e) {}
+        // ЕСТЬ ОТМЕТКИ — ПОДСВЕТКИ НЕТ. Галочка уже говорит «строка выбрана», и
+        // второй способ сказать то же самое только отнимает цвет у того, что
+        // цветом и должно показываться: тона состояния документа (`rowTones`) и
+        // подсветка ТЕКУЩЕЙ строки.
+        if (this.selectionColumn) return;
+        try {
+            // Тело таблицы, а не первый попавшийся `tbody`: у списка ДВЕ таблицы —
+            // шапка с фиксированными заголовками и тело с прокруткой, — и
+            // `element.querySelector('tbody')` находит шапку. Строки при этом
+            // выделяются, но невидимо.
+            const bodyTable = this.tableElement || this.element;
+            const tbody = bodyTable && bodyTable.querySelector('tbody');
+            if (!tbody) return;
+            for (const tr of Array.from(tbody.children || [])) {
+                // Обычная таблица метит строку `_dataIndex`, список — `_dtIndex`
+                // (у него виртуальная прокрутка и свой счёт строк).
+                const i = (tr._dataIndex !== undefined) ? tr._dataIndex : tr._dtIndex;
+                const on = this._selectedRows && this._selectedRows.has(i);
+                tr.classList.toggle('ui-row-selected', !!on);
+            }
+        } catch (e) { /* таблица ещё не отрисована */ }
     }
 
     /** Данные текущей (активной) строки, либо `null`, если строка не выбрана/не загружена. */
@@ -11964,6 +13074,7 @@ class Table extends UIObject {
     // --- Extractable rendering helpers ---
     // Create header table and return { headerTable, hcolgroup, renderHeaderAdjust }
     buildHeader(headerContainer, getBcolgroup) {
+        this._ensureSelectionColumn();
         const headerTable = document.createElement('table');
         headerTable.style.width = '100%';
         headerTable.style.borderCollapse = 'separate';
@@ -12000,6 +13111,25 @@ class Table extends UIObject {
             th.style.borderBottom = '2px solid #808080';
             th.style.fontWeight = 'bold';
             th.style.textAlign = _isCbCol ? 'center' : 'left';
+
+            // Заголовок колонки отметок: ЗНАК вместо подписи. Ставится ПОСЛЕ общего
+            // оформления — иначе ячейка остаётся без рельефа и выпадает из ряда
+            // заголовков (ровно это и случилось: ветка стояла раньше стилей).
+            // Команда «выделить все» живёт на панели инструментов; вторая такая же
+            // кнопка здесь была бы двойником без подписи и в неожиданном месте.
+            if (col && col.__selection) {
+                th.style.padding = '2px';
+                try {
+                    const mimg = MySpace.icon.img('/apps/general_icons/resources/public/16x16/mark_column.png', 18);
+                    mimg.style.display = 'block';
+                    mimg.style.margin = '0 auto';
+                    mimg.style.verticalAlign = 'middle';
+                    th.appendChild(mimg);
+                } catch (e) {}
+                try { attachHoverTip(th, __t('Selection')); } catch (e) {}
+                htr.appendChild(th);
+                continue;
+            }
             th.style.cursor = 'pointer';
             th.style.userSelect = 'none';
             th.style.position = 'relative';
@@ -12026,7 +13156,7 @@ class Table extends UIObject {
                 const _tip = (_tipRaw && typeof _tipRaw === 'object' && _tipRaw.i18n)
                     ? (typeof __t === 'function' ? __t(_tipRaw.i18n) : _tipRaw.i18n)
                     : _tipRaw;
-                // Своя Win95-подсказка, а не атрибут `title`: нативную рисует браузер
+                // Своя ретро-подсказка, а не атрибут `title`: нативную рисует браузер
                 // мимо DOM — её не видно ни на скриншоте, ни в проверке, и появляется
                 // она с секундной задержкой. Ровно поэтому подсказку «не нашли».
                 if (_tip) attachHoverTip(th, _tip);
@@ -12436,6 +13566,58 @@ class Table extends UIObject {
     // чтобы код вне Draw (API фильтров) не падал до первой отрисовки.
     _updateFilterBar() {}
 
+    /**
+     * КОЛОНКА ОТМЕТОК — видимая часть выделения.
+     *
+     * Подсветка строки показывает выбор только пока смотришь на неё; отметка
+     * показывает его всегда и позволяет выбирать по одной, не держа Ctrl. Это не
+     * второй механизм рядом с подсветкой, а её ВИДИМАЯ ЧАСТЬ: состояние одно
+     * (`_selectedRows`), отображений два.
+     *
+     * ОБЪЯВЛЯЕТСЯ, А НЕ НАВЯЗЫВАЕТСЯ: `selectionColumn: true`. Отметки нужны там,
+     * где выбор и ЕСТЬ работа формы («Удаление помеченных объектов»,
+     * «Групповое проведение»). В журнале документов выбор — дополнительная
+     * возможность, а не смысл окна: там хватает Ctrl/Shift, а колонка галочек
+     * заняла бы место в каждой строке ради того, чем пользуются изредка.
+     *
+     * Вместе с колонкой включаются кнопки выделения на панели и счётчик в
+     * статусной строке: это одна и та же мысль — «здесь выбирают».
+     */
+    _ensureSelectionColumn() {
+        if (!this.multiSelect || !this.selectionColumn) return;
+        if (!Array.isArray(this.columns)) return;
+        const first = this.columns[0];
+        if (first && first.__selection) return;
+        this.columns = [{
+            __selection: true,
+            data: '__selection',
+            caption: '',
+            width: 32,
+            inputType: 'checkbox',
+            readOnly: false,
+            sortable: false
+        }].concat(this.columns.filter(c => !(c && c.__selection)));
+    }
+
+    /** Ячейка отметки: чекбокс, привязанный к выделению строки. */
+    _renderSelectionCell(td, container, rowIndex) {
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.className = 'ui-select-mark';
+        cb.checked = !!(this._selectedRows && this._selectedRows.has(rowIndex));
+        cb.addEventListener('click', (ev) => {
+            // Щелчок по отметке НЕ должен заодно переносить курсор и сбрасывать
+            // остальные отметки — он про одну строку.
+            ev.stopPropagation();
+        });
+        cb.addEventListener('change', () => {
+            try { this.toggleRowSelection(rowIndex); } catch (e) {}
+        });
+        container.appendChild(cb);
+        try { td.classList.add('ui-cell-selection'); } catch (e) {}
+        return td;
+    }
+
     renderCellElement(rowIndex, c, col, row) {
         const td = document.createElement('td');
         // Чекбокс-ячейка: симметричный маленький паддинг + центрирование, чтобы
@@ -12450,7 +13632,13 @@ class Table extends UIObject {
         // редакторов (календарь, выпадашка, спиннеры). Гасить их флагами по одному
         // пришлось бы у каждого типа контрола отдельно, и следующий тип снова про это
         // забудет; правило же одно: нельзя править — не показывай средства правки.
-        try { if (this.readOnly || (col && col.readOnly)) td.classList.add('ui-cell-readonly'); } catch (e) {}
+        try {
+            // Колонка отметок не «только для чтения» никогда: выбор строки — не
+            // правка её данных.
+            if (!(col && col.__selection) && (this.readOnly || (col && col.readOnly))) {
+                td.classList.add('ui-cell-readonly');
+            }
+        } catch (e) {}
 
         const cellContainer = document.createElement('div');
         cellContainer.style.width = '100%';
@@ -12468,6 +13656,10 @@ class Table extends UIObject {
             if (_cTip) attachHoverTip(td, _cTip);
         } catch (e) {}
         td.appendChild(cellContainer);
+
+        // Колонка отметок рисуется сама: она не поле данных, и обычный путь
+        // (контрол по `col.data`) для неё не подходит.
+        if (col && col.__selection) return this._renderSelectionCell(td, cellContainer, rowIndex);
 
         const cellKey = (this.dataKey ? (this.dataKey + '__r' + rowIndex + '__' + (col.data || c)) : ('table_' + Math.random().toString(36).slice(2)));
 
@@ -12723,7 +13915,7 @@ class Table extends UIObject {
                         }
 
                         // Set initial editable state based on active row, table-level readOnly and column-level readOnly.
-                        // В режиме 'cell-immediate' (непосредственное редактирование, как в 1С)
+                        // В режиме 'cell-immediate' (непосредственное редактирование, как в классических учётных системах)
                         // каждая строка редактируема без предварительной активации — кнопки
                         // ("...", "+", выпадашка) активны во всех строках, а не только в активной.
                         const isActive = (this.editMode === 'cell-immediate' || this._activeRowIndex === rowIndexLocal) && !this.readOnly && !colDef.readOnly;
@@ -12731,6 +13923,8 @@ class Table extends UIObject {
                         const applyReadonlyToElement = (node, makeReadOnly) => {
                             try {
                                 if (!node) return;
+                                // Отметка выбора не запирается: см. updateAllRowsReadOnly.
+                                if (node.classList && node.classList.contains('ui-select-mark')) return;
                                 // If node has an associated UI object with setReadOnly, try to call it
                                 if (node._uiObject && typeof node._uiObject.setReadOnly === 'function') {
                                     try { node._uiObject.setReadOnly(!isActive); } catch (e) {}
@@ -12806,6 +14000,53 @@ class Table extends UIObject {
             }
         } catch (e) {}
 
+        // ── ЗНАЧОК ПО ЗНАЧЕНИЮ ЯЧЕЙКИ ────────────────────────────────────────
+        //
+        // «Проведён / в очереди / ошибка» читается значком с одного взгляда, а
+        // словом — только прочтя его. Колонка объявляет соответствие
+        // «значение → иконка», и ядро ставит картинку перед содержимым ячейки:
+        //
+        //   { "data": "postingState", "valueIcons": { "posted": "…/posted.png", … } }
+        //
+        // Иконку собирает `MySpace.icon.img` — руками <img> не строить (ядро само
+        // выбирает файл нужного размера и добавляет srcset для HiDPI).
+        try {
+            const map = col && col.valueIcons;
+            if (map && typeof map === 'object') {
+                let raw = (row && Object.prototype.hasOwnProperty.call(row, col.data)) ? row[col.data] : null;
+                // ПЕРЕБИВАЮЩЕЕ ПОЛЕ: пометка на удаление старше состояния
+                // проведения — помеченный объект приговорён, и знать, был ли он
+                // проведён, в списке уже незачем.
+                const ov = col.iconOverride;
+                if (ov && ov.field && row && row[ov.field]) raw = ov.value;
+
+                const key = raw === null || raw === undefined ? '' : String(raw);
+                const ref = map[key];
+                // `iconOnly` — колонка без текста и без заголовка (первая колонка
+                // журнала). Текст убираем ДО вставки значка: ячейку уже наполнил
+                // общий рендер, и «notPosted» рядом со значком читалось бы как
+                // ошибка вёрстки.
+                if (col.iconOnly) {
+                    try {
+                        cellContainer.textContent = '';
+                        cellContainer.style.justifyContent = 'center';
+                    } catch (e) {}
+                }
+                if (ref && window.MySpace && MySpace.icon && typeof MySpace.icon.img === 'function') {
+                    const img = MySpace.icon.img(ref, 16);
+                    img.style.flex = '0 0 auto';
+                    if (!col.iconOnly) img.style.marginRight = '4px';
+                    // Значок узнают не с первого дня — подсказка при наведении.
+                    try {
+                        const titles = col.iconTitles || null;
+                        const t = titles && titles[key];
+                        if (t) img.title = (typeof t === 'string') ? t : (t.caption || t.text || '');
+                    } catch (e) {}
+                    cellContainer.insertBefore(img, cellContainer.firstChild);
+                }
+            }
+        } catch (e) { /* значок — украшение, без него ячейка остаётся читаемой */ }
+
         return td;
     }
 
@@ -12821,6 +14062,11 @@ class Table extends UIObject {
         if (this._activeRowIndex === rowIndex && this.highlightActiveRow !== false) {
             try { tr.classList.add('active'); } catch (e) {}
         }
+        // Выделение переживает перерисовку (прокрутка, фильтр, refresh списка):
+        // иначе выделил двадцать строк, прокрутил — и половина «развыделилась».
+        if (this._selectedRows && this._selectedRows.has(rowIndex) && !this.selectionColumn) {
+            try { tr.classList.add('ui-row-selected'); } catch (e) {}
+        }
         // Make rows focusable so keyboard users can select them
         try { tr.tabIndex = 0; } catch (e) {}
 
@@ -12829,6 +14075,22 @@ class Table extends UIObject {
             try {
                 const prevActive = this._activeRowIndex;
                 const clickedRow = rowIndex;
+
+                // Выделение нескольких строк: Ctrl — добавить/убрать, Shift —
+                // интервал. Идёт ДО активации: активная строка при этом всё равно
+                // переезжает на нажатую, но выделение не должно зависеть от того,
+                // была ли она активна раньше.
+                if (this.multiSelect) {
+                    this._applySelection(clickedRow, { ctrl: ev.ctrlKey || ev.metaKey, shift: ev.shiftKey });
+                    // С зажатым модификатором пользователь ВЫДЕЛЯЕТ, а не правит:
+                    // фокусировать редактор ячейки в этот момент — значит открыть
+                    // выпадашку на каждый Ctrl-клик.
+                    if (ev.ctrlKey || ev.metaKey || ev.shiftKey) {
+                        if (this._activeRowIndex !== clickedRow) this.activateRow(clickedRow);
+                        try { ev.preventDefault(); } catch (e) {}
+                        return;
+                    }
+                }
 
                 // If click target is inside a td, find nearest td
                 const td = ev.target && ev.target.closest ? ev.target.closest('td') : null;
@@ -13036,8 +14298,18 @@ class Table extends UIObject {
      * не примет. Зовётся, когда документ провели в уже открытом окне.
      */
     setLocked(locked) {
-        this.locked = !!locked;
+        const next = !!locked;
+        // Отпирание возвращает прежнюю редактируемость, а не «редактируема» вообще:
+        // табличная часть могла быть `readOnly` по лейауту, и временный замок
+        // (документ проводится) не вправе это отменить. До появления временного
+        // замка вопрос не стоял — постоянный назад не открывается.
+        if (next && !this.locked) this._preLockReadOnly = this.readOnly;
+        this.locked = next;
         if (this.locked) this.readOnly = true;
+        else if (this._preLockReadOnly !== undefined) {
+            this.readOnly = this._preLockReadOnly;
+            this._preLockReadOnly = undefined;
+        }
         try {
             const btns = this._toolbarButtons || {};
             for (const action of ['recordAdd', 'recordDelete']) {
@@ -13063,6 +14335,11 @@ class Table extends UIObject {
                 const interactives = tr.querySelectorAll('input,textarea,select,button');
                 for (let i = 0; i < interactives.length; i++) {
                     const el = interactives[i];
+                    // ОТМЕТКА ВЫБОРА живёт своей жизнью: «только чтение» относится к
+                    // ДАННЫМ строки, а выбрать строку в нередактируемом списке —
+                    // обычное дело (журнал, обработка). Гасить её здесь значило бы
+                    // отдать выбор одной только мыши с Ctrl.
+                    if (el.classList && el.classList.contains('ui-select-mark')) continue;
                     // Skip elements inside column-readOnly cells — they must stay readonly regardless of row state
                     if (el.closest && el.closest('[data-col-readonly]')) continue;
                     try {
@@ -13092,6 +14369,7 @@ class Table extends UIObject {
     }
 
     buildBody(bodyContainer, rows) {
+        this._ensureSelectionColumn();
         const bodyTable = document.createElement('table');
         bodyTable.style.width = '100%';
         bodyTable.style.borderCollapse = 'collapse';
@@ -13194,11 +14472,11 @@ class Table extends UIObject {
     }
 
     // ── Подвал таблицы ───────────────────────────────────────────────────
-    // Сделан по фактическому устройству подвала в 1С (проверено по источникам
+    // Сделан по фактическому устройству подвала в учётных системах (проверено по источникам
     // и скриншоту, а НЕ по памяти — первая редакция была выдумана «по мотивам»
     // и переделывалась целиком, см. ИНСТРУКЦИИ_ДЛЯ_AI.md, «Сначала посмотри»).
     //
-    // Как в 1С:
+    // Как в классических учётных системах:
     //   · подписи «Итого» НЕТ — значение стоит в своей колонке и больше нигде;
     //   · выравнивание в подвале — отдельное свойство, по умолчанию ЛЕВОЕ,
     //     даже если данные колонки прижаты вправо;
@@ -13274,7 +14552,7 @@ class Table extends UIObject {
         const tbody = this._totalsBody;
         if (!tbody) return;
         // Итог считается по ВИДИМЫМ строкам: если включён отбор, значение
-        // обязано меняться вместе с ним (в 1С именно так). Явно переданный
+        // обязано меняться вместе с ним (в учётных системах именно так). Явно переданный
         // массив имеет приоритет — его передают точки, которые уже знают
         // актуальный набор строк.
         const data = Array.isArray(rows) ? rows : this._visibleRowsForTotals();
@@ -13285,7 +14563,7 @@ class Table extends UIObject {
             const col = this.columns[i] || {};
             const td = document.createElement('td');
             // Оформление ячейки подвала — ОДИН В ОДИН с ячейкой шапки (см.
-            // buildHeader): в 1С шапка и подвал визуально идентичны. Любое
+            // buildHeader): в учётных системах шапка и подвал визуально идентичны. Любое
             // расхождение — фон, рамка, начертание — читается как чужеродная
             // полоска под таблицей. Если меняешь стиль шапки, меняй и здесь.
             const _isCbCol = !!(col && (col.inputType === 'checkbox' || col.type === 'checkbox'));
@@ -13318,7 +14596,7 @@ class Table extends UIObject {
                     td.textContent = Number(val).toFixed(dec);
                 }
             }
-            // Никакой автоматической подписи «Итого»: в 1С её нет, значение
+            // Никакой автоматической подписи «Итого»: в учётных системах её нет, значение
             // стоит только в своей колонке.
             tr.appendChild(td);
         }
@@ -13362,10 +14640,13 @@ class Table extends UIObject {
                     const rows = this.data_getRows ? this.data_getRows(this.dataKey) : [];
                     const row = Array.isArray(rows) ? rows[rowIndex] : null;
                     if (row && (row.UID !== undefined && row.UID !== null)) {
-                        // Не наследуем tableName родительской формы если эта таблица является
-                        // табличной секцией (_dataMap[dataKey].tabularSection === true) —
-                        // в этом случае у таблицы нет своего независимого типа записи.
-                        let tableName = this.tableName || '';
+                        // СТРОКА МОЖЕТ НАЗВАТЬ СВОЙ ОБЪЕКТ САМА — служебное поле
+                        // `__table`. Разнородный список (кто ссылается на объект,
+                        // движения документа, результат поиска по всей базе) состоит
+                        // из записей РАЗНЫХ таблиц, и одного имени таблицы на весь
+                        // список для него не существует. Обычный список поля не
+                        // несёт и работает как раньше.
+                        let tableName = (row.__table || '') || this.tableName || '';
                         if (!tableName) {
                             const isTabularSection = !!(
                                 this.dataKey &&
@@ -13442,10 +14723,82 @@ class Table extends UIObject {
             if (this.highlightActiveRow === false) wrapper.classList.add('ui-table-no-row-highlight');
             wrapper.style.position = 'relative';
             wrapper.style.width = '100%';
-            wrapper.style.height = '100%';
+            // ВЫСОТА — ДОЛЯ ОСТАВШЕГОСЯ, а не «сто процентов родителя».
+            //
+            // `height: 100%` брало всю высоту области содержимого формы, не
+            // считаясь с соседями: командная панель формы сверху, пометки,
+            // строка итога снизу. Итог — таблица ровно на их высоту выше места,
+            // и у КАЖДОЙ формы со списком появлялась полоса прокрутки, хотя
+            // прокручивать нечего. Область содержимого — флекс-колонка, поэтому
+            // правильная запись здесь одна: занять остаток и уметь сжиматься
+            // (`min-height: 0` — без него флекс-элемент не сжимается ниже
+            // содержимого и полоса возвращается).
+            wrapper.style.flex = '1 1 auto';
+            wrapper.style.minHeight = '0';
+            wrapper.style.height = 'auto';
             wrapper.style.boxSizing = 'border-box';
             wrapper.style.display = 'flex';
             wrapper.style.flexDirection = 'column';
+
+            // ПОДПИСЬ ТАБЛИЦЫ. `setCaption` существовал давно и искал в разметке
+            // элемент `.table-caption`, которого НИКТО не создавал: подпись,
+            // объявленная в лейауте, молча никуда не попадала. Нужна она там, где
+            // таблиц на форме больше одной, — иначе непонятно, что в какой.
+            if (this.caption) {
+                const capEl = document.createElement('div');
+                capEl.className = 'table-caption';
+                capEl.textContent = (typeof this.caption === 'object')
+                    ? (this.caption.text || '') : String(this.caption);
+                capEl.style.flex = '0 0 auto';
+                capEl.style.padding = '2px 0 3px 2px';
+                capEl.style.fontWeight = 'bold';
+                capEl.style.userSelect = 'none';
+                wrapper.appendChild(capEl);
+            }
+
+            // СТАТУСНАЯ СТРОКА — ПОД таблицей, а не на панели инструментов.
+            //
+            // Панель инструментов — это КОМАНДЫ; текст между кнопками сбивает их
+            // ряд и читается как подпись к соседней кнопке. Состояние показывают
+            // внизу: так устроены и списки учётных систем, и файловые менеджеры,
+            // и там же потом встанут итоги по колонкам.
+            //
+            // Создаётся ДО тела: `wrapper` наполняется по порядку, и строка,
+            // добавленная после, оказалась бы под полосой прокрутки.
+            this._statusBarEl = null;
+            if (this.multiSelect && this.selectionColumn) {
+                const sb = document.createElement('div');
+                sb.className = 'ui-table-statusbar';
+                this._statusBarEl = sb;
+                this._selCountEl = document.createElement('span');
+                this._selCountEl.className = 'ui-table-selcount';
+                sb.appendChild(this._selCountEl);
+            }
+
+            // ПРОБЕЛ переключает выделение текущей строки — у ЛЮБОЙ таблицы с
+            // множественным выбором, а не только у журнала: динамический список и
+            // статическая таблица различаются способом получения данных, а не
+            // способом выбирать строки. Слушатель на корне таблицы, чтобы не
+            // мешать пробелу в полях ввода других контролов формы.
+            try {
+                if (this.multiSelect && !this._spaceKeyAttached) {
+                    this._spaceKeyAttached = true;
+                    const selfT = this;
+                    wrapper.setAttribute('tabindex', wrapper.getAttribute('tabindex') || '0');
+                    wrapper.addEventListener('keydown', (e) => {
+                        if (e.key !== ' ' && e.code !== 'Space') return;
+                        // Внутри поля ввода пробел — это пробел.
+                        const t = e.target;
+                        if (t && /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName || '')
+                            && !(t.type === 'checkbox' || t.readOnly || t.disabled)) return;
+                        const cur = selfT.currentRowIndex;
+                        if (cur === undefined || cur === null || cur < 0) return;
+                        e.preventDefault();
+                        e.stopPropagation();
+                        try { selfT.toggleRowSelection(cur); } catch (err) {}
+                    });
+                }
+            } catch (e) {}
 
             // Определяем: является ли таблица табличной частью
             try {
@@ -13478,13 +14831,24 @@ class Table extends UIObject {
                     // он принимает за неё, открывает настройки фильтров).
                     { action: 'listRefresh',  caption: __t('Refresh'),  icon: '/apps/general_icons/resources/public/16x16/refresh.png', dynamicOnly: true },
                     { action: 'listSettings', caption: __t('Settings'), icon: '/apps/general_icons/resources/public/16x16/settings.png' },
-                    { action: 'recordDelete', caption: __t('Delete'),   icon: '/apps/general_icons/resources/public/16x16/delete.png' }
+                    { action: 'recordDelete', caption: __t('Delete'),   icon: '/apps/general_icons/resources/public/16x16/delete.png' },
+                    // ── Выделение: три кнопки, и они ОБЯЗАТЕЛЬНЫ у любой таблицы
+                    // с множественным выбором. Выделение мышью с Ctrl умеет не
+                    // каждый, а «отметить всё, кроме двух» без «инвертировать»
+                    // превращается в двадцать щелчков.
+                    { action: 'selectAll',    caption: __t('Select all'),        icon: '/apps/general_icons/resources/public/16x16/select_all.png',    multiOnly: true },
+                    { action: 'selectNone',   caption: __t('Clear selection'),   icon: '/apps/general_icons/resources/public/16x16/select_none.png',   multiOnly: true },
+                    { action: 'selectInvert', caption: __t('Invert selection'),  icon: '/apps/general_icons/resources/public/16x16/select_invert.png', multiOnly: true }
                 ];
 
                 for (const btnDef of toolbarButtons) {
                     if (btnDef.selectModeOnly && !isSelectMode) continue;
                     if (btnDef.hideInSelectMode && isSelectMode) continue;
                     if (btnDef.dynamicOnly && typeof this.refresh !== 'function') continue;
+                    // Кнопки выделения — только у таблиц, где выбор объявлен
+                    // работой (`selectionColumn`). В журнале они были бы тремя
+                    // кнопками для того, что там делают Ctrl и Shift.
+                    if (btnDef.multiOnly && !(this.multiSelect && this.selectionColumn)) continue;
                     if (hiddenButtons.includes(btnDef.action)) continue;
                     // Запертая таблица (ТЧ проведённого документа) не предлагает
                     // того, чего не сделает: строку нельзя ни добавить, ни удалить.
@@ -13497,6 +14861,9 @@ class Table extends UIObject {
                     // (документ провели в открытом окне) её надо убрать.
                     try { (this._toolbarButtons || (this._toolbarButtons = {}))[btnDef.action] = btn; } catch (e) {}
                     btn.onClick = () => {
+                        if (action === 'selectAll')    { try { self.selectAll(); } catch (e) {} return; }
+                        if (action === 'selectNone')   { try { self.clearSelection(); } catch (e) {} return; }
+                        if (action === 'selectInvert') { try { self.invertSelection(); } catch (e) {} return; }
                         // Кнопка "Настройки": передаём себя как tableInstance чтобы listSettings
                         // мог читать/писать фильтры напрямую на экземпляре таблицы
                         if (action === 'listSettings') {
@@ -13621,6 +14988,9 @@ class Table extends UIObject {
             }
             bodyContainer.style.flex = '1 1 auto';
             wrapper.appendChild(bodyContainer);
+            // Статусная строка — ПОСЛЕ тела: она стоит под таблицей, как в
+            // списках учётных систем и файловых менеджерах.
+            if (this._statusBarEl) wrapper.appendChild(this._statusBarEl);
 
             // Build header and body using extractable helpers so DynamicTable can override
             // We'll provide a getter to allow header resize handler to access the body colgroup
@@ -13643,7 +15013,7 @@ class Table extends UIObject {
             this._dtBodyTable = bodyTable;
 
             // Подвал таблицы (итоги по колонкам) — ЗАКРЕПЛЁННЫЙ блок под телом,
-            // как в 1С: строки прокручиваются, подвал остаётся на месте.
+            // как в классических учётных системах: строки прокручиваются, подвал остаётся на месте.
             // Создаётся только если хоть у одной колонки задан итог или своя
             // подпись подвала — иначе таблица выглядит как раньше.
             this._totalsBody = null;
@@ -13657,7 +15027,7 @@ class Table extends UIObject {
                 footerContainer.style.flex = '0 0 auto';
                 footerContainer.style.width = '100%';
                 footerContainer.style.boxSizing = 'border-box';
-                // Контейнер оформляется как контейнер ШАПКИ: в 1С шапка и подвал
+                // Контейнер оформляется как контейнер ШАПКИ: в учётных системах шапка и подвал
                 // визуально идентичны, и отличие сразу читается как чужеродная
                 // полоска. Рамок у контейнера нет — объём дают сами ячейки.
                 footerContainer.style.position = 'relative';
@@ -13699,6 +15069,71 @@ class Table extends UIObject {
             // ширин, чтобы учесть резерв под вертикальный скроллбар).
             this._adjustHeaderForScrollbar = adjustHeaderForScrollbar;
 
+            /**
+             * ОБЪЯВЛЕННЫЕ СТРОКИ — ЭТО ЖЕЛАЕМАЯ ДОЛЯ ВЫСОТЫ, А НЕ ЖЁСТКИЙ ПОЛ.
+             *
+             * ПРАВИЛО ОДНО, И ИМ УПРАВЛЯЕТ ЛЕЙАУТ:
+             *   · строки ОБЪЯВЛЕНЫ (`visibleRows`) — столько и показываем, пока
+             *     есть место: не растёт, но уступает до пола;
+             *   · строки НЕ объявлены — таблица занимает ОСТАТОК формы (базис
+             *     ноль, не `auto`), тоже не меньше пола.
+             *
+             * Пол — три строки; когда в него упёрлись все, форма прокручивается.
+             *
+             * Так автор формы решает, кто на ней главный: список, ради которого
+             * окно открыли, строк не объявляет и получает всё свободное место, а
+             * вспомогательный получает ровно столько, сколько попросил. Раньше
+             * росли обе, и таблица с тремя строками данных занимала пол-экрана,
+             * пока соседняя с шестьюдесятью была обрезана.
+             *
+             * `min-height` — не объявление, а абсолютный пол в ТРИ строки: ниже
+             * него таблица перестаёт быть таблицей (одна строка под курсором и
+             * ничего вокруг — это уже не список), и вот тогда прокрутка формы
+             * честна: бывают экраны, на которых без неё не обойтись, и сжимать
+             * содержимое в ноль ради её отсутствия — хуже, чем прокрутить. Жёсткий пол ПО ОБЪЯВЛЕНИЮ здесь уже стоял и на экране
+             * ноутбука дал ровно то, от чего уходили: прокрутку формы при живом
+             * запасе пустоты внутри таблиц.
+             *
+             * Высота панели и шапки берётся по факту: у таблицы без панели она
+             * другая, и константа тут врала бы.
+             */
+            this._applyDeclaredHeight = () => {
+                try {
+                    const w = this.element;
+                    if (!w) return;
+                    let chrome = 0;
+                    for (const el of Array.from(w.children || [])) {
+                        if (el === bodyContainer) continue;
+                        chrome += el.offsetHeight || 0;
+                    }
+                    const FLOOR_ROWS = 3;
+                    const floorPx = chrome + Math.min(FLOOR_ROWS, this.declaredRows || FLOOR_ROWS) * this.rowHeight + 4;
+                    if (this.declaredRows && this.declaredRows > 0) {
+                        // ОБЪЯВЛЕНО — СТОЛЬКО И ПОКАЗЫВАЕМ, ПОКА ЕСТЬ МЕСТО.
+                        // Не растёт (иначе таблица с тремя строками данных
+                        // занимает пол-экрана), но УСТУПАЕТ до пола, когда экран
+                        // маленький: на ноутбуке 725×585 верхняя таблица держала
+                        // все восемь строк, нижняя лежала на полу, и форма всё
+                        // равно прокручивалась.
+                        w.style.flex = '0 1 auto';
+                        w.style.height = (chrome + this.declaredRows * this.rowHeight + 4) + 'px';
+                        w.style.minHeight = floorPx + 'px';
+                        bodyContainer.style.minHeight = (Math.min(FLOOR_ROWS, this.declaredRows) * this.rowHeight) + 'px';
+                    } else {
+                        // НЕ ОБЪЯВЛЕНО — таблица берёт ОСТАТОК формы. Базис ноль, а
+                        // не `auto`: с `auto` она просит высоту по содержимому
+                        // (шестьдесят строк — тысячи точек), флекс считает, что
+                        // места не хватает, и отбирает его у соседки, которая своё
+                        // объявила. Ноль означает «мне причитается только то, что
+                        // осталось» — и нехватка ложится на того, кто просил много.
+                        w.style.flex = '1 1 0';
+                        w.style.height = 'auto';
+                        w.style.minHeight = floorPx + 'px';
+                        bodyContainer.style.minHeight = (FLOOR_ROWS * this.rowHeight) + 'px';
+                    }
+                } catch (e) {}
+            };
+
             bodyContainer.addEventListener('scroll', () => {
                 headerContainer.scrollLeft = bodyContainer.scrollLeft;
                 // Подвал прокручивается по горизонтали синхронно с телом и
@@ -13711,9 +15146,15 @@ class Table extends UIObject {
             try { 
                 // Call after layout to ensure scrollbar presence is measured correctly
                 if (window.requestAnimationFrame) {
-                    window.requestAnimationFrame(adjustHeaderForScrollbar);
+                    window.requestAnimationFrame(() => {
+                        adjustHeaderForScrollbar();
+                        this._applyDeclaredHeight();
+                    });
                 }
-                setTimeout(adjustHeaderForScrollbar, 0);
+                setTimeout(() => {
+                    adjustHeaderForScrollbar();
+                    this._applyDeclaredHeight();
+                }, 0);
             } catch (e) {}
 
             // Save references
@@ -13727,7 +15168,7 @@ class Table extends UIObject {
             try {
                 // make wrapper focusable to receive key events
                 try { this.element.tabIndex = 0; } catch (e) {}
-                this._anchorRow = null; // for shift-selection
+                // Точка опоры объявлена в конструкторе (одно состояние на таблицу).
                 this.element.addEventListener('keydown', (ev) => {
                     try {
                         if (this.editMode !== 'row-activate') return;
@@ -13806,19 +15247,13 @@ class Table extends UIObject {
                             // focus row element so further keyboard events target table
                             try { const tr = rows[idx]; if (tr) tr.focus(); } catch (e) {}
                             // update selection range UI when shift is held
+                            // Клавиатурное выделение идёт через ТОТ ЖЕ набор, что и
+                            // мышь. Раньше здесь вешался класс `range-selected`, для
+                            // которого не было ни стиля, ни читателя: выделение
+                            // существовало и было невидимо и недоступно.
                             try {
-                                if (this._anchorRow !== null && shift) {
-                                    const a = this._anchorRow;
-                                    const b = idx;
-                                    const start = Math.min(a,b);
-                                    const end = Math.max(a,b);
-                                    for (let i = 0; i < rows.length; i++) {
-                                        try { if (i >= start && i <= end) rows[i].classList.add('range-selected'); else rows[i].classList.remove('range-selected'); } catch (e) {}
-                                    }
-                                } else {
-                                    // clear any previous range selections
-                                    for (let i = 0; i < rows.length; i++) try { rows[i].classList.remove('range-selected'); } catch (e) {}
-                                }
+                                if (shift) this._applySelection(idx, { shift: true });
+                                else if (this.multiSelect) this._applySelection(idx, {});
                             } catch (e) {}
                         }
                     } catch (e) {}
@@ -14540,15 +15975,7 @@ class Calendar extends UIObject {
         if (!this._selectedId) { if (typeof showAlert === 'function') showAlert(__t('Please select a record to delete')); return; }
         const self = this;
         const id = this._selectedId;
-        if (typeof window.showConfirm === 'function') {
-            window.showConfirm(__t('Are you sure you want to delete this record?'), async () => {
-                try {
-                    const result = await callServerMethod('uniForm', 'deleteRecord', { tableName: self.tableName, recordId: id });
-                    if (result && result.ok) { self._selectedId = null; self._load({}); }
-                    else if (typeof showAlert === 'function') showAlert(__t('Delete error: ') + ((result && result.error) || __t('unknown error')));
-                } catch (e) { console.error('[Calendar] delete error:', e); }
-            });
-        }
+        deleteOrMarkRecord(self.tableName, id, () => { self._selectedId = null; self._load({}); });
     }
 
     _goToday() {
@@ -16223,14 +17650,172 @@ class InfoLine extends UIObject {
     }
 }
 
+/**
+ * Блок состояния проведения — элемент ЯДРА (`type: "postingQueueLine"`).
+ *
+ * Живёт под командной панелью любого проводимого документа и отвечает на два
+ * вопроса, которые человек задаёт документу в первую секунду: «что с ним сейчас»
+ * и «почему не получилось». Обе строки в ОДНОЙ группе намеренно (решение
+ * владельца 22.09.2026): это один сюжет, и разносить его по разным углам формы
+ * значит заставлять искать вторую половину.
+ *
+ *   ┌──────────────────────────────────────────────────────────────┐
+ *   │ ⏳ Документ в очереди на проведение     [Снять с очереди]     │  ← жёлтая
+ *   │ ✖  Не удалось провести документ по причине: сумма равна нулю │  ← красная
+ *   └──────────────────────────────────────────────────────────────┘
+ *
+ * Две адресации, и они разные СОЗНАТЕЛЬНО (решение владельца 22.09.2026):
+ *   - ПУШ-уведомление об ошибке получает только тот, кто поставил документ в
+ *     очередь: это ответ на его действие, и рассылать его остальным незачем;
+ *   - ПОМЕТКУ НА ФОРМЕ видит каждый, кто открыл документ. Иначе коллега видит
+ *     состояние «не проведён» без единого слова почему — и идёт спрашивать.
+ *
+ * Строка очереди не запирается замком проведения: она и существует только на
+ * время, пока форма заперта, и запереть её значило бы оставить документ в
+ * очереди без выхода.
+ */
+class PostingStatusBlock extends UIObject {
+    constructor(parentElement = null, properties = {}) {
+        super();
+        this.parentElement = parentElement;
+        this.props = properties || {};
+        this.phase = null;
+        this.action = null;
+        this.reason = '';
+    }
+
+    /** Кому звать команду снятия. Ставит форма при создании. */
+    setForm(form) { this.form = form; return this; }
+
+    /**
+     * Состояние очереди.
+     * @param {string|null} phase  — `'queued'` | `'posting'` | `null` (строки нет)
+     * @param {string|null} action — `'post'` | `'unpost'`
+     */
+    update(phase, action) {
+        this.phase = phase || null;
+        if (action) this.action = action;
+        this._render();
+    }
+
+    /** Причина неудачи. Пустая строка убирает красную строку. */
+    setReason(text) {
+        this.reason = text ? String(text) : '';
+        this._render();
+    }
+
+    _render() {
+        if (!this.element) return;
+        const unpost = this.action === 'unpost';
+        const running = this.phase === 'posting';
+
+        if (this.phase) {
+            this._queueRow.style.display = '';
+            this._queueText.textContent = running
+                ? (unpost ? __t('The posting is being undone right now')
+                          : __t('The document is being posted right now'))
+                : (unpost ? __t('The document is queued for unposting')
+                          : __t('The document is queued for posting'));
+            // Взятую в работу задачу снять нельзя: транзакция проведения либо
+            // ляжет целиком, либо откатится сама, и выдернуть её на полпути
+            // было бы обманом — кнопку гасим, а не прячем, чтобы не прыгала.
+            if (this._btn && typeof this._btn.setEnabled === 'function') {
+                try { this._btn.setEnabled(!running); } catch (e) {}
+            }
+        } else {
+            this._queueRow.style.display = 'none';
+        }
+
+        if (this.reason) {
+            this._errorRow.style.display = '';
+            // На форме — ОДНА короткая фраза, а не сам текст ошибки. Причина
+            // бывает в десятки строк (ответ внешнего сервиса, текст
+            // исключения), и, развёрнутая в шапке, она отодвинула бы вниз сам
+            // документ — пользователь пришёл смотреть документ, а не ошибку.
+            // Полный текст открывается кнопкой, в диалоге просмотра.
+            this._errorText.textContent = unpost
+                ? __t('The posting could not be undone')
+                : __t('The document could not be posted');
+        } else {
+            this._errorRow.style.display = 'none';
+        }
+
+        // Пустой блок не занимает места и не рисует рамку: у документа, с которым
+        // всё в порядке, в шапке не должно быть ничего.
+        this.element.style.display = (this.phase || this.reason) ? '' : 'none';
+    }
+
+    Draw(container) {
+        const box = document.createElement('div');
+        box.className = 'ui-posting-status';
+        box._uiObject = this;
+        box.style.display = 'none';
+
+        // ── строка очереди ──────────────────────────────────────────────────
+        const q = document.createElement('div');
+        q.className = 'ui-related-links ui-posting-status-queue';
+        q.style.display = 'none';
+        try { q.appendChild(MySpace.icon.img('/apps/general_icons/resources/public/16x16/queued.png', 16)); } catch (e) {}
+        const qt = document.createElement('span');
+        qt.className = 'ui-related-links-caption';
+        q.appendChild(qt);
+        // Кнопка — обычная `Button`, а не самодельный `<button>`: иначе она не
+        // получит ретро-рельеф и будет чужой на своей же форме.
+        try {
+            const btn = new Button(q);
+            btn.setCaption(__t('Remove from queue'));
+            btn.setIcon('/apps/general_icons/resources/public/16x16/unpost.png');
+            btn.Draw(q);
+            btn.onClick = () => {
+                if (!this.form) return;
+                try { this.form.runDocumentCommand('cancelQueue', false); } catch (e) {}
+            };
+            this._btn = btn;
+        } catch (e) {
+            console.error('[postingStatus] кнопка не построена:', e);
+        }
+        box.appendChild(q);
+        this._queueRow = q; this._queueText = qt;
+
+        // ── строка причины ──────────────────────────────────────────────────
+        const r = document.createElement('div');
+        r.className = 'ui-related-links ui-posting-status-error';
+        r.style.display = 'none';
+        try { r.appendChild(MySpace.icon.img('/apps/general_icons/resources/public/16x16/post_error.png', 16)); } catch (e) {}
+        const rt = document.createElement('span');
+        rt.className = 'ui-related-links-caption ui-posting-status-label';
+        r.appendChild(rt);
+        try {
+            const why = new Button(r);
+            why.setCaption(__t('Show reason'));
+            why.setIcon('/apps/general_icons/resources/public/16x16/post_error.png');
+            why.Draw(r);
+            why.onClick = () => {
+                if (!this.reason) return;
+                try { showTextView(__t('Why the posting failed'), this.reason); } catch (e) {}
+            };
+            this._whyBtn = why;
+        } catch (e) {
+            console.error('[postingStatus] кнопка причины не построена:', e);
+        }
+        box.appendChild(r);
+        this._errorRow = r; this._errorText = rt;
+
+        this.element = box;
+        const host = container || this.parentElement;
+        if (host && host.appendChild) host.appendChild(box);
+        return box;
+    }
+}
+
 class DynamicTable extends Table {
     constructor(options = {}) {
-        super(null, { columns: options.fields || options.columns || [], rowHeight: options.rowHeight, appForm: options.appForm, dataKey: options.dataKey || options.data || options.tableName, readOnly: options.readOnly !== false, locked: !!options.locked, showToolbar: options.showToolbar, hiddenButtons: options.hiddenButtons });
+        super(null, { columns: options.fields || options.columns || [], rowHeight: options.rowHeight, appForm: options.appForm, dataKey: options.dataKey || options.data || options.tableName, readOnly: options.readOnly !== false, locked: !!options.locked, showToolbar: options.showToolbar, hiddenButtons: options.hiddenButtons, initialFilter: options.initialFilter });
 
         this.appName = options.appName || '';
         this.tableName = options.tableName || '';
         this.bufferRows = 10;
-        // Список сам ведёт текущую строку (как список 1С: первая строка активна сразу).
+        // Список сам ведёт текущую строку (как список учётной системы: первая строка активна сразу).
         // Включается там, где выбор — часть работы с формой (relatedList), а не там,
         // где активная строка означала бы «редактируем эту».
         this.autoActivateFirstRow = !!options.autoActivateFirstRow;
@@ -16239,7 +17824,7 @@ class DynamicTable extends Table {
         // `saveOnEdit` предназначен ТОЛЬКО для списка САМОСТОЯТЕЛЬНЫХ записей — таких,
         // которые живут независимо от открытой формы (журнал резервных копий,
         // справочник в отдельном окне). У такого списка своей кнопки «Сохранить» нет и
-        // быть не должно, как и в списках 1С: правка ячейки есть правка записи.
+        // быть не должно, как и в списках учётных систем: правка ячейки есть правка записи.
         //
         // ТАБЛИЧНОЙ ЧАСТИ ДОКУМЕНТА это включать НЕЛЬЗЯ. Строки ТЧ принадлежат самому
         // документу, их судьбу решают «Сохранить»/«Отмена» формы, и мгновенная запись
@@ -16255,6 +17840,11 @@ class DynamicTable extends Table {
         // прикладной код читает `editable` как false у заведомо редактируемой таблицы.
         if (options.editMode) this.editMode = options.editMode;
         if (options.editable !== undefined) this.editable = !!options.editable;
+        // Выделение нескольких строк — по той же причине здесь, а не в super:
+        // базовый конструктор получает лишь часть опций, и список, которому
+        // выделение включили в лейауте, молча оставался бы с одной строкой.
+        if (options.multiSelect !== undefined) this.multiSelect = options.multiSelect === true;
+        if (options.selectionColumn !== undefined) this.selectionColumn = options.selectionColumn === true;
         // Явный выбор видимых колонок (имена полей модели) — сервер отдаст только их.
         this.serverFields = Array.isArray(options.serverFields) ? options.serverFields : null;
         // Точечные правки колонок из ЛЕЙАУТА: { имяПоля: { showTime, width, caption, properties } }.
@@ -16274,7 +17864,13 @@ class DynamicTable extends Table {
         this.fields = [];
         this.dataCache = {};
         this.currentSort = options.initialSort || [];
-        this.currentFilters = options.initialFilter || [];
+        // Отбор уже разобран базовым конструктором (Table): он приводит записи к
+        // полному виду (operator/type/visibility/enabled). Присваивание сырого
+        // массива поверх этого затирало разбор — и объявленный в лейауте отбор
+        // молча не применялся.
+        if (!Array.isArray(this.currentFilters) || !this.currentFilters.length) {
+            this.currentFilters = Array.isArray(options.initialFilter) ? options.initialFilter : [];
+        }
         this.isLoading = false;
         this.dataLoaded = false;
         this.visibleRows = 20;
@@ -16298,6 +17894,49 @@ class DynamicTable extends Table {
         const el = (function(self, cnt) {
             try { return Table.prototype.Draw.call(self, cnt); } catch (e) { return null; }
         })(this, container);
+
+        // КЛАВИША DELETE В ЖУРНАЛЕ. Раньше её не было вовсе: удалить строку можно
+        // было только кнопкой панели, и «Del не работает» было чистой правдой —
+        // обработчика не существовало.
+        //
+        //   Del        — обычное удаление (у сущности это пометка; если доступны
+        //                оба способа, программа спросит, какой);
+        //   Shift+Del  — удалить сразу, минуя вопрос о способе. Сам факт удаления
+        //                всё равно переспрашивается: необратимое действие не
+        //                делается по одному нажатию.
+        //
+        // Слушатель на КОРНЕ таблицы, а не на документе: на форме документа есть
+        // ещё табличные части, и Del в них означает совсем другое — убрать строку
+        // из документа, а не удалить объект из базы.
+        try {
+            if (el && !this._delKeyAttached) {
+                this._delKeyAttached = true;
+                const self = this;
+                el.addEventListener('keydown', (e) => {
+                    if (e.key !== 'Delete') return;
+                    // Только ЖУРНАЛ: редактируемая таблица удаляет свою строку сама.
+                    if (!self.readOnly || !self.tableName) return;
+                    // Текущая строка у таблицы — `currentRow` (так её читает и
+                    // прикладной код, напр. форма восстановления копии). Метода
+                    // `getCurrentRow` у таблицы нет — он есть у ФОРМЫ, и берётся
+                    // запасным путём: у встроенного списка своя активная строка,
+                    // у формы — своя, и они не обязаны совпадать.
+                    let row = self.currentRow || null;
+                    if ((!row || !row.UID) && self.appForm && typeof self.appForm.getCurrentRow === 'function') {
+                        row = self.appForm.getCurrentRow();
+                    }
+                    if (!row || !row.UID) return;
+                    e.preventDefault();
+                    e.stopPropagation();
+                    try {
+                        deleteOrMarkRecord(self.tableName, row.UID, null,
+                            e.shiftKey ? 'direct' : undefined);
+                    } catch (err) { console.error('[DynamicTable] Delete:', err); }
+                });
+                // Без tabindex таблица не получает фокус, а значит и клавиш.
+                try { if (!el.hasAttribute('tabindex')) el.setAttribute('tabindex', '0'); } catch (err) {}
+            }
+        } catch (e) {}
 
         // Attach virtual scroll listener once (bodyContainer created by Table.Draw)
         try {
@@ -16407,6 +18046,9 @@ class DynamicTable extends Table {
             tr.tabIndex = 0;
             tr._dtIndex = i;
             tr._dtFilled = false;
+            // Выделение переживает перерисовку (прокрутка, refresh): иначе
+            // выделил двадцать строк, прокрутил — и половина «развыделилась».
+            if (this._selectedRows && this._selectedRows.has(i) && !this.selectionColumn) tr.classList.add('ui-row-selected');
 
             // Placeholder: single wide cell occupying the row height
             const ph = document.createElement('td');
@@ -16420,6 +18062,18 @@ class DynamicTable extends Table {
             const gi = i;
             tr.addEventListener('click', (ev) => {
                 try {
+                    // Выделение нескольких строк: Ctrl — добавить/убрать, Shift —
+                    // интервал. Обработчик СВОЙ, а не унаследованный от Table:
+                    // список рисует строки сам (виртуальная прокрутка), и правка в
+                    // базовом классе сюда не попадает.
+                    if (self.multiSelect) {
+                        self._applySelection(gi, { ctrl: ev.ctrlKey || ev.metaKey, shift: ev.shiftKey });
+                        if (ev.ctrlKey || ev.metaKey || ev.shiftKey) {
+                            if (self._activeRowIndex !== gi) self.activateRow(gi);
+                            try { ev.preventDefault(); } catch (e) {}
+                            return;
+                        }
+                    }
                     if (self.editMode === 'row-activate') {
                         if (self._activeRowIndex !== gi) { self.activateRow(gi); return; }
                     } else {
@@ -16691,7 +18345,9 @@ class DynamicTable extends Table {
                 return;
             }
             if (Array.isArray(this.hiddenButtons) && this.hiddenButtons.includes('recordOpen')) return;
-            const tableName = this.tableName || (this.appForm && (this.appForm.dbTable || this.dataKey)) || '';
+            // `__table` — строка называет свою таблицу сама (см. Table.onSelectOrOpen).
+            const tableName = (row.__table || '')
+                || this.tableName || (this.appForm && (this.appForm.dbTable || this.dataKey)) || '';
             if (typeof window !== 'undefined' && window.MySpace && typeof window.MySpace.open === 'function') {
                 const self = this;
                 (async () => {
@@ -16830,7 +18486,7 @@ class DynamicTable extends Table {
      * Восстановить выбор после перечитывания данных.
      *
      * Порядок попыток: та же запись по UID → первая строка (если список сам ведёт
-     * текущую строку, как в списках 1С) → снять выбор. Ключевое: выбор НЕ остаётся
+     * текущую строку, как в списках учётных систем) → снять выбор. Ключевое: выбор НЕ остаётся
      * висеть на индексе, за которым теперь чужая запись.
      */
     _restoreSelection(prevUID) {
@@ -16925,7 +18581,14 @@ class DynamicTable extends Table {
                     if (col && typeof col === 'object') {
                         const out = Object.assign({}, col);
                         out.data = out.data || out.name || '';
-                        out.caption = out.caption || out.data || out.name || '';
+                        // ПУСТАЯ подпись — это подпись, а не её отсутствие.
+                        // Колонка-значок (состояние объекта) объявляет
+                        // `caption: ""` намеренно; подстановка имени поля рисовала
+                        // бы в шапке «postingState». Та же правка сделана на
+                        // сервере (drive_forms/dynamicTableRegistry.js).
+                        if (out.caption === undefined || out.caption === null) {
+                            out.caption = out.data || out.name || '';
+                        }
                         return out;
                     }
                     return { data: '', caption: '' };

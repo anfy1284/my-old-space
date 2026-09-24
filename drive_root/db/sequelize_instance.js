@@ -4,45 +4,23 @@ const path = require('path');
 
 
 
-// Читаем настройки из dbSettings.json
-// 1. Если production и есть DATABASE_URL — используем только её
-// 2. Если DB_SETTINGS_PATH задана — используем её
-// 3. Иначе ищем dbSettings.json сначала в корне процесса, потом в пакете
-const projectRoot = process.cwd();
-let baseSettings = { dialect: 'sqlite' };
-const baseSettingsPath = path.join(projectRoot, 'dbSettings.json');
+// Настройки подключения решает ОДИН модуль — `drive_root/db/dbSettings.js`.
+// Прежде их читали здесь и ещё раз в `createDB.js`, каждый по-своему: этот файл от
+// рабочего каталога процесса, тот — от `PROJECT_ROOT`. Пока они совпадают, разницы
+// не видно; стоит разойтись — миграция уходит в одну базу, а сервер работает с
+// другой, и обе операции при этом «успешны». Второго места быть не должно.
+const dbSettingsResolver = require('./dbSettings');
+const isProduction = process.env.NODE_ENV === 'production';
 
-if (fs.existsSync(baseSettingsPath)) {
-  try {
-    baseSettings = JSON.parse(fs.readFileSync(baseSettingsPath, 'utf8'));
-  } catch (e) {
-    console.error('Ошибка парсинга dbSettings.json:', e.message);
-  }
-}
-
-// 2. Load dialect-specific settings
-const dialect = baseSettings.dialect || 'sqlite';
-const configFileName = `dbSettings.${dialect}.json`;
-const configPath = path.join(projectRoot, configFileName);
-
-let settings = dialect === 'sqlite'
-  ? { dialect: 'sqlite', storage: path.join(projectRoot, 'database.sqlite') }
-  : {};
-
-if (fs.existsSync(configPath)) {
-  try {
-    settings = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-  } catch (e) {
-    console.error(`Ошибка чтения ${configFileName}:`, e.message);
-    if (dialect === 'postgres') throw e; // Postgres requires config
-  }
-} else if (dialect === 'postgres') {
-  console.error(`Критическая ошибка: ${configFileName} не найден для PostgreSQL`);
-  throw new Error(`Configuration file ${configFileName} missing`);
+let settings = {};
+let dialect = 'sqlite';
+if (!(isProduction && process.env.DATABASE_URL)) {
+  const resolved = dbSettingsResolver.resolve();
+  settings = resolved.settings;
+  dialect = resolved.dialect;
 }
 
 let sequelize;
-const isProduction = process.env.NODE_ENV === 'production';
 
 // ТЗ «Оптимизация фреймворка», п. 3.2 — пул соединений.
 // По умолчанию Sequelize держит max=5/idle=10s без keepAlive: при RLS-амплификации

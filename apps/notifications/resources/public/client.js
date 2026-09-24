@@ -114,10 +114,21 @@
 
             const el = this.createElement(n);
             this.area.appendChild(el);           // свежее — вниз
-            this.items.push({ data: n, element: el });
+            const item = { data: n, element: el };
+            this.items.push(item);
             this.area.style.display = 'flex';
             // Показать только что пришедшее, даже если стек прокручен вверх.
             this.area.scrollTop = this.area.scrollHeight;
+
+            // Тайм-аут показа. Нужен уведомлениям, которых МНОГО и которые не
+            // требуют действия («документ проведён»): без него стек за день
+            // работы превращается в ленту, где важное неотличимо от рутины.
+            // Снимаем только со стека — строка в базе (если она есть) живёт
+            // своей жизнью и уйдёт по кнопке «очистить».
+            const ttl = Number(n.ttl) || 0;
+            if (ttl > 0) {
+                item.timer = setTimeout(() => this.dismiss(n), ttl * 1000);
+            }
             return n;
         },
 
@@ -193,13 +204,28 @@
         },
 
         // ── Снятие со стека ───────────────────────────────────────────────
-        remove: function (n) {
+        /**
+         * Убрать с ЭКРАНА, не трогая базу.
+         *
+         * Именно это делает тайм-аут показа: «погасло само» и «пользователь
+         * прочитал» — разные события, и путать их нельзя. Уведомление с записью,
+         * погасшее по сроку, обязано остаться в списке, иначе сообщение об
+         * ошибке исчезло бы, не будучи прочитанным.
+         */
+        dismiss: function (n) {
             const idx = this.items.findIndex(i => i.data === n || (n.UID && i.data.UID === n.UID));
-            if (idx === -1) return;
+            if (idx === -1) return null;
             const item = this.items[idx];
+            if (item.timer) { clearTimeout(item.timer); item.timer = null; }
             if (item.element) item.element.remove();
             this.items.splice(idx, 1);
             if (!this.items.length && this.area) this.area.style.display = 'none';
+            return item;
+        },
+
+        /** Убрать со стека И из базы — действие пользователя. */
+        remove: function (n) {
+            if (!this.dismiss(n)) return;
             if (n.UID) {
                 callServerMethod(APP_NAME, 'remove', { UID: n.UID })
                     .catch(err => console.error('[notifications] remove:', err.message));

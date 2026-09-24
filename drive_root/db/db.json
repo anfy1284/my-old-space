@@ -1239,6 +1239,162 @@
                     }
                 ]
             }
+        },
+        {
+            "name": "PostingQueue",
+            "tableName": "posting_queue",
+            "entityConfig": {
+                "systemData": "scheduler"
+            },
+            "fields": {
+                "documentTable": {
+                    "type": "STRING",
+                    "allowNull": false,
+                    "caption": {
+                        "i18n": "pq_document_table_field"
+                    }
+                },
+                "documentUID": {
+                    "type": "STRING",
+                    "allowNull": false,
+                    "caption": {
+                        "i18n": "pq_document_field"
+                    }
+                },
+                "date": {
+                    "type": "DATE",
+                    "allowNull": true,
+                    "caption": {
+                        "i18n": "pq_date_field"
+                    }
+                },
+                "seq": {
+                    "type": "BIGINT",
+                    "allowNull": false,
+                    "defaultValue": 0,
+                    "caption": {
+                        "i18n": "pq_seq_field"
+                    }
+                },
+                "action": {
+                    "type": "STRING",
+                    "allowNull": false,
+                    "defaultValue": "post",
+                    "caption": {
+                        "i18n": "pq_action_field"
+                    }
+                },
+                "requestedBy": {
+                    "type": "STRING",
+                    "allowNull": true,
+                    "references": {
+                        "model": "users",
+                        "key": "UID"
+                    },
+                    "caption": {
+                        "i18n": "pq_requested_by_field"
+                    }
+                },
+                "organizationId": {
+                    "type": "STRING",
+                    "allowNull": true,
+                    "caption": {
+                        "i18n": "pq_organization_field"
+                    }
+                },
+                "byHuman": {
+                    "type": "BOOLEAN",
+                    "allowNull": false,
+                    "defaultValue": false,
+                    "caption": {
+                        "i18n": "pq_by_human_field"
+                    }
+                },
+                "attempts": {
+                    "type": "INTEGER",
+                    "allowNull": false,
+                    "defaultValue": 0,
+                    "caption": {
+                        "i18n": "pq_attempts_field"
+                    }
+                },
+                "nextAttemptAt": {
+                    "type": "DATE",
+                    "allowNull": true,
+                    "caption": {
+                        "i18n": "pq_next_attempt_field"
+                    }
+                },
+                "startedAt": {
+                    "type": "DATE",
+                    "allowNull": true,
+                    "caption": {
+                        "i18n": "pq_started_at_field"
+                    }
+                },
+                "prevState": {
+                    "type": "STRING",
+                    "allowNull": true,
+                    "caption": {
+                        "i18n": "pq_prev_state_field"
+                    }
+                },
+                "thenMark": {
+                    "type": "BOOLEAN",
+                    "allowNull": false,
+                    "defaultValue": false,
+                    "caption": {
+                        "i18n": "pq_then_mark_field"
+                    }
+                },
+                "lastError": {
+                    "type": "TEXT",
+                    "allowNull": true,
+                    "caption": {
+                        "i18n": "pq_last_error_field"
+                    }
+                },
+                "lastErrorKey": {
+                    "type": "STRING",
+                    "allowNull": true,
+                    "caption": {
+                        "i18n": "pq_last_error_key_field"
+                    }
+                },
+                "lastErrorVars": {
+                    "type": "TEXT",
+                    "allowNull": true,
+                    "caption": {
+                        "i18n": "pq_last_error_vars_field"
+                    }
+                },
+                "lastErrorAt": {
+                    "type": "DATE",
+                    "allowNull": true,
+                    "caption": {
+                        "i18n": "pq_last_error_at_field"
+                    }
+                }
+            },
+            "options": {
+                "timestamps": true,
+                "indexes": [
+                    {
+                        "fields": [
+                            "documentTable",
+                            "documentUID"
+                        ],
+                        "unique": true
+                    },
+                    {
+                        "fields": [
+                            "nextAttemptAt",
+                            "date",
+                            "seq"
+                        ]
+                    }
+                ]
+            }
         }
     ],
     "associations": [

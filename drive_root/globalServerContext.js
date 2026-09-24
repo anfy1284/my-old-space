@@ -161,25 +161,37 @@ function collectAllModelDefs() {
     const defs = [];
     const associations = [];
 
+    // Слой `db.json` — одинаково для всех трёх источников: модели, связи и РЕГИСТРЫ.
+    // Регистр превращается в обычное определение модели (drive_root/db/registers.js):
+    // таблица регистра обязана ехать по тому же пути, что остальные, — миграция,
+    // сверка схемы, RLS, резервная копия. Второго способа создавать таблицы нет.
+    const registersModule = require('./db/registers');
+    function pushLayer(exported, origin) {
+        const models = exported.models || exported;
+        defs.push(...(Array.isArray(models) ? models : []));
+        associations.push(...(exported.associations || []));
+        if (Array.isArray(exported.registers)) {
+            for (const reg of exported.registers) {
+                try {
+                    defs.push(registersModule.declare(reg));
+                } catch (e) {
+                    console.error(`[globalModels] Регистр в ${origin} не объявлен: ${e.message}`);
+                }
+            }
+        }
+    }
+
     // 1. drive_root/db/db.json
     const rootDbPath = path.join(__dirname, 'db', 'db.json');
     if (fs.existsSync(rootDbPath)) {
-        const rootExport = require(rootDbPath);
-        const rootModels = rootExport.models || rootExport;
-        const rootAssoc = rootExport.associations || [];
-        defs.push(...(Array.isArray(rootModels) ? rootModels : []));
-        associations.push(...rootAssoc);
+        pushLayer(require(rootDbPath), 'drive_root');
     }
     // 2. appDir/db/db.js (e.g. drive_forms)
     const config = require(path.join(__dirname, '..', 'server.config.json'));
     const appDir = path.join(__dirname, '..', config.appDir);
     const appDbPath = path.join(appDir, 'db', 'db.json');
     if (fs.existsSync(appDbPath)) {
-        const appExport = require(appDbPath);
-        const appModels = appExport.models || appExport;
-        const appAssoc = appExport.associations || [];
-        defs.push(...(Array.isArray(appModels) ? appModels : []));
-        associations.push(...appAssoc);
+        pushLayer(require(appDbPath), config.appDir);
     }
     // 3. App models from apps.json
     try {
@@ -245,10 +257,10 @@ function collectAllModelDefs() {
                 try {
                     const appExport = require(appDbDefPath);
                     const appModels = appExport.models || appExport;
-                    const appAssoc = appExport.associations || [];
-                    defs.push(...(Array.isArray(appModels) ? appModels : []));
-                    associations.push(...appAssoc);
-                    console.log(`[globalModels] Loaded models from ${app.name}: ${appModels.length} models`);
+                    pushLayer(appExport, app.name);
+                    console.log(`[globalModels] Loaded models from ${app.name}: ${appModels.length} models`
+                        + (Array.isArray(appExport.registers) && appExport.registers.length
+                            ? `, ${appExport.registers.length} register(s)` : ''));
                 } catch (e) {
                     console.error(`[globalModels] Error loading models for app ${app.name}:`, e.message);
                 }
@@ -266,12 +278,29 @@ function collectAllModelDefs() {
     try {
         const { injectEntityNumber } = require('./db/entityNumber');
         const { injectEntityDate } = require('./db/entityDate');
+        // Момент времени `(date, seq)` — тоже системный реквизит документа, и он
+        // нужен именно в РАНТАЙМЕ: без него модель не знает ни о поле, ни о хуке
+        // присвоения, и документ уходит в базу без момента (drive_root/db/entityMoment.js).
+        const { injectEntityMoment } = require('./db/entityMoment');
         // `name` (представление) — тоже системное поле модели. Без него
         // перестройка таблицы при миграции теряет представления всех
         // записей: колонку раньше навешивали отдельно, уже после переноса
         // данных. Подробности — drive_root/db/entityName.js.
         const { injectEntityName } = require('./db/entityName');
-        for (const def of defs) { injectEntityNumber(def); injectEntityDate(def); injectEntityName(def); }
+        // Состояние проведения — тем документам, что объявили `entityConfig.posting`.
+        const { injectPostingState } = require('./db/posting');
+        const { injectDeletionMark, applyReferenceRule } = require('./db/deletionMark');
+        for (const def of defs) {
+            injectEntityNumber(def); injectEntityDate(def); injectEntityMoment(def);
+            injectPostingState(def); injectDeletionMark(def); injectEntityName(def);
+        }
+        // Правило ссылок — ПОСЛЕ цикла: оно про весь набор сразу («кто на кого
+        // ссылается»), а не про одно определение. Прямое удаление объекта, на
+        // который может ссылаться другая таблица, закрывается независимо от
+        // того, что объявлено в `db.json`.
+        try { applyReferenceRule(defs); } catch (e) {
+            console.error('[globalServerContext] правило ссылок не применено:', e && e.message || e);
+        }
 
         // Умолчания пустых значений (число 0, строка "", булево false, дата
         // 0001-01-01; NULL только у ссылок) нужны и в РАНТАЙМЕ, а не только
@@ -292,7 +321,7 @@ function collectAllModelDefs() {
         const { injectTargetSections } = require('./db/difference');
         injectTargetSections(defs);
     } catch (e) {
-        console.error('[globalModels] entity number/date/name injection failed:', e && e.message || e);
+        console.error('[globalModels] entity number/date/moment/name injection failed:', e && e.message || e);
     }
 
     return { models: defs, associations };
@@ -915,9 +944,14 @@ async function getTableMetadata(modelName) {
         if (Array.isArray(scopeExclude)) scopeExclude.forEach(f => hiddenByScope.add(f));
     } catch (e) { /* нет defaultScope — скрывать нечего */ }
 
+    const serviceFields = require('./db/serviceFields');
+
     for (const [fieldName, attr] of Object.entries(attributes)) {
-        // Skip Sequelize internal fields
-        if (['createdAt', 'updatedAt', 'deletedAt'].includes(fieldName)) continue;
+        // Отметки времени Sequelize — служебные всегда и у всех таблиц; их в
+        // метаданных нет вовсе. Прочие служебные реквизиты (момент времени,
+        // состояние проведения) из метаданных НЕ выбрасываются — они помечаются
+        // признаком, а прячет их автогенерация интерфейса (db/serviceFields.js).
+        if (serviceFields.ALWAYS_SERVICE.has(fieldName)) continue;
         if (hiddenByScope.has(fieldName)) continue;
 
         // Get caption from db.json or use field name
@@ -990,6 +1024,10 @@ async function getTableMetadata(modelName) {
             foreignKey: foreignKey,
             isPrimary: !!attr.primaryKey,
             isUID: fieldName === 'UID',
+            // Реквизит механизма, а не пользователя: в автоформу и автоколонку не
+            // попадает. Объявляется в db.json (`"service": true`) или инъекцией ядра.
+            service: serviceFields.isServiceField(fieldName,
+                modelDef && modelDef.fields && modelDef.fields[fieldName]),
             editable: false,  // All fields readonly for now
             isAddress: !!(modelDef && modelDef.fields && modelDef.fields[fieldName] && modelDef.fields[fieldName].isAddress),
             inputType: explicitInputType,
@@ -1063,8 +1101,10 @@ async function getDynamicTableData(options) {
             };
         });
     } else {
-        // Auto-generate from model
-        fields = await getTableMetadata(modelName);
+        // Автоколонки списка: служебные реквизиты не показываем — колонку «момент
+        // времени» рядом с номером и датой никто не заказывал (db/serviceFields.js).
+        fields = require('./db/serviceFields')
+            .withoutService(await getTableMetadata(modelName), { keepUID: true });
     }
     // Build WHERE clause from filters
     const where = {};
@@ -1370,7 +1410,13 @@ async function resolveTableForeignKeys(modelName, dataArray, fields, language) {
         const batch = tableBatches.get(fkTableName);
         for (const row of dataArray) {
             const fkValue = row[fkField.name];
+            // ПУСТАЯ ссылка — законное состояние необязательного поля, а не
+            // «запись не найдена». Пустую строку пропускали мимо проверки (она
+            // не `null` и не `undefined`), она уходила в запрос и возвращалась
+            // как «(not found: )» — в журнале регистра это стояло в каждой
+            // строке переноса, у которого нет вида операции.
             if (fkValue === null || fkValue === undefined) continue;
+            if (typeof fkValue === 'string' && fkValue.trim() === '') continue;
             if (_fkCacheGet(fkTableName, cacheUid(fkTableName, fkValue)) === undefined) {
                 batch.uids.add(fkValue);
             }

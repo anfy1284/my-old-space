@@ -280,9 +280,15 @@ async function check(request, globalCtx, t) {
             // в том числе такое, где пользователь тронул одно лишь разрешённое поле
             // (отметку об оплате). Сравнение то же, что в журнале изменений: DECIMAL
             // приезжает из драйвера строкой, а с формы числом.
+            // Служебный реквизит ядра (состояние проведения) замком не закрыт: это
+            // не учётные данные, а отметка механизма о самом себе. Но право на него
+            // не «системная сессия» и не роль, а узкий, неподделываемый токен
+            // процесса со списком разрешённых полей (drive_root/db/coreWrite.js):
+            // весь остальной замок для того же запроса остаётся на месте.
             const allowedFields = cfg.except.concat([cfg.field]);
             const suspect = changed.filter(k => allowedFields.indexOf(k) === -1
-                && k !== 'UID' && k !== 'updatedAt');
+                && k !== 'UID' && k !== 'updatedAt'
+                && !require('./coreWrite').allows(request, k));
             let forbidden = suspect;
             if (suspect.length) {
                 const current = await Model.findOne({

@@ -1,0 +1,137 @@
+[
+    {
+        "type": "commandBar",
+        "extraButtons": [
+            {
+                "name": "btnControl",
+                "caption": {
+                    "i18n": "dm_control"
+                },
+                "icon": "/apps/general_icons/resources/public/16x16/search.png",
+                "events": {
+                    "onClick": "runControl"
+                }
+            },
+            {
+                "name": "btnControlDelete",
+                "caption": {
+                    "i18n": "dm_control_delete"
+                },
+                "icon": "/apps/general_icons/resources/public/16x16/deletion_mark.png",
+                "events": {
+                    "onClick": "controlAndDelete"
+                }
+            },
+            {
+                "name": "btnUnmark",
+                "caption": {
+                    "i18n": "dm_unmark_selected"
+                },
+                "icon": "/apps/general_icons/resources/public/16x16/undo.png",
+                "events": {
+                    "onClick": "unmarkSelected"
+                }
+            }
+        ]
+    },
+    {
+        "type": "infoLine",
+        "name": "hint",
+        "caption": {
+            "i18n": "dm_hint"
+        },
+        "properties": {
+            "tone": "yellow"
+        }
+    },
+    {
+        "type": "table",
+        "name": "markedTable",
+        "data": "marked",
+        "caption": {
+            "i18n": "dm_marked_caption"
+        },
+        "columns": [
+            {
+                "caption": {
+                    "i18n": "dm_col_kind"
+                },
+                "data": "kindCaption",
+                "width": 170,
+                "inputType": "textbox",
+                "readOnly": true
+            },
+            {
+                "caption": {
+                    "i18n": "dm_col_object"
+                },
+                "data": "name",
+                "width": 330,
+                "inputType": "textbox",
+                "readOnly": true
+            },
+            {
+                "caption": {
+                    "i18n": "dm_col_blockers"
+                },
+                "data": "blockersText",
+                "autoWidth": true,
+                "inputType": "textbox",
+                "readOnly": true
+            }
+        ],
+        "properties": {
+            "visibleRows": 8,
+            "saveOnEdit": false,
+            "hiddenButtons": [
+                "recordAdd",
+                "recordDelete",
+                "recordOpen",
+                "listSettings"
+            ],
+            "multiSelect": true,
+            "readOnly": true,
+            "selectionColumn": true,
+            "masterFor": "refsTable",
+            "masterField": "key",
+            "detailField": "ownerKey"
+        }
+    },
+    {
+        "type": "table",
+        "name": "refsTable",
+        "data": "refs",
+        "caption": {
+            "i18n": "dm_refs_caption"
+        },
+        "columns": [
+            {
+                "caption": {
+                    "i18n": "dm_col_kind"
+                },
+                "data": "kindCaption",
+                "width": 170,
+                "inputType": "textbox",
+                "readOnly": true
+            },
+            {
+                "caption": {
+                    "i18n": "dm_col_object"
+                },
+                "data": "name",
+                "autoWidth": true,
+                "inputType": "textbox",
+                "readOnly": true
+            }
+        ],
+        "properties": {
+            "saveOnEdit": false,
+            "hiddenButtons": [
+                "recordAdd",
+                "recordDelete",
+                "listSettings"
+            ],
+            "readOnly": true
+        }
+    }
+]

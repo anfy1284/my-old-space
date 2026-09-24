@@ -105,7 +105,31 @@ function loadI18n(projectRoot) {
  * @param {string} [langCode='en'] - target language code
  * @returns {string}
  */
+/**
+ * Реестр построен? Если нет — построить.
+ *
+ * Реестр наполняет `drive_forms/init.js`, а его выполняет только ГЛАВНЫЙ процесс.
+ * Форкнутый воркер планировщика (регламентные задачи, проведение документов) его
+ * не выполняет — и любой перевод там молча возвращал КЛЮЧ. Видно это было не в
+ * коде, а в уведомлении на экране: «posting_notify_error_title» вместо текста.
+ * Именно поэтому тексты в существующих обработчиках задач написаны по-русски
+ * прямо в коде — перевести их было нечем.
+ *
+ * Ленивая загрузка дешевле явного вызова в воркере: она чинит ВСЕ такие места
+ * разом, включая те, что появятся позже, и ничего не делает там, где реестр уже
+ * построен.
+ */
+function ensureLoaded() {
+    if (Object.keys(_registry).length) return;
+    try {
+        loadI18n(process.env.PROJECT_ROOT || process.cwd());
+    } catch (e) {
+        console.error('[i18n] Ленивая загрузка реестра не удалась:', e && e.message || e);
+    }
+}
+
 function t(key, langCode = 'en') {
+    ensureLoaded();
     const entry = _registry[key];
     if (!entry) return key;
     const val = entry[langCode] || entry['en'] || key;
@@ -172,6 +196,7 @@ function pickPluralForm(forms, count, langCode) {
  * @returns {string}
  */
 function tf(key, langCode = 'en', vars = {}) {
+    ensureLoaded();
     const entry = _registry[key];
     const raw = entry ? (entry[langCode] || entry['en']) : null;
     let str = (raw && typeof raw === 'object')
@@ -196,4 +221,4 @@ function entries() {
     return JSON.parse(JSON.stringify(_registry));
 }
 
-module.exports = { loadI18n, t, tf, pluralCategory, entries };
+module.exports = { loadI18n, ensureLoaded, t, tf, pluralCategory, entries };

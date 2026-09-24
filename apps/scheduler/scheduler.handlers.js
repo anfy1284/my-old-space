@@ -56,6 +56,54 @@ module.exports = function (modelsDB, Utilities) {
 
                 return { resultText: `Удалено записей журнала: ${removed} (старше ${keepDays} дн.)` };
             }
+        },
+
+        // ── Исполнитель очереди проведения (ТЗ «Проведение документов», §10) ──
+        // Единственное место, откуда зовётся проведение. Сделано типом задачи, а не
+        // вторым механизмом, потому что от планировщика нужно ровно одно —
+        // «разбудись и сделай проход», а взамен даром достаются форкнутый воркер
+        // (проведение не блокирует event loop), служебные сессии, захват задачи
+        // (два прохода одновременно невозможны), журнал прогонов, отмена и таймаут.
+        //
+        // Задача заводится с интервалом — это СТРАХУЮЩИЙ запуск (§10.2.3): процесс
+        // может упасть между «строка записана» и «исполнитель разбужен», и тогда
+        // документ подберёт ближайший тик. Обычный путь — толчок сразу после
+        // постановки в очередь (postingQueue.kick).
+        'core.postingQueue': {
+            caption: { i18n: 'sched_handler_posting_queue' },
+            icon: '/apps/general_icons/resources/public/16x16/document.png',
+            scope: 'system',
+            paramsSchema: {},
+            run: async (ctx) => {
+                const runner = require('../../drive_root/db/postingRunner');
+
+                const stats = await runner.pass(ctx);
+
+                // Что приехало в очередь ЗА ВРЕМЯ прохода (в том числе каскадом от
+                // только что проведённых), подбирает сам проход: он перечитывает
+                // таблицу на каждом шаге. Будить себя отсюда бесполезно — задача
+                // исполняется в форкнутом воркере, планировщика в нём нет.
+                // Строку, приехавшую после выхода из цикла, подберёт отложенный
+                // толчок главного процесса (postingQueue.kick) или страхующий тик.
+                if (!stats.seen) return { resultText: 'Очередь пуста' };
+                return {
+                    resultText: `Проведено: ${stats.posted}, ошибок: ${stats.failed}`
+                        + (stats.cascaded ? `, поставлено на перепроведение: ${stats.cascaded}` : '')
+                };
+            }
+        },
+
+        // ── Автосдвиг даты запрета редактирования (ТЗ §13.3) ──────────────────
+        'core.advanceClosingDate': {
+            caption: { i18n: 'sched_handler_advance_closing_date' },
+            icon: '/apps/general_icons/resources/public/16x16/calendar.png',
+            scope: 'system',
+            paramsSchema: {},
+            run: async (ctx) => {
+                const closing = require('../../drive_root/db/closingDate');
+                const n = await closing.advanceAll(ctx.sessionID);
+                return { resultText: `Дата запрета сдвинута у организаций: ${n}` };
+            }
         }
     };
 };

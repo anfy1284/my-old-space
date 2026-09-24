@@ -48,7 +48,7 @@ const Taskbar = {
         this.trayContainer.style.height = '100%';
         this.trayContainer.style.flexShrink = '0';
         this.trayContainer.style.padding = '0 2px';
-        // Утопленная рамка Win95 — как у области уведомлений в оригинале.
+        // Утопленная ретро-рамка — как у области уведомлений в оригинале.
         this.trayContainer.style.borderTop = '1px solid #808080';
         this.trayContainer.style.borderLeft = '1px solid #808080';
         this.trayContainer.style.borderRight = '1px solid #ffffff';

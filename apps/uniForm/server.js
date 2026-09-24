@@ -100,6 +100,19 @@ function normalizeLoadedData(data, where) {
  * @param {string} tableName
  * @param {string} [mode] — 'record' (по умолчанию) | 'list'
  */
+/**
+ * Подпись регистра для заголовка окна — из его объявления (`registers.get`).
+ * Лейаута у регистра нет (формы строит автогенератор), значит и в реестре
+ * подписей его нет; без этого в заголовке стояло бы имя таблицы `reg_cash`.
+ */
+function getRegisterCaption(tableName) {
+    try {
+        const registers = require('../../drive_root/db/registers');
+        const cfg = registers.get(tableName);
+        return (cfg && cfg.caption) || null;
+    } catch (e) { return null; }
+}
+
 function getDefaultIconForTable(tableName, mode) {
     const isList = mode === 'list';
     try {
@@ -342,6 +355,12 @@ async function getLayoutWithData(params, sessionID) {
                     }
                 }
 
+                // Журнал — список чужих записей: «ОК»/«Сохранить»/«Отменить» ему
+                // не нужны, правки идут в форме записи. Правим КОПИЮ (`clLayout`),
+                // которая и уедет клиенту, и делаем это ДО `storeDataset`: он
+                // кладёт в хранилище глубокую копию, и всё, что изменено после
+                // него, до клиента не доезжает.
+                suppressStandardButtons(clLayout);
                 const payload = { layout: clLayout, data: listData, params: params || {} };
                 const datasetId = dataApp.storeDataset(payload);
                 const resolvedCaption = await resolveAppCaption(customLayout.appCaption, sessionID);
@@ -373,7 +392,8 @@ async function getLayoutWithData(params, sessionID) {
             } catch (e) {}
             const layout = [{
                 type: 'table',
-                caption: tableName,
+                // Подписи у списка нет: её место занимает заголовок окна, а имя
+                // таблицы в ней стояло бы служебным словом над данными.
                 properties: {
                     dynamicTable: true,
                     readOnly: params.readOnly !== false,
@@ -391,11 +411,24 @@ async function getLayoutWithData(params, sessionID) {
                     initialSort: _initialSort
                 }
             }];
+
+            // РЕГИСТР: строк не добавляют и не удаляют — их пишет только
+            // проведение. Кнопки, которых сервер всё равно не пустит, с панели
+            // убираем: кнопка, обещающая отказ, хуже отсутствующей. И порядок по
+            // умолчанию у движений — свежие сверху, а не по имени.
+            try {
+                const registerForms = require('../../drive_root/db/registerForms');
+                if (registerForms.isRegisterTable(tableName)) {
+                    layout[0].properties.hiddenButtons = ['recordAdd', 'recordDelete'];
+                    layout[0].properties.initialSort = [{ field: 'period', order: 'desc' }];
+                }
+            } catch (e) { /* не регистр */ }
             const payload = { layout, data: [], params: params || {} };
             const datasetId = dataApp.storeDataset(payload);
             const formIcon = getDefaultIconForTable(tableName, 'list');
             const layoutMemory2 = require('../../drive_root/layoutMemory');
-            const rawCaption = layoutMemory2.getTableCaption(tableName);
+            const rawCaption = layoutMemory2.getTableCaption(tableName)
+                || getRegisterCaption(tableName);
             // Нет зарегистрированной подписи → перевод по ключу = имя таблицы (i18n.json),
             // tForSession вернёт само имя при отсутствии перевода. Никогда не «uniForm».
             const appCaption = (rawCaption ? await resolveAppCaption(rawCaption, sessionID) : null) || await tForSession(tableName, sessionID);
@@ -415,7 +448,7 @@ async function getLayoutWithData(params, sessionID) {
                     });
                     const spec = await generateFormSpec(resolvedParams.tableName, resolvedParams, sessionID);
                     return { layout: spec.layout, data: spec.data, datasetId: spec.datasetId,
-                             clientScript: spec.clientScript || null, formIcon: spec.formIcon || null, appCaption: spec.appCaption || null, windowState: spec.windowState || null, fkLookups: spec.fkLookups || null, isNew: !!spec.isNew, events: spec.events || null, prefilled: spec.prefilled || null, lock: spec.lock || null, rowTones: spec.rowTones || null };
+                             clientScript: spec.clientScript || null, formIcon: spec.formIcon || null, appCaption: spec.appCaption || null, windowState: spec.windowState || null, fkLookups: spec.fkLookups || null, isNew: !!spec.isNew, events: spec.events || null, prefilled: spec.prefilled || null, lock: spec.lock || null, rowTones: spec.rowTones || null, postingState: spec.postingState || null, postingCaptions: spec.postingCaptions || null, isRecordForm: !!spec.isRecordForm };
                 }
             } catch (e) {
                 console.error('[uniForm/getLayoutWithData] datasetId refresh error:', e && e.message || e);
@@ -432,7 +465,7 @@ async function getLayoutWithData(params, sessionID) {
                     table: params.tableName,
                     id: params.recordID || params.recordId || params.id
                 });
-                return { layout: spec.layout, data: spec.data, datasetId, clientScript: spec.clientScript || null, formIcon: spec.formIcon || null, appCaption: spec.appCaption || null, windowState: spec.windowState || null, fkLookups: spec.fkLookups || null, isNew: !!spec.isNew, events: spec.events || null, prefilled: spec.prefilled || null, lock: spec.lock || null, rowTones: spec.rowTones || null };
+                return { layout: spec.layout, data: spec.data, datasetId, clientScript: spec.clientScript || null, formIcon: spec.formIcon || null, appCaption: spec.appCaption || null, windowState: spec.windowState || null, fkLookups: spec.fkLookups || null, isNew: !!spec.isNew, events: spec.events || null, prefilled: spec.prefilled || null, lock: spec.lock || null, rowTones: spec.rowTones || null, postingState: spec.postingState || null, postingCaptions: spec.postingCaptions || null, isRecordForm: !!spec.isRecordForm };
             } catch (e) {
                 console.error('[uniForm/getLayoutWithData] generateFormSpec error:', e && e.message || e);
             }
@@ -789,7 +822,20 @@ const { registerDynamicTableMethods } = require('../../drive_forms/dynamicTableR
 function buildTableFields(params) {
     const tableName = params && (params.tableName || params.dbTable || params.table);
     if (!tableName) return null;
-    return buildTableFieldsFromModel(tableName);
+    // `params.fields` — колонки, НАЗВАННЫЕ лейаутом списка. Служебный реквизит,
+    // названный явно, обязан доехать: правило «не показывать» относится к
+    // АВТОгенерации, а рукописный лейаут вправе показать что угодно
+    // (drive_root/db/serviceFields.js). Без этого колонка «Проведение» в журнале
+    // молча исчезала: и объявлена, и отфильтрована.
+    const built = buildTableFieldsFromModel(tableName, Array.isArray(params.fields) ? params.fields : null);
+    // Журнал регистра и форма его записи отвечают на РАЗНЫЕ вопросы, поэтому и
+    // состав колонок у них разный: из журнала убираем то, что дублирует соседей
+    // (drive_root/db/registerForms.js#hideInJournal).
+    return Promise.resolve(built).then(fields => {
+        try {
+            return require('../../drive_root/db/registerForms').hideInJournal(tableName, fields);
+        } catch (e) { return fields; }
+    });
 }
 
 // Подписи допустимых значений полей (db.json → options[].caption = { i18n }) —
@@ -813,13 +859,37 @@ async function translateFieldOptions(fields, sessionID) {
 }
 
 // Build table fields from global model metadata (единственная копия для uniForm)
-async function buildTableFieldsFromModel(tableName) {
+async function buildTableFieldsFromModel(tableName, keepService) {
     try {
         const globalCtx = require('../../drive_root/globalServerContext');
         const modelName = globalCtx.getModelNameForTable(tableName) || tableName;
         if (!modelName) return null;
-        const meta = await globalCtx.getTableMetadata(modelName);
-        if (!Array.isArray(meta)) return null;
+        const metaAll = await globalCtx.getTableMetadata(modelName);
+        if (!Array.isArray(metaAll)) return null;
+        // Служебные реквизиты (момент времени, состояние проведения) в АВТОМАТИЧЕСКИ
+        // построенный интерфейс не идут — ни полем формы записи, ни колонкой
+        // табличной части. `UID` оставляем: он нужен данным формы, а прячется
+        // отдельно там, где строятся контролы (drive_root/db/serviceFields.js).
+        let keep = Array.isArray(keepService) ? keepService : [];
+        // У РЕГИСТРА служебные поля — не внутренняя механика, а суть строки:
+        // период, регистратор, номер строки и знак и есть движение. Правило
+        // «служебное не показываем» писалось про реквизиты документа (момент
+        // времени, состояние проведения), и распространять его сюда — значит
+        // оставить форму записи регистра с пустыми полями.
+        try {
+            const registerForms = require('../../drive_root/db/registerForms');
+            if (registerForms.isRegisterTable(tableName)) {
+                keep = keep.concat(registerForms.HEAD);
+            }
+        } catch (e) { /* реестр регистров может быть не поднят */ }
+        let meta = require('../../drive_root/db/serviceFields')
+            .withoutService(metaAll, { keepUID: true, keep });
+        // Канонический порядок полей регистра: когда → кто сделал → в каком
+        // разрезе → сколько → подробности. Порядок ключей в `db.json` у двух
+        // регистров случайно разный, а вопрос у читателя один и тот же.
+        try {
+            meta = require('../../drive_root/db/registerForms').orderFields(tableName, meta);
+        } catch (e) { /* не регистр или реестр не поднят */ }
 
         const fields = meta.map(f => {
             const typeKey = f.type || '';
@@ -1103,9 +1173,92 @@ async function buildFkLookups(layout, sessionID) {
 }
 
 // ── generateFormSpec ──────────────────────────────────────────────────────────────────────────
+/**
+ * ФОРМА БЕЗ СОБСТВЕННЫХ ДАННЫХ не имеет «ОК», «Сохранить» и «Отменить».
+ *
+ * Три рода форм, и это не оттенки, а разные вещи (понятие взято у классических
+ * учётных систем, где обработка — отдельный вид объекта):
+ *
+ *   ЗАПИСЬ    — у формы есть запись, её правят и сохраняют. Кнопки нужны.
+ *   ЖУРНАЛ    — список чужих записей. Сохранять нечего: правки идут в форме записи.
+ *   ОБРАБОТКА — у формы нет данных вообще, она ДЕЛАЕТ работу («Удаление
+ *               помеченных объектов», «Движения документа»). Сохранять нечего
+ *               тем более, и признак изменённости («звёздочка») ей тоже не нужен:
+ *               галочка в списке — не «несохранённая правка», а выбор на один раз.
+ *
+ * Кнопка, которая ничего не делает, хуже отсутствующей: она обещает действие и
+ * заставляет гадать, что произойдёт. Поэтому убирает их ЯДРО, по роду формы, а
+ * не каждый лейаут своим `hiddenButtons`, о котором легко забыть.
+ */
+function suppressStandardButtons(layout, ids) {
+    if (!Array.isArray(layout)) return layout;
+    const STD = Array.isArray(ids) ? ids : ['ok', 'save', 'cancel'];
+    for (const item of layout) {
+        if (!item || item.type !== 'commandBar') continue;
+        const had = Array.isArray(item.hiddenButtons) ? item.hiddenButtons : [];
+        item.hiddenButtons = Array.from(new Set(had.concat(STD)));
+    }
+    return layout;
+}
+
+/**
+ * ФОРМА, КОТОРУЮ ЦЕЛИКОМ НЕЛЬЗЯ ПРАВИТЬ, не предлагает сохранение.
+ *
+ * Это не то же самое, что обработка (у той нет данных вовсе). Здесь запись есть,
+ * но заперта вся: строка регистра, документ в закрытом состоянии без единого
+ * разрешённого поля. «Сохранить» на такой форме не делает ничего, а «Отмена»
+ * называется не тем словом — отменять нечего, окно просто закрывают.
+ *
+ * Решает ЗАМОК, а не отдельное объявление: замок и так знает, что заперто, и
+ * второй источник этого знания разошёлся бы с первым.
+ */
+function applyReadOnlyButtons(layout, lock) {
+    if (!lock || !lock.closed) return false;
+    if (Array.isArray(lock.editable) && lock.editable.length) return false;
+    // У закрытого документа может остаться ЗАКОННЫЙ переход состояния
+    // (выставлен → оплачен): его выбирают в поле состояния и записывают
+    // «Сохранить». Убрать кнопку здесь значило бы запретить переход, оставив
+    // список состояний на экране, — то есть предложить выбор без последствий.
+    if (Array.isArray(lock.states) && lock.states.length > 1) return false;
+    suppressStandardButtons(layout, ['ok', 'save']);
+    for (const item of (Array.isArray(layout) ? layout : [])) {
+        if (item && item.type === 'commandBar') item.cancelAsClose = true;
+    }
+    return true;
+}
+
 async function generateFormSpec(tableName, params, sessionID) {
     try {
         if (!tableName) return { data: [], layout: [] };
+
+        // ЭКРАН ДВИЖЕНИЙ ДОКУМЕНТА — виртуальная таблица: записи с таким именем
+        // нет, а лейаут зависит от КОНКРЕТНОГО документа (сколько у него
+        // регистров), поэтому он не регистрируется заранее, а строится на вызов
+        // (drive_root/db/movementsForm.js). Каждая вкладка внутри — обычный
+        // журнал регистра с отбором, то есть та же автоформа.
+        {
+            const movementsForm = require('../../drive_root/db/movementsForm');
+            if (tableName === movementsForm.TABLE) {
+                const spec = await movementsForm.buildSpec({
+                    table: params && params.sourceTable,
+                    uid: params && params.sourceUID,
+                    sessionID
+                });
+                if (!spec) return { data: [], layout: [] };
+                suppressStandardButtons(spec.layout);
+                await translateLayoutI18n(spec.layout, sessionID);
+                const dsId = dataApp.storeDataset({ layout: spec.layout, data: spec.data, params: params || {} });
+                return {
+                    data: spec.data, layout: spec.layout, datasetId: dsId,
+                    clientScript: null,
+                    formIcon: '/apps/general_icons/resources/public/16x16/register.png',
+                    appCaption: spec.caption, windowState: 'maximized',
+                    fkLookups: null, isNew: false, events: null, prefilled: null,
+                    lock: null, rowTones: null, postingState: null,
+                    postingCaptions: null, isRecordForm: false
+                };
+            }
+        }
 
         // Проверяем кастомный лейаут ДО загрузки модели (поддержка виртуальных таблиц)
         let customLayoutObj = null;
@@ -1114,6 +1267,7 @@ async function generateFormSpec(tableName, params, sessionID) {
         let appCaption = null;
         let recordCaption = null;
         let windowState = null;
+        let formKind = null;
         try {
             const layoutMemory = require('../../drive_root/layoutMemory');
             for (const appN of LAYOUT_APP_NAMES_RECORD) {
@@ -1121,6 +1275,7 @@ async function generateFormSpec(tableName, params, sessionID) {
                 const userRole = await layoutMemory.getUserRoleBySession(sessionID);
                 customLayoutObj = await layoutMemory.getLayoutForUser(appN, tableName, userRole, sessionID, 'record');
                 if (customLayoutObj) {
+                    formKind = customLayoutObj.formKind || null;
                     clientScript = customLayoutObj.clientScript || null;
                     formIcon = customLayoutObj.formIcon || null;
                     windowState = customLayoutObj.windowState || null;
@@ -1152,6 +1307,15 @@ async function generateFormSpec(tableName, params, sessionID) {
                         const dfltMap = await loadUserDefaultValues(sessionID);
                         if (Object.keys(dfltMap).length > 0) applyAutofillFromLayout(data, layout, dfltMap);
                     }
+                    // РОД ФОРМЫ действует и здесь. Эта ветка — самостоятельный
+                    // выход из `generateFormSpec` для форм с `onLoadData`
+                    // (виртуальные таблицы: обработки, экраны настроек), и всё,
+                    // что сделано ниже по коду, до них не доходит. Именно поэтому
+                    // обработка «Удаление помеченных объектов» продолжала
+                    // показывать «ОК»/«Сохранить»: подавление стояло в общей
+                    // ветке, а форма уходила отсюда.
+                    if (formKind === 'processing') suppressStandardButtons(layout);
+
                     const datasetId = dataApp.storeDataset({
                         layout, data, params: params || {},
                         table: tableName,
@@ -1168,7 +1332,8 @@ async function generateFormSpec(tableName, params, sessionID) {
                     // не должен остаться родовым «uniForm» (форма через onLoadData).
                     const resolvedOnLoadCaption = (await resolveAppCaption(appCaption, sessionID)) || await tForSession(tableName, sessionID);
                     return { layout, data, datasetId, clientScript, formIcon, appCaption: resolvedOnLoadCaption, windowState: windowState || 'centered', fkLookups,
-                             events: clientEventsOf(customLayoutObj) };
+                             events: clientEventsOf(customLayoutObj),
+                             isRecordForm: formKind !== 'processing' };
                 }
             } catch (e) {
                 console.error('[uniForm/generateFormSpec] onLoadData dispatch error:', e && e.message || e);
@@ -1598,6 +1763,11 @@ async function generateFormSpec(tableName, params, sessionID) {
             console.error('[uniForm/generateFormSpec] tabularFilter scan error:', e && e.message || e);
         }
 
+        // ОБРАБОТКА — не форма записи: своих данных нет, сохранять нечего.
+        // Делается ДО `storeDataset`: он кладёт в хранилище глубокую копию, и
+        // правка лейаута после него до клиента не доезжает.
+        if (formKind === 'processing') suppressStandardButtons(layout);
+
         const datasetId = dataApp.storeDataset({
             table: tableName, id: effectiveRecordId, isNew: isNew,
             params: params, time: Date.now()
@@ -1614,6 +1784,12 @@ async function generateFormSpec(tableName, params, sessionID) {
         let resolvedCaption = await resolveAppCaption(recordCaption || appCaption, sessionID);
         // Тот же фолбэк, что и в режиме списка: перевод по ключу = имя таблицы (i18n.json),
         // иначе само имя. Заголовок формы записи совпадает с заголовком формы списка.
+        // У регистра лейаута нет (формы строит автогенератор), значит нет и
+        // подписи в реестре — берём её из объявления регистра, иначе в заголовке
+        // окна стоит имя таблицы.
+        if (!resolvedCaption) {
+            resolvedCaption = await resolveAppCaption(getRegisterCaption(tableName), sessionID);
+        }
         if (!resolvedCaption) resolvedCaption = await tForSession(tableName, sessionID);
         const presentation = (record && record.name != null) ? String(record.name).trim() : '';
         if (presentation) {
@@ -1649,6 +1825,35 @@ async function generateFormSpec(tableName, params, sessionID) {
                 if (immutable.readConfig(LockModel)) {
                     const values = {};
                     for (const d of data) values[d.name] = d.value;
+
+                    // СОСТОЯНИЕ ИЗ ЗАПИСИ, если его нет в данных формы.
+                    //
+                    // Замок читает состояние из значений формы, но у документа,
+                    // чьё состояние — СЛУЖЕБНЫЙ реквизит (`postingState` у
+                    // денежных документов), этого значения там ещё нет: служебные
+                    // поля кладутся в данные ниже по коду. Итог был тихий и
+                    // неприятный: `state: null` → `closed: false` → форма
+                    // ПРОВЕДЁННОГО документа оставалась редактируемой, хотя
+                    // объявление прямо это запрещает. У счёта не проявлялось —
+                    // там поле состояния обычное и в данных есть.
+                    const lockCfg = immutable.readConfig(LockModel);
+                    const lockField = lockCfg && lockCfg.field;
+                    if (lockField && values[lockField] === undefined && !isNew) {
+                        const recUID = (data.find(d => d && d.name === 'UID') || {}).value;
+                        if (recUID) {
+                            try {
+                                const lockGW = require('../../drive_root/dbGateway');
+                                const lockRows = await lockGW.execute({
+                                    operation: 'read', table: tableName, where: { UID: recUID },
+                                    options: { raw: true, limit: 1, attributes: ['UID', lockField] },
+                                    context: { sessionID }
+                                });
+                                if (lockRows && lockRows[0]) values[lockField] = lockRows[0][lockField];
+                            } catch (e) {
+                                console.error('[uniForm] состояние для замка не прочитано:', e && e.message || e);
+                            }
+                        }
+                    }
                     // Администратор при включённой настройке — без замка (тот же
                     // признак, что снимает запрет записи в dbGateway).
                     const override = await immutable.adminOverride(sessionID);
@@ -1656,8 +1861,106 @@ async function generateFormSpec(tableName, params, sessionID) {
                     if (lock) applyLockToLayout(layout, lock);
                 }
             }
+            // СТРОКА РЕГИСТРА — всегда только чтение, и это не настройка, а
+            // свойство таблицы: прямая запись в регистр отбивается middleware
+            // (`registerWriteGuard`), писать вправе только проведение.
+            // Редактируемая форма обещала бы то, в чём сервер откажет.
+            {
+                const registerForms = require('../../drive_root/db/registerForms');
+                if (registerForms.isRegisterTable(tableName)) {
+                    lock = registerForms.readOnlyLock();
+                    applyLockToLayout(layout, lock);
+                }
+            }
+            // Форму, запертую ЦЕЛИКОМ, не надо спрашивать «сохранить?»: сохранять
+            // нечего, а «Отмена» называется не тем словом. Ставится ЗДЕСЬ, рядом с
+            // замком: это единственная точка, правки лейаута из которой доезжают
+            // до клиента (ниже по коду набор уже сохранён глубокой копией).
+            applyReadOnlyButtons(layout, lock);
         } catch (e) {
             console.error('[uniForm/generateFormSpec] lock resolve error:', e && e.message || e);
+        }
+
+        // ── Состояние проведения ─────────────────────────────────────────────
+        // «Служебный реквизит» значит «не строим по нему контрол автоматически»,
+        // а НЕ «форма о нём не знает». Форме он нужен для двух вещей, и обе
+        // читают значение ИЗ ДАННЫХ формы (`getControlValue` → `_dataMap`):
+        //   - доступность команд (`enabledWhen: { field: "postingState" }`);
+        //   - пометка «в очереди» / «ошибка» (`visibleWhen`).
+        // Поэтому он кладётся и в `data` (как `UID`), и отдельным полем
+        // спецификации — второе нужно, чтобы форма, открытая на уже стоящем в
+        // очереди документе, заперлась с первой секунды.
+        let postingState = null;
+        let postingCaptions = null;
+        try {
+            const posting = require('../../drive_root/db/posting');
+            const gCtxPost = require('../../drive_root/globalServerContext');
+            const modelNameP = gCtxPost.getModelNameForTable(tableName);
+            const ModelP = modelNameP ? (gCtxPost.modelsDB || {})[modelNameP] : null;
+            if (ModelP && posting.readConfig(ModelP)) {
+                const rec = data.find(d => d && d.name === 'UID');
+                const uidP = rec && rec.value;
+                if (uidP && !isNew) {
+                    const dbGW = require('../../drive_root/dbGateway');
+                    const rowsP = await dbGW.execute({
+                        operation: 'read', table: tableName, where: { UID: uidP },
+                        options: { raw: true, limit: 1, attributes: ['UID', posting.STATE_FIELD] },
+                        context: { sessionID }
+                    });
+                    if (rowsP && rowsP[0]) postingState = rowsP[0][posting.STATE_FIELD] || null;
+                }
+                if (!postingState) postingState = posting.STATE.NOT_POSTED;
+
+                // Состояние проведения кладётся и В ДАННЫЕ ФОРМЫ — как `UID`.
+                // «Служебный» значит «не строим по нему контрол автоматически», а
+                // НЕ «форма о нём не знает»: по нему объявляется доступность команд
+                // (`enabledWhen: { field: "postingState" }`) и видимость пометки, а
+                // оба условия читают значение из данных формы. Без этой записи
+                // условие всегда ложно — кнопки «Провести» стоят серыми у любого
+                // документа, и выглядит это как поломка команды, а не как
+                // недостающие данные.
+                if (!data.some(d => d && d.name === posting.STATE_FIELD)) {
+                    data.push({ name: posting.STATE_FIELD, value: postingState });
+                }
+
+                // Подписи команд проведения — ПОТАБЛИЧНЫЕ (ТЗ §5.1): счёт говорит
+                // «Выставить», денежный документ — «Провести». Форме они нужны
+                // потому, что стандартную кнопку «ОК» она переименовывает в
+                // «<команда> и закрыть»: у документа «ОК» означает не «закрыть
+                // окно», а «закончить с документом».
+                const cfgP = posting.readConfig(ModelP);
+                // Подписи отдаём ТОЛЬКО для ручного режима. В режиме `auto` команд
+                // проведения на форме нет вовсе — и кнопка «ОК» там обязана
+                // остаться «Сохранить и закрыть»: документ уйдёт в очередь сам.
+                const capsP = {};
+                if (cfgP.mode !== 'manual') { postingCaptions = null; }
+                else for (const [k, v] of Object.entries(cfgP.captions || {})) {
+                    if (v && typeof v === 'object' && v.i18n) {
+                        try { capsP[k] = await tForSession(v.i18n, sessionID); }
+                        catch (e) { capsP[k] = v.i18n; }
+                    } else if (typeof v === 'string') {
+                        capsP[k] = v;
+                    }
+                }
+                if (cfgP.mode === 'manual') postingCaptions = capsP;
+
+                // СТРОКА ОЧЕРЕДИ — элемент ядра, а не лейаута приложения.
+                // «Документ стоит в очереди» — состояние, одинаковое у любого
+                // проводимого документа, и объявлять его в каждом лейауте значило
+                // бы двадцать раз списать один и тот же элемент, а потом найти
+                // документ, где его забыли. Поэтому ядро вставляет строку само —
+                // сразу под командной панелью, как просил владелец.
+                if (Array.isArray(layout)) {
+                    const already = layout.some(it => it && it.type === 'postingQueueLine');
+                    if (!already) {
+                        const line = { type: 'postingQueueLine', name: '__postingQueue' };
+                        const barAt = layout.findIndex(it => it && it.type === 'commandBar');
+                        layout.splice(barAt === -1 ? 0 : barAt + 1, 0, line);
+                    }
+                }
+            }
+        } catch (e) {
+            console.error('[uniForm/generateFormSpec] posting state resolve error:', e && e.message || e);
         }
 
         // Translate all { i18n: 'key' } objects in layout before sending to client
@@ -1682,7 +1985,7 @@ async function generateFormSpec(tableName, params, sessionID) {
             }
         }
 
-        return { data, layout, datasetId, clientScript, formIcon, appCaption: resolvedCaption, windowState: finalWindowState, fkLookups: await fkLookupsPromise, isNew: isNew, events: clientEvents, prefilled, lock, rowTones };
+        return { data, layout, datasetId, clientScript, formIcon, appCaption: resolvedCaption, windowState: finalWindowState, fkLookups: await fkLookupsPromise, isNew: isNew, events: clientEvents, prefilled, lock, rowTones, postingState, postingCaptions, isRecordForm: formKind !== 'processing' };
     } catch (e) {
         console.error('[uniForm/generateFormSpec] failed:', e && e.message || e);
         return { data: [], layout: [] };
@@ -1826,10 +2129,21 @@ async function cascadeDeleteChildren(tableName, parentIds, sessionID, ctx) {
 }
 
 // ── deleteRecord ────────────────────────────────────────────────────────────────────────────
-// Удаление записи из формы списка (кнопка «Удалить»). Раньше клиент слал в applyChanges
-// datasetId объектом { table, id } + changes:{_deleted:true}; applyChanges ждёт строковый
-// datasetId (резолв через dataApp.getDataset) и НЕ умеет удалять — запись молча не удалялась.
-// Теперь удаление — отдельная операция через dbGateway (RLS соблюдается).
+// Кнопка «Удалить» в списке делает РАЗНОЕ, и это не двусмысленность, а правило
+// (решение владельца 22.09.2026, как в классических учётных системах):
+//
+//   СУЩНОСТЬ (есть entityConfig.entityType) → ставит/снимает ПОМЕТКУ НА УДАЛЕНИЕ.
+//       Сама запись не трогается. Удаляет помеченные отдельная обработка, которая
+//       умеет проверить ссылки и сказать, кто мешает (drive_root/db/deletionMark.js).
+//   ВСЁ ОСТАЛЬНОЕ (технические таблицы: задания планировщика, настройки) → удаляет
+//       сразу, как раньше. Пометка у них не значила бы ничего: их не перечисляет
+//       обработка, и удалять их безопасно.
+//
+// ДВА ВЫЗОВА НА ОДНО НАЖАТИЕ. Клиент сначала спрашивает `dryRun: true` — что
+// произойдёт, — показывает соответствующий вопрос и только потом зовёт
+// по-настоящему. Иначе текст вопроса пришлось бы вычислять на клиенте, то есть
+// завести вторую копию правил о том, кого можно удалять; а они уже объявлены
+// один раз — в `entityConfig.immutable`.
 async function deleteRecord(params, sessionID) {
     const tableName = params && (params.tableName || params.table || params.dbTable);
     const recordId  = params && (params.recordId || params.recordID || params.id);
@@ -1839,6 +2153,52 @@ async function deleteRecord(params, sessionID) {
     const modelName = globalServerContext.getModelNameForTable(tableName) || tableName;
     const Model = globalServerContext.modelsDB[modelName];
     if (!Model) return { ok: false, error: 'Model not found for table: ' + tableName + ' (model: ' + modelName + ')' };
+
+    const deletionMark = require('../../drive_root/db/deletionMark');
+
+    // ── Сущность: два способа удаления, и выбирает человек ───────────────────
+    if (deletionMark.isEntityDef(Model)) {
+        const policy = deletionMark.readPolicy(Model);
+        const mode = (params && params.mode) || null;
+
+        // Прямое удаление — только если объявление его разрешает. Проверка ЗДЕСЬ,
+        // а не только на клиенте: кнопки на экране подсказывают, а не решают.
+        if (mode === 'direct') {
+            if (!policy.direct) {
+                return { ok: false, action: 'refuse',
+                    error: await tForSession('deletion_refuse_direct_off', sessionID) };
+            }
+            return await hardDeleteRecord({ tableName, recordId, sessionID });
+        }
+        if (mode === 'mark' || mode === null) {
+            return await applyDeletionMark({
+                Model, tableName, recordId, sessionID,
+                dryRun: !!(params && params.dryRun),
+                unpostFirst: !!(params && params.unpostFirst),
+                policy
+            });
+        }
+        return { ok: false, error: 'unknown delete mode: ' + mode };
+    }
+    if (params && params.dryRun) return { ok: true, action: 'delete', direct: true };
+    return await hardDeleteRecord({ tableName, recordId, sessionID });
+}
+
+/**
+ * НАСТОЯЩЕЕ удаление записи — вместе с её табличными частями, одной транзакцией.
+ *
+ * Отдельной функцией, потому что вызывающих двое и у них разные поводы:
+ *   - `deleteRecord` — техническая таблица, у которой пометки нет и не нужно;
+ *   - обработка «Удаление помеченных объектов» — второй шаг удаления сущности,
+ *     после того как она проверила ссылки (drive_root/db/deleteMarked.js).
+ * Замок неизменности и RLS стоят на шлюзе, поэтому здесь их копии нет: закрытый
+ * документ не удалится и отсюда.
+ */
+async function hardDeleteRecord({ tableName, recordId, sessionID }) {
+    const globalServerContextLocal = globalServerContext;
+    const modelName = globalServerContextLocal.getModelNameForTable(tableName) || tableName;
+    const Model = globalServerContextLocal.modelsDB[modelName];
+    if (!Model) return { ok: false, error: 'Model not found for table: ' + tableName };
 
     const delDbGW = require('../../drive_root/dbGateway');
 
@@ -1869,6 +2229,87 @@ async function deleteRecord(params, sessionID) {
         try { dynamicTableMethods.notifyTableChange(tbl, 'delete', null); } catch (e) {}
     }
     return { ok: true, recordId };
+}
+
+/**
+ * Поставить или снять пометку на удаление.
+ *
+ * Возвращает ДЕЙСТВИЕ, а не «ок/ошибка»: у нажатия четыре разных исхода, и
+ * каждый требует своего вопроса пользователю.
+ *
+ *   mark           — пометить (запись свободна);
+ *   unmark         — снять пометку (уже помечена);
+ *   unpostThenMark — документ проведён: сначала снять движения через очередь,
+ *                    потом пометить. Пометка поедет в строке очереди
+ *                    (`posting_queue.thenMark`) и встанет в той же транзакции,
+ *                    что и снятие движений;
+ *   refuse         — нельзя вообще (выставленный счёт удалению не подлежит).
+ */
+async function applyDeletionMark(p) {
+    const { Model, tableName, recordId, sessionID, dryRun, unpostFirst } = p;
+    const delDbGW = require('../../drive_root/dbGateway');
+    const deletionMark = require('../../drive_root/db/deletionMark');
+
+    const rows = await delDbGW.execute({
+        operation: 'read', table: tableName, where: { UID: recordId },
+        options: { raw: true, limit: 1 }, context: { appName: 'uniForm', sessionID }
+    });
+    const row = rows && rows[0];
+    if (!row) return { ok: false, error: await tForSession('record_not_found', sessionID) };
+
+    const marked = !!row[deletionMark.FIELD];
+    const decision = marked
+        ? { action: 'unmark' }
+        : deletionMark.intent(Model, row, true);
+
+    if (decision.action === 'refuse') {
+        const msg = await tfForSession(decision.reasonKey, sessionID, decision.reasonVars || {});
+        // Пометка запрещена, но прямое удаление может быть разрешено — тогда это
+        // не отказ, а единственный оставшийся способ, и клиент обязан его увидеть.
+        if (dryRun && p.policy && p.policy.direct) {
+            return { ok: true, action: null, marked, direct: true, markRefusal: msg };
+        }
+        return { ok: false, action: 'refuse', error: msg };
+    }
+
+    if (dryRun) {
+        // Ответ описывает ОБА способа сразу: клиенту нужно решить, спрашивать ли
+        // человека, а для этого он должен знать, есть ли из чего выбирать.
+        return { ok: true, action: decision.action, marked, direct: !!(p.policy && p.policy.direct) };
+    }
+
+    // Проведённый документ: пометка едет вместе с распроведением, одной задачей.
+    if (decision.action === 'unpostThenMark') {
+        if (!unpostFirst) {
+            // Без явного согласия человека распроведение не запускаем: это
+            // учётная операция, а он нажимал «удалить».
+            return { ok: false, action: 'unpostThenMark',
+                error: await tForSession('deletion_needs_unpost', sessionID) };
+        }
+        const posting = require('../../drive_root/db/posting');
+        const postingQueue = require('../../drive_root/db/postingQueue');
+        let userId = null;
+        try {
+            const u = await globalServerContext.getUserBySessionID(sessionID);
+            userId = (u && u.UID) || null;
+        } catch (e) { userId = null; }
+        await postingQueue.enqueue({
+            table: tableName, uid: recordId, action: posting.ACTION.UNPOST,
+            requestedBy: userId, byHuman: true, sessionID, thenMark: true
+        });
+        try { await postingQueue.kick(); } catch (e) { /* подберёт страхующий тик */ }
+        try { dynamicTableMethods.notifyTableChange(tableName, 'update', recordId); } catch (e) {}
+        return { ok: true, action: 'unpostThenMark', queued: true, recordId };
+    }
+
+    const next = !marked;
+    await delDbGW.execute({
+        operation: 'update', table: tableName, where: { UID: recordId },
+        data: { [deletionMark.FIELD]: next },
+        context: { appName: 'uniForm', sessionID }
+    });
+    try { dynamicTableMethods.notifyTableChange(tableName, 'update', recordId); } catch (e) {}
+    return { ok: true, action: next ? 'mark' : 'unmark', marked: next, recordId };
 }
 
 // Распознаёт нарушение внешнего ключа (PostgreSQL code 23503) сквозь обёртки Sequelize.
@@ -1945,6 +2386,7 @@ module.exports = {
     applyChanges,
     updateRow,
     deleteRecord,
+    hardDeleteRecord,
     getMultiInstanceTables,
     generateFormSpec,
     // Экспортируется ради самопроверки (tmp/2026-09-03_formlock_selftest.js):

@@ -1216,5 +1216,137 @@
         "ru": "Значения по умолчанию",
         "de": "Standardwerte",
         "pl": "Wartości domyślne"
+    },
+    "settings_core_group_closing": {
+        "en": "Closing date",
+        "ru": "Дата запрета",
+        "de": "Festschreibung",
+        "pl": "Data blokady"
+    },
+    "settings_core_closing_date": {
+        "en": "Closing date",
+        "ru": "Дата запрета редактирования",
+        "de": "Festschreibungsdatum",
+        "pl": "Data blokady edycji"
+    },
+    "settings_core_closing_date_hint": {
+        "en": "Documents dated on or before this date can no longer be changed or deleted.",
+        "ru": "Документы с датой не позже этой нельзя изменять и удалять.",
+        "de": "Belege mit einem Datum bis einschließlich dieses Tages können nicht mehr geändert oder gelöscht werden.",
+        "pl": "Dokumentów z datą nie późniejszą niż ta nie można zmieniać ani usuwać."
+    },
+    "settings_core_closing_auto": {
+        "en": "Advance automatically",
+        "ru": "Двигать автоматически",
+        "de": "Automatisch fortschreiben",
+        "pl": "Przesuwać automatycznie"
+    },
+    "settings_core_closing_auto_hint": {
+        "en": "A scheduled task moves the closing date forward every month.",
+        "ru": "Регламентное задание двигает дату запрета каждый месяц.",
+        "de": "Eine geplante Aufgabe verschiebt das Festschreibungsdatum monatlich.",
+        "pl": "Zadanie harmonogramu co miesiąc przesuwa datę blokady."
+    },
+    "settings_core_closing_offset": {
+        "en": "Days after month end",
+        "ru": "Дней после конца месяца",
+        "de": "Tage nach Monatsende",
+        "pl": "Dni po końcu miesiąca"
+    },
+    "settings_core_closing_offset_hint": {
+        "en": "How many days after the end of the previous month the closing date is set.",
+        "ru": "На сколько дней после конца прошлого месяца ставится дата запрета.",
+        "de": "Wie viele Tage nach dem Ende des Vormonats das Festschreibungsdatum gesetzt wird.",
+        "pl": "Ile dni po końcu poprzedniego miesiąca ustawiana jest data blokady."
+    },
+    "settings_core_group_posting": {
+        "en": "Posting",
+        "ru": "Проведение",
+        "de": "Verbuchung",
+        "pl": "Księgowanie"
+    },
+    "settings_core_posting_retry_threshold": {
+        "en": "Retries before back-off",
+        "ru": "Попыток до разрежения",
+        "de": "Versuche vor Verzögerung",
+        "pl": "Prób przed odroczeniem"
+    },
+    "settings_core_posting_retry_threshold_hint": {
+        "en": "How many consecutive failures are retried on every pass before the document is delayed.",
+        "ru": "Сколько неудач подряд пробуются на каждом проходе, прежде чем документ откладывается.",
+        "de": "Wie viele aufeinanderfolgende Fehlversuche bei jedem Durchlauf wiederholt werden, bevor der Beleg zurückgestellt wird.",
+        "pl": "Ile kolejnych niepowodzeń próbuje się przy każdym przebiegu, zanim dokument zostanie odłożony."
+    },
+    "settings_core_posting_retry_delay": {
+        "en": "Back-off, minutes",
+        "ru": "Пауза повтора, минут",
+        "de": "Wartezeit, Minuten",
+        "pl": "Przerwa, minuty"
+    },
+    "settings_core_posting_retry_delay_hint": {
+        "en": "How long to wait before the next attempt once the retry threshold is exceeded.",
+        "ru": "Сколько ждать до следующей попытки после превышения порога неудач.",
+        "de": "Wie lange bis zum nächsten Versuch gewartet wird, nachdem die Schwelle überschritten ist.",
+        "pl": "Jak długo czekać do następnej próby po przekroczeniu progu niepowodzeń."
+    },
+    "settings_core_posting_sweep": {
+        "en": "Safety sweep, minutes",
+        "ru": "Страхующий проход, минут",
+        "de": "Sicherungslauf, Minuten",
+        "pl": "Przebieg zabezpieczający, minuty"
+    },
+    "settings_core_posting_sweep_hint": {
+        "en": "How often the queue is checked even if nothing woke it up.",
+        "ru": "Как часто очередь проверяется, даже если её никто не разбудил.",
+        "de": "Wie oft die Warteschlange geprüft wird, auch wenn sie niemand geweckt hat.",
+        "pl": "Jak często sprawdzana jest kolejka, nawet gdy nikt jej nie obudził."
+    },
+    "settings_core_posting_success_ttl": {
+        "en": "Success message, seconds",
+        "ru": "Сообщение об успехе, секунд",
+        "de": "Erfolgsmeldung, Sekunden",
+        "pl": "Komunikat o sukcesie, sekundy"
+    },
+    "settings_core_posting_success_ttl_hint": {
+        "en": "How long a 'posted' message stays on screen. Error messages never expire.",
+        "ru": "Сколько держится на экране сообщение «проведено». Сообщения об ошибке не гаснут.",
+        "de": "Wie lange die Meldung «verbucht» angezeigt wird. Fehlermeldungen verschwinden nie von selbst.",
+        "pl": "Jak długo widoczny jest komunikat «zaksięgowano». Komunikaty o błędach nie gasną."
+    },
+    "closing_period_refusal": {
+        "en": "The period is closed: documents with this date cannot be changed.",
+        "ru": "Период закрыт: документы этой даты изменять нельзя.",
+        "de": "Der Zeitraum ist festgeschrieben: Belege mit diesem Datum können nicht geändert werden.",
+        "pl": "Okres jest zamknięty: dokumentów z tą datą nie można zmieniać."
+    },
+    "register_direct_write_denied": {
+        "en": "Direct writes to a register are not allowed: movements are written by posting only.",
+        "ru": "Прямая запись в регистр запрещена: движения пишет только проведение.",
+        "de": "Direktes Schreiben in ein Register ist nicht erlaubt: Bewegungen schreibt nur die Verbuchung.",
+        "pl": "Bezpośredni zapis do rejestru jest zabroniony: zapisy tworzy tylko księgowanie."
+    },
+    "queued for posting…": {
+        "en": "queued for posting…",
+        "ru": "в очереди на проведение…",
+        "de": "in der Verbuchungswarteschlange…",
+        "pl": "w kolejce do księgowania…"
+    },
+    "posting…": {
+        "en": "posting…",
+        "ru": "проводится…",
+        "de": "wird verbucht…",
+        "pl": "księgowanie…"
+    },
+    "The document is already posted": {
+        "en": "The document is already posted",
+        "ru": "Документ уже проведён",
+        "de": "Der Beleg ist bereits gebucht",
+        "pl": "Dokument jest już zaksięgowany"
+    },
+    "Save and close": {
+        "en": "Save and close",
+        "ru": "Сохранить и закрыть",
+        "de": "Speichern und schließen",
+        "pl": "Zapisz i zamknij"
     }
 }

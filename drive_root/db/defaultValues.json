@@ -128,5 +128,32 @@
             "language": "pl",
             "value": "Zadania zaplanowane"
         }
+    ],
+    "scheduler_tasks": [
+        {
+            "UID": "000000000-schedtask-0001",
+            "caption": "Posting queue",
+            "handler": "core.postingQueue",
+            "enabled": true,
+            "userId": "000000000-organizations-0001",
+            "scheduleMode": "interval",
+            "intervalMinutes": 5,
+            "misfirePolicy": "skip",
+            "timeoutSec": 1800,
+            "maxRetries": 0
+        },
+        {
+            "UID": "000000000-schedtask-0002",
+            "caption": "Advance closing date",
+            "handler": "core.advanceClosingDate",
+            "enabled": false,
+            "userId": "000000000-organizations-0001",
+            "scheduleMode": "monthly",
+            "monthDay": 1,
+            "timeOfDay": "03:00",
+            "misfirePolicy": "runOnce",
+            "timeoutSec": 600,
+            "maxRetries": 0
+        }
     ]
 }

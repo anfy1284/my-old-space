@@ -97,7 +97,7 @@
                 content.style.flexDirection = 'column';
                 content.style.gap = '6px';
 
-                // Дисплей (утопленная панель Win95)
+                // Дисплей (утопленная утопленная ретро-панель)
                 displayEl = document.createElement('div');
                 content.appendChild(displayEl);
                 displayEl.textContent = '0';

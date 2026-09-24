@@ -24,6 +24,82 @@
             "caption": { "i18n": "settings_core_admin_edits_closed_docs" },
             "hint": { "i18n": "settings_core_admin_edits_closed_docs_hint" },
             "order": 100
+        },
+
+        "closingDate": {
+            "//": "Дата запрета редактирования (GoBD-Festschreibung, ТЗ §13). Документы с датой НЕ ПОЗЖЕ этой не меняются и не удаляются. Уровень — организация: решение владельца; резолвер один (drive_root/db/closingDate.js#configFor), чтобы перенос уровня был правкой одной функции.",
+            "scope": "organization",
+            "type": "date",
+            "default": null,
+            "group": { "i18n": "settings_core_group_closing" },
+            "caption": { "i18n": "settings_core_closing_date" },
+            "hint": { "i18n": "settings_core_closing_date_hint" },
+            "order": 200
+        },
+        "closingAuto": {
+            "//": "Двигать дату запрета автоматически — задачей core.advanceClosingDate.",
+            "scope": "organization",
+            "type": "boolean",
+            "default": false,
+            "group": { "i18n": "settings_core_group_closing" },
+            "caption": { "i18n": "settings_core_closing_auto" },
+            "hint": { "i18n": "settings_core_closing_auto_hint" },
+            "order": 210
+        },
+        "closingOffsetDays": {
+            "//": "На сколько дней после конца прошлого месяца ставить дату при автосдвиге. Срок — норма (GoBD: не позже 30 числа следующего месяца), поэтому настройка, а не константа в коде.",
+            "scope": "organization",
+            "type": "number",
+            "default": 30,
+            "group": { "i18n": "settings_core_group_closing" },
+            "caption": { "i18n": "settings_core_closing_offset" },
+            "hint": { "i18n": "settings_core_closing_offset_hint" },
+            "order": 220
+        },
+
+        "postingRetryThreshold": {
+            "//": "Сколько неудач подряд пробуем на КАЖДОМ проходе очереди, прежде чем разредить повторы (ТЗ §10.4, §15).",
+            "scope": "system",
+            "type": "number",
+            "default": 3,
+            "visibility": "admin",
+            "group": { "i18n": "settings_core_group_posting" },
+            "caption": { "i18n": "settings_core_posting_retry_threshold" },
+            "hint": { "i18n": "settings_core_posting_retry_threshold_hint" },
+            "order": 300
+        },
+        "postingRetryDelayMinutes": {
+            "//": "Через сколько минут пробовать проведение после превышения порога неудач.",
+            "scope": "system",
+            "type": "number",
+            "default": 5,
+            "visibility": "admin",
+            "group": { "i18n": "settings_core_group_posting" },
+            "caption": { "i18n": "settings_core_posting_retry_delay" },
+            "hint": { "i18n": "settings_core_posting_retry_delay_hint" },
+            "order": 310
+        },
+        "postingSweepMinutes": {
+            "//": "Период страхующего запуска исполнителя очереди. Обычный путь — толчок сразу после постановки; это на случай, когда процесс упал между записью строки и толчком.",
+            "scope": "system",
+            "type": "number",
+            "default": 5,
+            "visibility": "admin",
+            "group": { "i18n": "settings_core_group_posting" },
+            "caption": { "i18n": "settings_core_posting_sweep" },
+            "hint": { "i18n": "settings_core_posting_sweep_hint" },
+            "order": 320
+        },
+        "postingSuccessNotifyTtl": {
+            "//": "Через сколько секунд гаснет уведомление об успешном проведении. Успех — эфемерный и с тайм-аутом, ошибка — с записью и без (ТЗ §12.1).",
+            "scope": "system",
+            "type": "number",
+            "default": 10,
+            "visibility": "admin",
+            "group": { "i18n": "settings_core_group_posting" },
+            "caption": { "i18n": "settings_core_posting_success_ttl" },
+            "hint": { "i18n": "settings_core_posting_success_ttl_hint" },
+            "order": 330
         }
     }
 }
