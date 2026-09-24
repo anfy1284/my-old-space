@@ -49,14 +49,25 @@ async function notifications() {
 }
 
 /**
- * Перевод для сессии. Порядок аргументов у `tfForSession` — `(key, sessionID, vars)`;
- * перепутанный порядок не падает, а молча возвращает КЛЮЧ, и в уведомлении у
- * пользователя оказывается «posting_notify_error_title» вместо текста.
+ * Перевод для ПОЛУЧАТЕЛЯ уведомления.
+ *
+ * Раньше здесь стоял `tfForSession(key, ctx.sessionID)` — язык брался из сессии
+ * ЗАДАЧИ. Но проход исполняет регламентное задание, а уведомление уходит тому,
+ * кто нажал кнопку: это разные люди с разными языками, и русскоязычный
+ * пользователь получал текст на языке владельца задания. Ошибка молчаливая —
+ * текст-то осмысленный, просто чужой.
+ *
+ * Поэтому адресат задаётся ПОЛЬЗОВАТЕЛЕМ (`tfForUser`), а не сессией. Тот же
+ * принцип, что «документ организации — на языке организации, а не сессии».
+ *
+ * Порядок аргументов у `tfForUser` — `(key, userUID, vars)`; перепутанный
+ * порядок не падает, а молча возвращает КЛЮЧ, и в уведомлении у пользователя
+ * оказывается «posting_notify_error_title» вместо текста.
  */
-async function tf(key, vars, sessionID) {
+async function tf(key, vars, userId) {
     try {
         const forms = require('../../drive_forms/globalServerContext');
-        const out = await forms.tfForSession(key, sessionID, vars || {});
+        const out = await forms.tfForUser(key, userId, vars || {});
         return (out && out !== key) ? out : key;
     } catch (e) {
         return key;
@@ -140,7 +151,7 @@ function tally() {
  * единственное важное сообщение — об ошибке — в ней утонет. Если же и ошибку гасить
  * по таймеру, исчезнет единственный канал, которым о ней вообще сообщают.
  */
-async function flushNotifications(acc, sessionID) {
+async function flushNotifications(acc) {
     const n = await notifications();
     if (!n) return;
     const ttl = await postingQueue.setting(postingQueue.SETTINGS.successNotifyTtl, 10);
@@ -153,8 +164,8 @@ async function flushNotifications(acc, sessionID) {
                 : (a.action === posting.ACTION.UNPOST ? 'posting_notify_unposted' : 'posting_notify_posted');
             await n.notify({
                 userId, appName: APP_NAME,
-                title: await tf('posting_notify_title', {}, sessionID),
-                text: await tf(key, { count: a.ok }, sessionID),
+                title: await tf('posting_notify_title', {}, userId),
+                text: await tf(key, { count: a.ok }, userId),
                 icon: ICONS.posted,
                 ttl, ephemeral: true
             });
@@ -162,15 +173,15 @@ async function flushNotifications(acc, sessionID) {
         }
         let single = a.firstError;
         if (a.firstErrorKey) {
-            const translated = await tf(a.firstErrorKey, a.firstErrorVars || {}, sessionID);
+            const translated = await tf(a.firstErrorKey, a.firstErrorVars || {}, userId);
             if (translated && translated !== a.firstErrorKey) single = translated;
         }
         const text = many
-            ? await tf('posting_notify_group_result', { ok: a.ok, failed: a.failed }, sessionID)
-            : (single || await tf('posting_notify_failed', {}, sessionID));
+            ? await tf('posting_notify_group_result', { ok: a.ok, failed: a.failed }, userId)
+            : (single || await tf('posting_notify_failed', {}, userId));
         await n.notify({
             userId, appName: APP_NAME,
-            title: await tf('posting_notify_error_title', {}, sessionID),
+            title: await tf('posting_notify_error_title', {}, userId),
             text: clampLines(text, 5, 1000),
             icon: ICONS.error,
             // Клик открывает документ. Имя функции, а не UID скрипта: UID живёт
@@ -196,7 +207,6 @@ async function pass(ctx) {
     const stats = { posted: 0, failed: 0, cascaded: 0, seen: 0 };
     const failedThisPass = [];
     const acc = tally();
-    let lastSessionID = (ctx && ctx.sessionID) || null;
 
     for (let i = 0; i < MAX_PER_PASS; i++) {
         if (ctx && typeof ctx.isCancelled === 'function' && ctx.isCancelled()) break;
@@ -292,7 +302,7 @@ async function pass(ctx) {
 
     // Ответы человеку — одним махом в конце прохода (см. tally).
     try {
-        await flushNotifications(acc, lastSessionID);
+        await flushNotifications(acc);
     } catch (e) {
         console.error('[postingRunner] Уведомления не отправлены:', e && e.message || e);
     }

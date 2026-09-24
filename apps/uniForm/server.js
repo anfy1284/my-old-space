@@ -329,7 +329,27 @@ async function getLayoutWithData(params, sessionID) {
             (!params.mode && !!(params.dbTable && !params.recordID && !params.recordId && !params.id));
         if (isListMode) {
             const customLayout = await findCustomLayout(LAYOUT_APP_NAMES_LIST, 'list', tableName, sessionID);
-            if (customLayout) {
+
+            // ПУСТОЙ ЛЕЙАУТ = «кастомного лейаута нет» — так же, как в режиме
+            // записи (см. ту же проверку перед `if (!layout)` ниже). Раньше здесь
+            // стоял просто `if (customLayout)`, и одно и то же объявление значило
+            // в двух режимах ПРОТИВОПОЛОЖНОЕ: `saveLayout({ mode: 'record',
+            // layout: [] })` давало автоформу, а `saveLayout({ mode: 'list',
+            // layout: [] })` — ПУСТОЕ ОКНО. Без колонок, без тулбара, без ошибки
+            // в консоли: журнал просто не открывался, и выглядело это как «нет
+            // записей». Так в приложении денежных документов оказались недоступны
+            // справочник видов операции (то есть данные, которые решают, чем
+            // становится каждый платёж) и проверочный документ каскада.
+            //
+            // Подпись и значок при этом не теряются: ветка автогенерации ниже
+            // берёт их из `layoutMemory` (`getTableCaption`, `getTableListIcon`
+            // внутри `getDefaultIconForTable`) — то есть ровно из того же
+            // `saveLayout`. Поэтому регистрация «только ради заголовка и иконки»
+            // продолжает работать, и именно так её и объявляют приложения.
+            const hasCustomList = !!customLayout
+                && !(Array.isArray(customLayout.layout) && customLayout.layout.length === 0);
+
+            if (hasCustomList) {
                 const clLayout = JSON.parse(JSON.stringify(customLayout.layout || customLayout));
 
                 // Если лейаут имеет onLoadData — вызываем его (как в record-режиме),

@@ -1230,10 +1230,10 @@
         "pl": "Data blokady edycji"
     },
     "settings_core_closing_date_hint": {
-        "en": "Documents dated on or before this date can no longer be changed or deleted.",
-        "ru": "Документы с датой не позже этой нельзя изменять и удалять.",
-        "de": "Belege mit einem Datum bis einschließlich dieses Tages können nicht mehr geändert oder gelöscht werden.",
-        "pl": "Dokumentów z datą nie późniejszą niż ta nie można zmieniać ani usuwać."
+        "en": "Documents dated on or before this day (the whole day included) can no longer be changed or deleted. Set it by hand to close a period you have already reported.",
+        "ru": "Документы с датой не позже этого дня (день включительно) нельзя изменять и удалять. Выставьте её вручную, чтобы закрыть период, по которому уже отчитались.",
+        "de": "Belege mit einem Datum bis einschließlich dieses Tages können nicht mehr geändert oder gelöscht werden. Von Hand setzen, um einen bereits gemeldeten Zeitraum festzuschreiben.",
+        "pl": "Dokumentów z datą nie późniejszą niż ten dzień (dzień włącznie) nie można zmieniać ani usuwać. Ustaw ręcznie, aby zamknąć okres, za który już złożono sprawozdanie."
     },
     "settings_core_closing_auto": {
         "en": "Advance automatically",
@@ -1242,22 +1242,10 @@
         "pl": "Przesuwać automatycznie"
     },
     "settings_core_closing_auto_hint": {
-        "en": "A scheduled task moves the closing date forward every month.",
-        "ru": "Регламентное задание двигает дату запрета каждый месяц.",
-        "de": "Eine geplante Aufgabe verschiebt das Festschreibungsdatum monatlich.",
-        "pl": "Zadanie harmonogramu co miesiąc przesuwa datę blokady."
-    },
-    "settings_core_closing_offset": {
-        "en": "Days after month end",
-        "ru": "Дней после конца месяца",
-        "de": "Tage nach Monatsende",
-        "pl": "Dni po końcu miesiąca"
-    },
-    "settings_core_closing_offset_hint": {
-        "en": "How many days after the end of the previous month the closing date is set.",
-        "ru": "На сколько дней после конца прошлого месяца ставится дата запрета.",
-        "de": "Wie viele Tage nach dem Ende des Vormonats das Festschreibungsdatum gesetzt wird.",
-        "pl": "Ile dni po końcu poprzedniego miesiąca ustawiana jest data blokady."
+        "en": "A scheduled task moves the closing date forward every day, keeping the editable window the same length. It never moves the date back.",
+        "ru": "Регламентное задание каждый день двигает дату запрета вперёд, сохраняя длину окна правки. Назад дату не возвращает никогда.",
+        "de": "Eine geplante Aufgabe verschiebt das Festschreibungsdatum täglich nach vorn und hält das Bearbeitungsfenster gleich lang. Zurück wird das Datum nie gesetzt.",
+        "pl": "Zadanie harmonogramu codziennie przesuwa datę blokady do przodu, zachowując długość okna edycji. Nigdy nie cofa daty."
     },
     "settings_core_group_posting": {
         "en": "Posting",
@@ -1348,5 +1336,17 @@
         "ru": "Сохранить и закрыть",
         "de": "Speichern und schließen",
         "pl": "Zapisz i zamknij"
+    },
+    "settings_core_closing_window": {
+        "en": "Editable window, days",
+        "ru": "Окно свободной правки, дней",
+        "de": "Bearbeitungsfenster, Tage",
+        "pl": "Okno edycji, dni"
+    },
+    "settings_core_closing_window_hint": {
+        "en": "The closing date is set to today minus this many days. Today is 15 October and the value is 30 — everything up to and including 15 September is locked.",
+        "ru": "Дата запрета ставится на сегодня минус это число дней. Сегодня 15 октября, значение 30 — закрыто всё по 15 сентября включительно.",
+        "de": "Das Festschreibungsdatum wird auf heute minus so viele Tage gesetzt. Heute ist der 15. Oktober und der Wert ist 30 — gesperrt ist alles bis einschließlich 15. September.",
+        "pl": "Data blokady ustawiana jest na dziś minus tyle dni. Dziś 15 października, wartość 30 — zablokowane jest wszystko do 15 września włącznie."
     }
 }

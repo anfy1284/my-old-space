@@ -1,16 +1,22 @@
 {
     "app": {
-        "caption": { "i18n": "settings_app_core" },
+        "caption": {
+            "i18n": "settings_app_core"
+        },
         "icon": "/apps/general_icons/resources/public/16x16/settings.png",
         "order": 10
     },
-
     "settings": {
         "language": {
             "scope": "user",
             "type": "reference",
-            "reference": { "table": "languages", "displayField": "name" },
-            "caption": { "i18n": "settings_core_language" },
+            "reference": {
+                "table": "languages",
+                "displayField": "name"
+            },
+            "caption": {
+                "i18n": "settings_core_language"
+            },
             "default": null,
             "order": 10
         },
@@ -20,52 +26,80 @@
             "type": "boolean",
             "default": false,
             "visibility": "admin",
-            "group": { "i18n": "settings_core_group_documents" },
-            "caption": { "i18n": "settings_core_admin_edits_closed_docs" },
-            "hint": { "i18n": "settings_core_admin_edits_closed_docs_hint" },
+            "group": {
+                "i18n": "settings_core_group_documents"
+            },
+            "caption": {
+                "i18n": "settings_core_admin_edits_closed_docs"
+            },
+            "hint": {
+                "i18n": "settings_core_admin_edits_closed_docs_hint"
+            },
             "order": 100
         },
-
         "closingDate": {
-            "//": "Дата запрета редактирования (GoBD-Festschreibung, ТЗ §13). Документы с датой НЕ ПОЗЖЕ этой не меняются и не удаляются. Уровень — организация: решение владельца; резолвер один (drive_root/db/closingDate.js#configFor), чтобы перенос уровня был правкой одной функции.",
+            "//": "Дата запрета редактирования (ТЗ §13). Документы с датой НЕ ПОЗЖЕ этой (день включительно) не меняются и не удаляются. Выставленная РУКАМИ — это настоящее закрытие периода, по которому отчитались; автосдвиг её назад не возвращает. Уровень — организация; резолвер один (drive_root/db/closingDate.js#configFor).",
             "scope": "organization",
             "type": "date",
             "default": null,
-            "group": { "i18n": "settings_core_group_closing" },
-            "caption": { "i18n": "settings_core_closing_date" },
-            "hint": { "i18n": "settings_core_closing_date_hint" },
+            "group": {
+                "i18n": "settings_core_group_closing"
+            },
+            "caption": {
+                "i18n": "settings_core_closing_date"
+            },
+            "hint": {
+                "i18n": "settings_core_closing_date_hint"
+            },
             "order": 200
         },
         "closingAuto": {
-            "//": "Двигать дату запрета автоматически — задачей core.advanceClosingDate.",
+            "//": "Двигать дату запрета автоматически — задачей core.advanceClosingDate (скользящее окно постоянной длины). Выключено ПОЛНОСТЬЮ по умолчанию: механизм нужен не всем, а выставленная руками дата действует и без него.",
             "scope": "organization",
             "type": "boolean",
             "default": false,
-            "group": { "i18n": "settings_core_group_closing" },
-            "caption": { "i18n": "settings_core_closing_auto" },
-            "hint": { "i18n": "settings_core_closing_auto_hint" },
+            "group": {
+                "i18n": "settings_core_group_closing"
+            },
+            "caption": {
+                "i18n": "settings_core_closing_auto"
+            },
+            "hint": {
+                "i18n": "settings_core_closing_auto_hint"
+            },
             "order": 210
         },
         "closingOffsetDays": {
-            "//": "На сколько дней после конца прошлого месяца ставить дату при автосдвиге. Срок — норма (GoBD: не позже 30 числа следующего месяца), поэтому настройка, а не константа в коде.",
+            "//": "Длина окна свободной правки, в днях. Дата запрета при автосдвиге = сегодня минус это число, конец суток: сегодня 15 октября при значении 30 — закрыто по 15 сентября включительно. Окно ПОСТОЯННОЙ длины, а не «до конца прошлого месяца»: месячная граница даёт 27-го почти месяц свободы, а 1-го — ноль.",
             "scope": "organization",
             "type": "number",
             "default": 30,
-            "group": { "i18n": "settings_core_group_closing" },
-            "caption": { "i18n": "settings_core_closing_offset" },
-            "hint": { "i18n": "settings_core_closing_offset_hint" },
+            "group": {
+                "i18n": "settings_core_group_closing"
+            },
+            "caption": {
+                "i18n": "settings_core_closing_window"
+            },
+            "hint": {
+                "i18n": "settings_core_closing_window_hint"
+            },
             "order": 220
         },
-
         "postingRetryThreshold": {
             "//": "Сколько неудач подряд пробуем на КАЖДОМ проходе очереди, прежде чем разредить повторы (ТЗ §10.4, §15).",
             "scope": "system",
             "type": "number",
             "default": 3,
             "visibility": "admin",
-            "group": { "i18n": "settings_core_group_posting" },
-            "caption": { "i18n": "settings_core_posting_retry_threshold" },
-            "hint": { "i18n": "settings_core_posting_retry_threshold_hint" },
+            "group": {
+                "i18n": "settings_core_group_posting"
+            },
+            "caption": {
+                "i18n": "settings_core_posting_retry_threshold"
+            },
+            "hint": {
+                "i18n": "settings_core_posting_retry_threshold_hint"
+            },
             "order": 300
         },
         "postingRetryDelayMinutes": {
@@ -74,9 +108,15 @@
             "type": "number",
             "default": 5,
             "visibility": "admin",
-            "group": { "i18n": "settings_core_group_posting" },
-            "caption": { "i18n": "settings_core_posting_retry_delay" },
-            "hint": { "i18n": "settings_core_posting_retry_delay_hint" },
+            "group": {
+                "i18n": "settings_core_group_posting"
+            },
+            "caption": {
+                "i18n": "settings_core_posting_retry_delay"
+            },
+            "hint": {
+                "i18n": "settings_core_posting_retry_delay_hint"
+            },
             "order": 310
         },
         "postingSweepMinutes": {
@@ -85,9 +125,15 @@
             "type": "number",
             "default": 5,
             "visibility": "admin",
-            "group": { "i18n": "settings_core_group_posting" },
-            "caption": { "i18n": "settings_core_posting_sweep" },
-            "hint": { "i18n": "settings_core_posting_sweep_hint" },
+            "group": {
+                "i18n": "settings_core_group_posting"
+            },
+            "caption": {
+                "i18n": "settings_core_posting_sweep"
+            },
+            "hint": {
+                "i18n": "settings_core_posting_sweep_hint"
+            },
             "order": 320
         },
         "postingSuccessNotifyTtl": {
@@ -96,9 +142,15 @@
             "type": "number",
             "default": 10,
             "visibility": "admin",
-            "group": { "i18n": "settings_core_group_posting" },
-            "caption": { "i18n": "settings_core_posting_success_ttl" },
-            "hint": { "i18n": "settings_core_posting_success_ttl_hint" },
+            "group": {
+                "i18n": "settings_core_group_posting"
+            },
+            "caption": {
+                "i18n": "settings_core_posting_success_ttl"
+            },
+            "hint": {
+                "i18n": "settings_core_posting_success_ttl_hint"
+            },
             "order": 330
         }
     }

@@ -382,6 +382,44 @@ async function tfForSession(key, sessionID, vars = {}) {
     return i18n.tf(key, language, vars);
 }
 
+/**
+ * Язык КОНКРЕТНОГО ПОЛЬЗОВАТЕЛЯ, а не текущей сессии.
+ *
+ * Нужен там, где текст пишет один человек, а читает другой: фоновая работа
+ * отвечает уведомлением тому, кто нажал кнопку, а исполняется под сессией
+ * владельца регламентного задания. Это разные люди с разными языками, и
+ * `tfForSession(key, ctx.sessionID)` в таком месте переводит на язык НЕ ТОГО
+ * человека — молча, потому что текст получается осмысленный, просто чужой.
+ *
+ * Тот же принцип, что «документ организации — на языке организации, а не
+ * сессии»: язык выбирается по тому, КОМУ адресован текст.
+ *
+ * @param {string} userUID — получатель (всегда `user.UID`, не `user.id`)
+ * @returns {Promise<string>} код языка; `'en'`, если настройка не прочиталась
+ */
+async function languageOfUser(userUID) {
+    if (!userUID) return 'en';
+    return (await _resolveUserLanguageCode(userUID)) || 'en';
+}
+
+/**
+ * Перевести ключ на языке ПОЛУЧАТЕЛЯ. Пара к `tForSession`, но адресат задаётся
+ * пользователем, а не сессией. См. `languageOfUser`.
+ *
+ * Порядок аргументов тот же, что у `tfForSession` — `(ключ, кому, подстановки)`;
+ * перепутанный порядок не падает, а молча возвращает КЛЮЧ.
+ *
+ * @param {string} key
+ * @param {string} userUID
+ * @param {Object} [vars={}]
+ * @returns {Promise<string>}
+ */
+async function tfForUser(key, userUID, vars = {}) {
+    const language = await languageOfUser(userUID);
+    const i18n = require('../drive_root/i18n');
+    return i18n.tf(key, language, vars);
+}
+
 module.exports = {
     getUserAccessRole,
     loadApps,
@@ -389,4 +427,6 @@ module.exports = {
     invalidateSessionContext,
     tForSession,
     tfForSession,
+    languageOfUser,
+    tfForUser,
 };
