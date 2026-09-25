@@ -1348,5 +1348,29 @@
         "ru": "Дата запрета ставится на сегодня минус это число дней. Сегодня 15 октября, значение 30 — закрыто всё по 15 сентября включительно.",
         "de": "Das Festschreibungsdatum wird auf heute minus so viele Tage gesetzt. Heute ist der 15. Oktober und der Wert ist 30 — gesperrt ist alles bis einschließlich 15. September.",
         "pl": "Data blokady ustawiana jest na dziś minus tyle dni. Dziś 15 października, wartość 30 — zablokowane jest wszystko do 15 września włącznie."
+    },
+    "view_main": {
+        "en": "Main",
+        "ru": "Основное",
+        "de": "Standard",
+        "pl": "Główny"
+    },
+    "view_auto": {
+        "en": "Automatic",
+        "ru": "Автоматическое",
+        "de": "Automatisch",
+        "pl": "Automatyczny"
+    },
+    "view_quick": {
+        "en": "Quick entry",
+        "ru": "Быстрый ввод",
+        "de": "Schnellerfassung",
+        "pl": "Szybkie wprowadzanie"
+    },
+    "view_switch_tooltip": {
+        "en": "View",
+        "ru": "Представление",
+        "de": "Ansicht",
+        "pl": "Widok"
     }
 }

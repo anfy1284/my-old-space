@@ -43,6 +43,29 @@ const _registeredPrefixes = new Set();
 // Нужен для подбора лейаута администратору: см. getLayoutForUser, шаг 3.
 const _registeredRoles = new Map();
 
+// ── ПРЕДСТАВЛЕНИЯ ────────────────────────────────────────────────────────────
+//
+// Одной таблице можно зарегистрировать НЕСКОЛЬКО лейаутов. Для пользователя это
+// «представления»: если ему доступно больше одного, форма показывает в командной
+// панели справа кнопку с названием текущего и списком остальных.
+//
+// Идентификатор представления — `variant` в `saveLayout`. Умолчание `main`, и его
+// ключ в хранилище остаётся ПРЕЖНИМ (`app|mode|table|role`): иначе перезапуск с
+// уцелевшим memory_store оставил бы старые записи невидимыми.
+//
+// Доступ отдельным полем НЕ объявляется: для этого уже есть `roles` — то же самое,
+// чем лейаут и так выбирается по роли. Второе поле доступа разошлось бы с первым.
+//
+// `auto` — синтетическое представление «как построит ядро»: та же регистрация, но с
+// пустым лейаутом (пустой лейаут и означает «кастомного нет»). Предлагается ТОЛЬКО
+// администратору: обычному пользователю выбор между своей формой и сырой
+// автоформой ничего не объясняет, а сломать вид ему позволяет.
+const MAIN_VARIANT = 'main';
+const AUTO_VARIANT = 'auto';
+
+// prefix → Map(variant → { roles:Set<string>, caption, isDefault, order })
+const _registeredViews = new Map();
+
 // Table-level icon registry: tableName → iconPath.
 // Populated automatically by saveLayout when formIcon is provided.
 // Any app can query getTableIcon(tableName) without needing its own layout.
@@ -95,8 +118,11 @@ require('./dbLifecycle').onDatabaseReset('layoutMemory', () => {
  * @param {string} role
  * @returns {string}
  */
-function makeKey(appName, mode, tableName, role) {
-    return `${appName}|${mode || 'record'}|${tableName}|${role}`;
+function makeKey(appName, mode, tableName, role, variant) {
+    const base = `${appName}|${mode || 'record'}|${tableName}|${role}`;
+    // Ключ основного представления — прежний, без хвоста: см. комментарий к
+    // _registeredViews. Дополнительные представления добавляют своё имя.
+    return (!variant || variant === MAIN_VARIANT) ? base : `${base}|${variant}`;
 }
 
 function makePrefix(appName, mode, tableName) {
@@ -126,7 +152,7 @@ function makePrefix(appName, mode, tableName) {
  * @param {string|object}   [opts.appCaption] — Человекочитаемое имя формы/приложения.
  *   Строка или объект { i18n: 'key' } — резолвится сервером при выдаче.
  */
-async function saveLayout({ appName, mode, tableName, roles, layout, extraButtons, events, clientScript, formIcon, appCaption, recordCaption, listIcon, windowState, formKind }) {
+async function saveLayout({ appName, mode, tableName, roles, layout, extraButtons, events, clientScript, formIcon, appCaption, recordCaption, listIcon, windowState, formKind, variant, viewCaption, isDefault }) {
     if (!appName || !tableName || (!Array.isArray(layout) && !Array.isArray(extraButtons))) {
         throw new Error('[layoutMemory.saveLayout] appName, tableName and layout (Array) are required (or extraButtons for an auto-generated form)');
     }
@@ -135,8 +161,9 @@ async function saveLayout({ appName, mode, tableName, roles, layout, extraButton
     // layout всегда пишем массивом (потребители различают «нет кастомного лейаута» по
     // пустому массиву, а `undefined` сломал бы разбор записи в getLayoutForUser).
     const storedLayout = Array.isArray(layout) ? layout : [];
+    const effectiveVariant = variant || MAIN_VARIANT;
     for (const role of roleList) {
-        await memoryStore.set(NAMESPACE, makeKey(appName, effectiveMode, tableName, role), { layout: storedLayout, extraButtons: Array.isArray(extraButtons) ? extraButtons : null, events: events || null, clientScript: clientScript || null, formIcon: formIcon || null, appCaption: appCaption || null, recordCaption: recordCaption || null, listIcon: listIcon || null, windowState: windowState || null, formKind: formKind || null });
+        await memoryStore.set(NAMESPACE, makeKey(appName, effectiveMode, tableName, role, effectiveVariant), { layout: storedLayout, extraButtons: Array.isArray(extraButtons) ? extraButtons : null, events: events || null, clientScript: clientScript || null, formIcon: formIcon || null, appCaption: appCaption || null, recordCaption: recordCaption || null, listIcon: listIcon || null, windowState: windowState || null, formKind: formKind || null });
     }
     // Register prefix so hot-path can skip tables with no layouts at all
     _registeredPrefixes.add(makePrefix(appName, effectiveMode, tableName));
@@ -144,6 +171,16 @@ async function saveLayout({ appName, mode, tableName, roles, layout, extraButton
         const prefix = makePrefix(appName, effectiveMode, tableName);
         if (!_registeredRoles.has(prefix)) _registeredRoles.set(prefix, new Set());
         for (const role of roleList) _registeredRoles.get(prefix).add(role);
+
+        if (!_registeredViews.has(prefix)) _registeredViews.set(prefix, new Map());
+        const views = _registeredViews.get(prefix);
+        const known = views.get(effectiveVariant) || { roles: new Set(), caption: null, isDefault: false, order: views.size };
+        for (const role of roleList) known.roles.add(role);
+        // Подпись представления необязательна: одиночному лейауту она не нужна —
+        // кнопка выбора у него всё равно не появится.
+        if (viewCaption) known.caption = viewCaption;
+        if (isDefault) known.isDefault = true;
+        views.set(effectiveVariant, known);
     }
     // 5.2 — лейаут пересохранён → переведённые клоны для его ключей устарели.
     // saveLayout вызывается на старте (и редко в рантайме), поэтому чистим целиком.
@@ -182,6 +219,13 @@ function translateLayoutCaptions(nodes, tFn) {
         if (node.confirm && typeof node.confirm === 'object' && node.confirm.i18n) {
             node.confirm = tFn(node.confirm.i18n);
         }
+        // enabledWhen.reason — причина отказа у недоступной команды. Та же природа,
+        // что confirm: строка элемента, которую клиент показывает как есть.
+        if (node.enabledWhen && typeof node.enabledWhen === 'object'
+            && node.enabledWhen.reason && typeof node.enabledWhen.reason === 'object'
+            && node.enabledWhen.reason.i18n) {
+            node.enabledWhen.reason = tFn(node.enabledWhen.reason.i18n);
+        }
         if (Array.isArray(node.layout))       translateLayoutCaptions(node.layout, tFn);
         if (Array.isArray(node.columns))       translateLayoutCaptions(node.columns, tFn);
         if (Array.isArray(node.options))       translateLayoutCaptions(node.options, tFn);
@@ -209,19 +253,30 @@ function translateLayoutCaptions(nodes, tFn) {
  * @param {string} [mode]      - 'record' (default) | 'list'
  * @returns {Promise<Array|null>}
  */
-async function getLayoutForUser(appName, tableName, userRole, sessionID, mode) {
+async function getLayoutForUser(appName, tableName, userRole, sessionID, mode, variant) {
     if (!appName || !tableName) return null;
     const effectiveMode = mode || 'record';
 
     // Fast-path: nothing registered for this table — immediate return
     if (!_registeredPrefixes.has(makePrefix(appName, effectiveMode, tableName))) return null;
 
+    // Представление «как построит ядро»: та же запись, но с ПУСТЫМ лейаутом —
+    // пустой лейаут и означает «кастомного нет». Кнопки, иконки и заголовки
+    // остаются: автоформа без них потеряла бы команды приложения.
+    if (variant === AUTO_VARIANT) {
+        const base = await getLayoutForUser(appName, tableName, userRole, sessionID, effectiveMode, MAIN_VARIANT);
+        if (!base) return null;
+        const copy = JSON.parse(JSON.stringify(base));
+        copy.layout = [];
+        return copy;
+    }
+
     let result = null;
     let matchedKey = null;
 
     // 1. Exact role match (in-memory Map → instant)
     if (userRole) {
-        const k = makeKey(appName, effectiveMode, tableName, userRole);
+        const k = makeKey(appName, effectiveMode, tableName, userRole, variant);
         const stored = memoryStore.getSync(NAMESPACE, k);
         if (stored) {
             result = stored.layout !== undefined ? stored : { layout: stored, events: null, clientScript: null, formIcon: null, appCaption: null };
@@ -231,7 +286,7 @@ async function getLayoutForUser(appName, tableName, userRole, sessionID, mode) {
 
     // 2. Wildcard match (any role)
     if (!result) {
-        const k = makeKey(appName, effectiveMode, tableName, '*');
+        const k = makeKey(appName, effectiveMode, tableName, '*', variant);
         const fallback = memoryStore.getSync(NAMESPACE, k);
         if (fallback) {
             result = fallback.layout !== undefined ? fallback : { layout: fallback, events: null, clientScript: null, formIcon: null, appCaption: null };
@@ -258,7 +313,7 @@ async function getLayoutForUser(appName, tableName, userRole, sessionID, mode) {
             const candidates = roles.has('user') ? ['user', ...roles] : Array.from(roles);
             for (const role of candidates) {
                 if (role === 'admin' || role === '*') continue;
-                const k = makeKey(appName, effectiveMode, tableName, role);
+                const k = makeKey(appName, effectiveMode, tableName, role, variant);
                 const stored = memoryStore.getSync(NAMESPACE, k);
                 if (!stored) continue;
                 result = stored.layout !== undefined ? stored : { layout: stored, events: null, clientScript: null, formIcon: null, appCaption: null };
@@ -386,4 +441,68 @@ function getListSort(tableName) {
     return _tableListSort.get(tableName) || null;
 }
 
-module.exports = { saveLayout, getLayoutForUser, getUserRoleBySession, hasRegistered, getTableIcon, getTableCaption, getTableRecordCaption, getTableListIcon, registerListSort, getListSort };
+/**
+ * Представления, доступные этому пользователю для формы.
+ *
+ * Возвращает ПУСТОЙ массив, когда выбирать не из чего (одно представление): кнопка
+ * выбора не должна появляться там, где она ничего не делает.
+ *
+ * Администратор видит все зарегистрированные представления и вдобавок
+ * «автоматическое» — форму, какой её построит ядро из модели. Именно так он
+ * сравнивает свою форму с тем, что даёт ядро, не правя конфигурацию.
+ *
+ * @param {string} appName
+ * @param {string} tableName
+ * @param {string|null} userRole
+ * @param {string} [sessionID] — когда задан, подписи { i18n } переводятся
+ * @param {string} [mode]      — 'record' (default) | 'list'
+ * @returns {Promise<Array<{variant:string, caption:string, isDefault:boolean}>>}
+ */
+async function listViewsForUser(appName, tableName, userRole, sessionID, mode) {
+    if (!appName || !tableName) return [];
+    const effectiveMode = mode || 'record';
+    const views = _registeredViews.get(makePrefix(appName, effectiveMode, tableName));
+    if (!views || !views.size) return [];
+
+    const isAdmin = String(userRole) === 'admin';
+    const out = [];
+    for (const [variant, info] of views) {
+        // Доступ — тот же `roles`, которым лейаут и выбирается. Администратор видит
+        // всё: его права сквозные везде, и подбор лейаута уже устроен так же.
+        if (!isAdmin && !info.roles.has(userRole) && !info.roles.has('*')) continue;
+        out.push({
+            variant,
+            caption: info.caption || { i18n: variant === MAIN_VARIANT ? 'view_main' : ('view_' + variant) },
+            isDefault: !!info.isDefault,
+            order: info.order
+        });
+    }
+    if (!out.length) return [];
+    if (isAdmin) {
+        out.push({ variant: AUTO_VARIANT, caption: { i18n: 'view_auto' }, isDefault: false, order: 9999 });
+    }
+    // Одно представление — выбирать не из чего.
+    if (out.length < 2) return [];
+
+    out.sort((a, b) => a.order - b.order);
+    // Ни одно не объявлено основным — основным считается первое зарегистрированное.
+    if (!out.some(v => v.isDefault)) out[0].isDefault = true;
+
+    let language = null;
+    if (sessionID) {
+        try {
+            const formsCtx = require('../drive_forms/globalServerContext');
+            language = (await formsCtx.getSessionContext(sessionID)).language;
+        } catch (e) { /* без сессии отдадим ключи как есть */ }
+    }
+    const i18n = require('./i18n');
+    return out.map(v => ({
+        variant: v.variant,
+        caption: (v.caption && typeof v.caption === 'object' && v.caption.i18n)
+            ? (language ? i18n.t(v.caption.i18n, language) : v.caption.i18n)
+            : String(v.caption),
+        isDefault: v.isDefault
+    }));
+}
+
+module.exports = { saveLayout, getLayoutForUser, listViewsForUser, getUserRoleBySession, hasRegistered, getTableIcon, getTableCaption, getTableRecordCaption, getTableListIcon, registerListSort, getListSort, MAIN_VARIANT, AUTO_VARIANT };

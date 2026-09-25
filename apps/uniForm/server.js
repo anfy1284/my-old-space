@@ -214,6 +214,15 @@ async function translateLayoutI18n(items, sessionID) {
             try { item.confirm = await tForSession(item.confirm.i18n, sessionID); }
             catch(e) { item.confirm = item.confirm.i18n; }
         }
+        // `enabledWhen.reason` — причина отказа у недоступной команды. Та же природа,
+        // что у `confirm`: текст элемента, который клиент показывает как есть, значит
+        // переводится здесь. Маркер `__t()` в статическом файле с переменной не работает.
+        if (item.enabledWhen && typeof item.enabledWhen === 'object'
+            && item.enabledWhen.reason && typeof item.enabledWhen.reason === 'object'
+            && item.enabledWhen.reason.i18n) {
+            try { item.enabledWhen.reason = await tForSession(item.enabledWhen.reason.i18n, sessionID); }
+            catch(e) { item.enabledWhen.reason = item.enabledWhen.reason.i18n; }
+        }
         // Translate options captions (emunList etc.)
         if (Array.isArray(item.options)) {
             for (const opt of item.options) {
@@ -300,13 +309,13 @@ async function resolveAppCaption(caption, sessionID) {
 const LAYOUT_APP_NAMES_LIST   = ['uniForm', 'uniListForm'];
 const LAYOUT_APP_NAMES_RECORD = ['uniForm', 'uniRecordForm'];
 
-async function findCustomLayout(appNames, mode, tableName, sessionID) {
+async function findCustomLayout(appNames, mode, tableName, sessionID, variant) {
     try {
         const layoutMemory = require('../../drive_root/layoutMemory');
         for (const appName of appNames) {
             if (!layoutMemory.hasRegistered(appName, tableName, mode)) continue;
             const userRole = await layoutMemory.getUserRoleBySession(sessionID);
-            const layout = await layoutMemory.getLayoutForUser(appName, tableName, userRole, sessionID, mode);
+            const layout = await layoutMemory.getLayoutForUser(appName, tableName, userRole, sessionID, mode, variant);
             if (layout) return layout;
         }
     } catch(e) {
@@ -320,7 +329,42 @@ function getData(params) {
 }
 
 // ── getLayoutWithData ─────────────────────────────────────────────────────────────────────────
+//
+// ПРЕДСТАВЛЕНИЯ. Форме можно зарегистрировать несколько лейаутов (`variant` в
+// saveLayout); какой показать — приезжает в `params.view`. Список доступных
+// пользователю прикладывается к ответу ОДНИМ местом, обёрткой ниже: ветвей
+// возврата у сборки несколько (список свой, автосписок свой, запись своя), и
+// дописывать поле в каждую значит однажды забыть про одну.
 async function getLayoutWithData(params, sessionID) {
+    const spec = await buildLayoutWithData(params, sessionID);
+    if (!spec || typeof spec !== 'object') return spec;
+    try {
+        const tableName = params && (params.tableName || params.dbTable || params.table);
+        const isListMode = params.mode === 'list' ||
+            (!params.mode && !!(params.dbTable && !params.recordID && !params.recordId && !params.id));
+        const layoutMemory = require('../../drive_root/layoutMemory');
+        const userRole = await layoutMemory.getUserRoleBySession(sessionID);
+        const mode = isListMode ? 'list' : 'record';
+        const names = isListMode ? LAYOUT_APP_NAMES_LIST : LAYOUT_APP_NAMES_RECORD;
+        let views = [];
+        for (const appN of names) {
+            views = await layoutMemory.listViewsForUser(appN, tableName, userRole, sessionID, mode);
+            if (views.length) break;
+        }
+        if (views.length) {
+            spec.views = views;
+            // Текущее: запрошенное, иначе основное. Клиент рисует его на кнопке.
+            const requested = params && params.view;
+            const current = views.find(v => v.variant === requested) || views.find(v => v.isDefault) || views[0];
+            spec.view = current.variant;
+        }
+    } catch (e) {
+        console.error('[uniForm/getLayoutWithData] views error:', e && e.message || e);
+    }
+    return spec;
+}
+
+async function buildLayoutWithData(params, sessionID) {
     try {
         const tableName = params && (params.tableName || params.dbTable || params.table);
 
@@ -328,7 +372,7 @@ async function getLayoutWithData(params, sessionID) {
         const isListMode = params.mode === 'list' ||
             (!params.mode && !!(params.dbTable && !params.recordID && !params.recordId && !params.id));
         if (isListMode) {
-            const customLayout = await findCustomLayout(LAYOUT_APP_NAMES_LIST, 'list', tableName, sessionID);
+            const customLayout = await findCustomLayout(LAYOUT_APP_NAMES_LIST, 'list', tableName, sessionID, params && params.view);
 
             // ПУСТОЙ ЛЕЙАУТ = «кастомного лейаута нет» — так же, как в режиме
             // записи (см. ту же проверку перед `if (!layout)` ниже). Раньше здесь
@@ -588,6 +632,9 @@ async function applyChanges(payload, sessionID) {
             for (const appN of LAYOUT_APP_NAMES_RECORD) {
                 if (!layoutMemory.hasRegistered(appN, tableName, 'record')) continue;
                 const userRole = await layoutMemory.getUserRoleBySession(sessionID);
+                // Представление здесь НЕ учитывается намеренно: `events` — свойство
+                // записи, а не её вида. Иначе переключение вида отключало бы
+                // серверную обработку сохранения.
                 const stored = await layoutMemory.getLayoutForUser(appN, tableName, userRole, sessionID, 'record');
                 if (stored && stored.events && stored.events.onSave) {
                     const binding = stored.events.onSave;
@@ -1293,7 +1340,7 @@ async function generateFormSpec(tableName, params, sessionID) {
             for (const appN of LAYOUT_APP_NAMES_RECORD) {
                 if (!layoutMemory.hasRegistered(appN, tableName, 'record')) continue;
                 const userRole = await layoutMemory.getUserRoleBySession(sessionID);
-                customLayoutObj = await layoutMemory.getLayoutForUser(appN, tableName, userRole, sessionID, 'record');
+                customLayoutObj = await layoutMemory.getLayoutForUser(appN, tableName, userRole, sessionID, 'record', params && params.view);
                 if (customLayoutObj) {
                     formKind = customLayoutObj.formKind || null;
                     clientScript = customLayoutObj.clientScript || null;

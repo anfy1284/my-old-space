@@ -4296,6 +4296,16 @@ class DataForm extends Form {
     //   "enabledWhen": { "field": "status", "notIn": ["cancelled"] }
     //   "enabledWhen": { "unlocked": true }                    // документ ещё не проведён
     //
+    // Любое из условий можно дополнить ПРИЧИНОЙ:
+    //
+    //   "enabledWhen": { "field": "status", "in": ["issued", "paid"],
+    //                    "reason": { "i18n": "correct_only_issued" } }
+    //
+    // Тогда элемент не гасится намертво, а остаётся нажимаемым и на нажатие говорит,
+    // почему сейчас нельзя (`_setRefusal`). Причина обязательна везде, где отказ не
+    // очевиден из самой формы: молчащая серая кнопка не учит правилу, а заставляет
+    // искать обходной путь.
+    //
     // Форма документа без этого выглядит работающей: у выставленного счёта кнопки
     // «Заполнить» и «Выставить» остаются нажимаемыми, а нажатие приводит к отказу
     // из базы. Условие по состоянию записи — то же знание, что и замок формы, и
@@ -4307,6 +4317,56 @@ class DataForm extends Form {
         if (!controlName || !decl || typeof decl !== 'object') return;
         if (!this._enabledWhen) this._enabledWhen = [];
         this._enabledWhen.push({ control: controlName, decl });
+    }
+
+    /**
+     * Отказ с объяснением: элемент выглядит приглушённым, но нажимается и на нажатие
+     * называет причину. Включается ключом `reason` в `enabledWhen` (текст приходит уже
+     * переведённым — `{ i18n }` разворачивает сервер при отдаче лейаута, как `caption`
+     * и `confirm`).
+     *
+     * Перехват стоит в ФАЗЕ ПЕРЕХВАТА (`capture`), до обработчика самой кнопки:
+     * иначе команда успеет уйти на сервер и вернуться отказом из базы — то есть
+     * ровно тем, от чего условие доступности и защищает.
+     *
+     * @param {string|Object} control имя элемента в лейауте или сам элемент («ОК» формы
+     *                                в `controlsMap` не лежит и имени не имеет)
+     * @param {string|null} text      причина отказа; `null` — снять отказ
+     * @param {string} [key]          ключ в карте отказов, если имени нет
+     */
+    _setRefusal(control, text, key) {
+        const c = (typeof control === 'string') ? this.getControl(control) : control;
+        const controlName = (typeof control === 'string') ? control : (key || '');
+        const el = c && c.element;
+        if (!el || !controlName) return;
+        if (!this._refusals) this._refusals = {};
+
+        if (text) {
+            if (this._refusals[controlName] === text) return;
+            this._refusals[controlName] = text;
+            if (el.__refusalPrevTitle === undefined) el.__refusalPrevTitle = el.title || '';
+            el.title = text;
+            el.style.opacity = '0.55';
+            if (!el.__refusalGuard) {
+                el.__refusalGuard = (e) => {
+                    const why = this._refusals && this._refusals[controlName];
+                    if (!why) return;
+                    e.stopPropagation();
+                    e.preventDefault();
+                    if (typeof showAlert === 'function') showAlert(why);
+                };
+                el.addEventListener('click', el.__refusalGuard, true);
+            }
+            return;
+        }
+
+        if (!this._refusals[controlName]) return;
+        delete this._refusals[controlName];
+        el.style.opacity = '';
+        if (el.__refusalPrevTitle !== undefined) {
+            el.title = el.__refusalPrevTitle;
+            delete el.__refusalPrevTitle;
+        }
     }
 
     // ── Декларативная ВИДИМОСТЬ вкладки: `visibleWhen` в лейауте ───────────────────
@@ -4573,7 +4633,25 @@ class DataForm extends Form {
     refreshEnabledWhen() {
         if (this._enabledWhen && this._enabledWhen.length) {
             for (const d of this._enabledWhen) {
-                try { this.setControlEnabled(d.control, this._evalEnabledWhen(d.decl)); } catch (e) {}
+                try {
+                    const ok = this._evalEnabledWhen(d.decl);
+                    // `reason` превращает жёсткое выключение в ОТКАЗ С ОБЪЯСНЕНИЕМ:
+                    // кнопка остаётся нажимаемой и на нажатие говорит, почему сейчас
+                    // нельзя. Серая кнопка молчит, и человек остаётся один на один с
+                    // «kann man nicht anklicken» — так в сентябре 2026 владелица
+                    // гостевого дома не смогла воспользоваться коррекцией счёта и
+                    // взяла вместо неё более слабый инструмент. Подсказкой это не
+                    // лечится: на ВЫКЛЮЧЕННОМ элементе браузер глушит события, и
+                    // `title` показывается через раз — да и наводить на то, что
+                    // выглядит мёртвым, никто не станет.
+                    if (!ok && d.decl.reason) {
+                        this.setControlEnabled(d.control, true);
+                        this._setRefusal(d.control, d.decl.reason);
+                    } else {
+                        this._setRefusal(d.control, null);
+                        this.setControlEnabled(d.control, ok);
+                    }
+                } catch (e) {}
             }
         }
         if (this._visibleWhen && this._visibleWhen.length) {
@@ -4618,10 +4696,21 @@ class DataForm extends Form {
             if (c && c.__documentCommand === 'post' && !source) source = c;
         }
         if (!source || !source.element) return;
-        const on = !source.element.disabled;
-        if (typeof btn.setEnabled === 'function') {
-            try { btn.setEnabled(on); } catch (e) {}
+        // Отказ с объяснением (`enabledWhen.reason`) оставляет команду НАЖИМАЕМОЙ,
+        // поэтому «выключена ли кнопка» перестало отвечать на вопрос «применима ли
+        // команда». Без этой проверки «ОК» снова уходил бы на сервер за отказом,
+        // от которого доступность и защищает. Причину «ОК» получает ту же — человеку
+        // всё равно, какой из двух кнопок он нажал.
+        let sourceName = null;
+        for (const name in this.controlsMap) {
+            if (this.controlsMap[name] === source) { sourceName = name; break; }
         }
+        const refusal = (sourceName && this._refusals) ? this._refusals[sourceName] : null;
+        const on = !source.element.disabled && !refusal;
+        if (typeof btn.setEnabled === 'function') {
+            try { btn.setEnabled(refusal ? true : on); } catch (e) {}
+        }
+        this._setRefusal(btn, refusal || null, '__okButton');
     }
 
     /**
