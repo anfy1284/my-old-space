@@ -511,6 +511,10 @@ async function enqueueAfterSave(table, uid, sessionID) {
     const postingQueue = require('./db/postingQueue');
     const already = await postingQueue.rowOf(table, uid);
     if (cfg.mode !== 'onSave' && !already) return;   // ручной режим: ждём команды
+    // Остановленная ручная команда (postingQueue.stopsOnFailure): сохранение её НЕ
+    // повторяет. Иначе сохранение черновика после отказа в «Ausstellen» выставляло
+    // счёт без нажатия и без переспроса — повтор только той же командой.
+    if (already && already.stopped) return;
 
     let user = null;
     try {

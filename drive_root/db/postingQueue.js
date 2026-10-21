@@ -22,6 +22,19 @@
  * этом НЕ встаёт: строка, до которой не дошло `nextAttemptAt`, просто пропускается, а
  * независимые документы идут дальше. Потолка попыток нет: сдаваться нельзя, потому что
  * непроведённый документ — это проблема, которую надо решить, а не обойти.
+ *
+ * ИСКЛЮЧЕНИЕ — НЕ ПРОШЕДШАЯ РУЧНАЯ КОМАНДА (решение владельца 21.10.2026,
+ * `stopsOnFailure`). Бесконечный повтор правилен там, где учёт надо ДОГНАТЬ:
+ * перепроведение уже проведённого документа (каскад) и документ режима `onSave`.
+ * Для первого проведения или распроведения документа режима `manual` он неправилен:
+ * человек велел, получил отказ — решение принято, «не проведено». У счёта
+ * «провести» = «выставить», и повтор выставлял его сам при первом сохранении
+ * после исправления — без нажатия «Ausstellen» и без переспроса, необратимо (сторно
+ * или коррекция — единственный путь назад); а каждое сохранение черновика присылало
+ * ещё одно уведомление об ошибке. Такая строка ОСТАНАВЛИВАЕТСЯ (`stopped`): не
+ * выбирается проходом, не будится сохранением (`dbGateway.enqueueAfterSave`) и
+ * остаётся только записью причины. Повтор — та же команда человека (`enqueue` с
+ * `byHuman` не из сохранения), с тем же переспросом.
  */
 
 const TABLE = 'posting_queue';
@@ -139,6 +152,9 @@ async function enqueue(p) {
             data.attempts = 0;
             data.nextAttemptAt = null;
             data.requestedBy = base.requestedBy || row.requestedBy;
+            // Повтор КОМАНДЫ снимает остановку. Сохранение сюда не доходит:
+            // `enqueueAfterSave` остановленную строку не трогает вовсе.
+            data.stopped = false;
         }
         await dbGateway.execute({
             operation: 'update', table: TABLE, where: { UID: row.UID }, data,
@@ -211,6 +227,7 @@ async function next(excludeUIDs) {
     const dbGateway = require('../dbGateway');
     const { Op } = require('sequelize');
     const where = {
+        stopped: false,
         [Op.or]: [{ nextAttemptAt: null }, { nextAttemptAt: { [Op.lte]: new Date() } }]
     };
     if (excludeUIDs && excludeUIDs.length) {
@@ -230,7 +247,7 @@ async function pending() {
     const { Op } = require('sequelize');
     return await dbGateway.execute({
         operation: 'count', table: TABLE,
-        where: { [Op.or]: [{ nextAttemptAt: null }, { nextAttemptAt: { [Op.lte]: new Date() } }] },
+        where: { stopped: false, [Op.or]: [{ nextAttemptAt: null }, { nextAttemptAt: { [Op.lte]: new Date() } }] },
         context: { sessionID: SYSTEM_SESSION_ID }
     });
 }
@@ -250,9 +267,11 @@ async function fail(row, error) {
     const delayMin = await setting(SETTINGS.retryDelayMinutes, 5);
 
     const attempts = (Number(row.attempts) || 0) + 1;
-    const delayed = attempts > threshold;
+    const stopped = stopsOnFailure(row);
+    const delayed = !stopped && attempts > threshold;
     const data = {
         attempts,
+        stopped,
         lastError: String((error && error.message) || error || '').slice(0, 4000),
         // Ключ перевода и подстановки хранятся РЯДОМ с техническим текстом.
         // Перевести причину при записи нельзя: читать её будет не обязательно
@@ -270,7 +289,32 @@ async function fail(row, error) {
         operation: 'update', table: TABLE, where: { UID: row.UID }, data,
         context: { sessionID: SYSTEM_SESSION_ID }
     });
-    return { attempts, delayed, delayMin };
+    return { attempts, delayed, delayMin, stopped };
+}
+
+/**
+ * Остановить ли строку после неудачи — то есть была ли это РУЧНАЯ команда, а не
+ * догоняющее проведение (см. шапку модуля).
+ *
+ * Догоняющее — всё, что учёт обязан привести в порядок сам: документ режима
+ * `onSave` (команды у него нет, проводится каждое сохранение) и перепроведение
+ * документа, который УЖЕ проведён (`prevState = posted`: каскад, групповое
+ * перепроведение — движения есть и должны сойтись). Остальное у документа режима
+ * `manual` — первое проведение и распроведение — команда человека, и её не
+ * повторяют за него.
+ */
+function stopsOnFailure(row) {
+    if (!row) return false;
+    let cfg = null;
+    try {
+        const globalCtx = require('../globalServerContext');
+        const modelName = globalCtx.getModelNameForTable(row.documentTable);
+        const Model = modelName ? globalCtx.modelsDB[modelName] : null;
+        cfg = Model ? posting.readConfig(Model) : null;
+    } catch (e) { cfg = null; }
+    if (!cfg || cfg.mode === 'onSave') return false;
+    const catchUp = row.action === posting.ACTION.POST && row.prevState === posting.STATE.POSTED;
+    return !catchUp;
 }
 
 /**
@@ -310,7 +354,10 @@ async function errorOf(table, uid) {
         // ПУСТАЯ ДАТА — `0001-01-01`, а не NULL (drive_root/db/emptyValues.js), и она
         // ИСТИННА в булевом смысле. Проверка `row.startedAt ? ...` объявляла бы
         // «проводится» всегда, даже у строки, которую никто не брал.
-        phase: emptyValues.isEmptyDate(row.startedAt) ? 'queued' : 'posting',
+        // Остановленная строка — не «в очереди»: повтора не будет, пока человек
+        // не повторит команду (`stopsOnFailure`). Фазы у неё нет, есть только причина.
+        phase: row.stopped ? null : (emptyValues.isEmptyDate(row.startedAt) ? 'queued' : 'posting'),
+        stopped: !!row.stopped,
         error: row.lastError || null,
         // Ключ и подстановки — чтобы причину перевёл ТОТ, КТО ПОКАЗЫВАЕТ, на
         // языке того, кто смотрит: подсказку в журнале читает не обязательно
@@ -453,6 +500,7 @@ module.exports = {
     cancelQueued,
     markStarted,
     fail,
+    stopsOnFailure,
     errorOf,
     rowOf
 };

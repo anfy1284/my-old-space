@@ -665,6 +665,12 @@
         "de": "Danach zur Löschung markieren",
         "pl": "Następnie oznacz do usunięcia"
     },
+    "pq_stopped_field": {
+        "en": "Stopped: waiting for the command to be repeated",
+        "ru": "Остановлено: ждёт повтора команды",
+        "de": "Angehalten: wartet auf erneuten Befehl",
+        "pl": "Zatrzymano: czeka na ponowienie polecenia"
+    },
     "deletion_refuse_state": {
         "en": "A document in this state cannot be deleted, so it cannot be marked for deletion either",
         "ru": "Документ в этом состоянии удалению не подлежит — значит, и пометить его нельзя",
