@@ -178,7 +178,7 @@ function registerDynamicTableMethods(appName, config = {}) {
         }
     }
 
-    return {
+    const methods = {
         /**
          * Получение данных таблицы в Table-совместимом формате
          */
@@ -305,6 +305,9 @@ function registerDynamicTableMethods(appName, config = {}) {
                 visibleRows,
                 sort: effectiveSort,
                 filters: filters || [],
+                // Постоянный отбор подчинённого списка (`properties.owner.where`) —
+                // проверяет и накладывает ядро, см. globalServerContext.getDynamicTableData.
+                ownerWhere: params.ownerWhere || null,
                 fieldConfig: fieldConfig,
                 sessionID: sessionID
             });
@@ -365,10 +368,86 @@ function registerDynamicTableMethods(appName, config = {}) {
             // Добавляется ПОСЛЕ запроса данных, а не до: колонка синтетическая,
             // поля с таким именем в модели нет, и попав в список атрибутов
             // выборки, она роняла запрос — список открывался пустым.
+            // ЖУРНАЛ ДОКУМЕНТОВ: у колонки «вид документа» — подписи и значки видов
+            // (берутся у зарегистрированных форм записи, drive_root/db/journals.js).
+            try {
+                require('../drive_root/db/journals').decorateFields(tableName, fields);
+            } catch (e) {
+                console.error(`[${appName}/getDynamicTableData] колонка вида документа не оформлена:`,
+                    e && e.message || e);
+            }
             try {
                 fields = require('../drive_root/db/entityStateColumn').prepend(tableName, fields);
             } catch (e) {
                 console.error(`[${appName}/getDynamicTableData] колонка состояния не добавлена:`,
+                    e && e.message || e);
+            }
+
+            // КОЛОНКА ОПОВЕЩЕНИЙ — ещё левее колонки состояния (ТЗ оповещений
+            // §11): значок уровня самого важного оповещения по строке,
+            // подсказка — сами тексты. Это ДРУГОЙ ФАКТ, чем состояние
+            // проведения, и в одну колонку с ним не кладётся: иначе сортировка и
+            // отбор по проведённости стали бы непредсказуемыми.
+            //
+            // Порядок вызовов и есть порядок колонок: `prepend` ставит свою
+            // колонку первой, поэтому оповещения добавляются ПОСЛЕ состояния.
+            // Значения — одним запросом на всю страницу строк.
+            try {
+                const alertColumn = require('../drive_root/db/alertColumn');
+                await alertColumn.decorateRows(tableName, rows, sessionID);
+                if (!explicitOrder) fields = alertColumn.prepend(tableName, fields);
+            } catch (e) {
+                console.error(`[${appName}/getDynamicTableData] колонка оповещений не добавлена:`,
+                    e && e.message || e);
+            }
+
+            // ВЫЧИСЛЯЕМЫЕ РЕКВИЗИТЫ ЖУРНАЛА (`entityConfig.listAttributes`):
+            // величина, которой нет в таблице, — предоплата брони (остаток
+            // регистра расчётов), расхождение «выставлено больше, чем заказано».
+            // Считаются ОДНИМ запросом на всю страницу строк: запрос на строку
+            // при сотне строк — не «медленнее», а другой порядок времени
+            // открытия окна (drive_root/db/listAttributes.js).
+            //
+            // Колонки добавляются здесь же, рядом с колонкой состояния, и по той
+            // же причине ПОСЛЕ выборки: поля с такими именами в модели нет, и в
+            // списке атрибутов запроса они уронили бы его.
+            try {
+                const listAttributes = require('../drive_root/db/listAttributes');
+                // Считаем ВСЕГДА: значение нужно не только колонке, но и правилам
+                // тона строки (`rowTones` читает его из строки).
+                await listAttributes.compute(tableName, rows, sessionID);
+                // А КОЛОНКИ добавляем только там, где состав колонок не задан
+                // явно: встроенный список (`relatedList`) просит ровно те три-четыре
+                // колонки, которые у него размечены, и две лишних сломали бы ему
+                // вид. Журнал состав колонок не задаёт — он берёт их у модели.
+                if (!explicitOrder) fields = listAttributes.append(tableName, fields);
+            } catch (e) {
+                console.error(`[${appName}/getDynamicTableData] реквизиты журнала не посчитаны:`,
+                    e && e.message || e);
+            }
+
+            // ЖУРНАЛ ДОКУМЕНТОВ: каждая строка называет СВОЙ вид (`__table`) — тот же
+            // приём, что у разнородных списков: «Открыть» и двойной щелчок открывают
+            // форму документа его вида, а не несуществующую форму журнала. Виды, их
+            // подписи и значки едут отдельно: по ним «Добавить» спрашивает, что
+            // заводить (drive_root/db/journals.js).
+            let journal = null;
+            try {
+                const journals = require('../drive_root/db/journals');
+                if (journals.isJournalTable(tableName)) {
+                    for (const r of rows) {
+                        if (r && r[journals.DOC_TABLE_FIELD]) r.__table = r[journals.DOC_TABLE_FIELD];
+                    }
+                    const kinds = journals.kindsOf(journals.get(tableName));
+                    for (const k of kinds) {
+                        if (k.caption && typeof k.caption === 'object' && k.caption.i18n) {
+                            try { k.caption = await tForSession(k.caption.i18n, sessionID); } catch (e) {}
+                        }
+                    }
+                    journal = { documents: kinds };
+                }
+            } catch (e) {
+                console.error(`[${appName}/getDynamicTableData] виды журнала не определены:`,
                     e && e.message || e);
             }
 
@@ -394,7 +473,8 @@ function registerDynamicTableMethods(appName, config = {}) {
                 totalRows,
                 range: (raw && raw.range) ? raw.range : null,
                 editSessionId: (raw && raw.editSessionId) ? raw.editSessionId : undefined,
-                rowTones
+                rowTones,
+                journal
             };
         },
 
@@ -438,7 +518,9 @@ function registerDynamicTableMethods(appName, config = {}) {
 
             if (!modelName) throw new Error('Unknown table: ' + tableName);
 
-            const raw = await globalServerContext.getLookupList({ modelName, firstRow, visibleRows, sessionID: sessionID });
+            // `where` — условие отбора из `selection.where` лейаута (только равенства;
+            // чистит getLookupList).
+            const raw = await globalServerContext.getLookupList({ modelName, firstRow, visibleRows, sessionID: sessionID, where: params && params.where });
 
             const rows = raw && (raw.rows || raw.data) || [];
             const fields = raw && raw.fields || [{ name: 'id' }, { name: 'display' }];
@@ -526,6 +608,14 @@ function registerDynamicTableMethods(appName, config = {}) {
          * Уведомление об изменении данных таблицы
          */
         notifyTableChange(tableName, action, rowId, rowData = null) {
+            // ЖУРНАЛ ДОКУМЕНТОВ своих записей не имеет: изменился документ — изменилась
+            // и строка журнала. Открытые журналы живут тем же каналом, что и списки
+            // документов, поэтому событие уходит и им (drive_root/db/journals.js).
+            try {
+                for (const jt of require('../drive_root/db/journals').journalsOfDocument(tableName)) {
+                    methods.notifyTableChange(jt, action, rowId, null);
+                }
+            } catch (e) { /* журналов нет */ }
             const messageObj = {
                 type: 'dataChanged',
                 app: appName,
@@ -586,6 +676,7 @@ function registerDynamicTableMethods(appName, config = {}) {
             return await globalServerContext.commitTableEdits(editSessionId);
         }
     };
+    return methods;
 }
 
 module.exports = { registerDynamicTableMethods, broadcastSessionEvent, sendSessionEventToUser };

@@ -184,9 +184,8 @@ async function registerTranslationForms(loadScript) {
     const contextsClientUID = await loadScript(contextsClient, 'admin');
 
     await layoutMemory.saveLayout({
-        appName: 'uniForm',
-        mode: 'record',
-        tableName: 'messenger_translation_contexts',
+        app: 'messenger',
+        subject: { table: 'messenger_translation_contexts', kind: 'record' },
         roles: 'admin',
         layout: require('./forms/translation_contexts.layout.json'),
         clientScript: contextsClientUID,
@@ -196,9 +195,8 @@ async function registerTranslationForms(loadScript) {
         listIcon: TRANSLATE_ICON
     });
     await layoutMemory.saveLayout({
-        appName: 'uniForm',
-        mode: 'record',
-        tableName: 'messenger_translation_reviews',
+        app: 'messenger',
+        subject: { table: 'messenger_translation_reviews', kind: 'record' },
         roles: 'admin',
         layout: require('./forms/translation_reviews.layout.json'),
         appCaption: { i18n: 'msg_trrev_app_caption' },

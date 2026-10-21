@@ -109,6 +109,23 @@ function clampLines(text, maxLines, maxChars) {
  * Пачка, не уместившаяся в один проход, даст два итога. Это честно: второй проход —
  * другое событие во времени, и склеивать их значило бы молчать неизвестно сколько.
  */
+/**
+ * Режим проведения документа — по его объявлению.
+ *
+ * Нужен ответам человеку: в режиме `onSave` успех НЕ сообщается (см. `tally`).
+ */
+function modeOf(table) {
+    try {
+        const gCtx = require('../globalServerContext');
+        const modelName = gCtx.getModelNameForTable(table);
+        const Model = modelName ? gCtx.modelsDB[modelName] : null;
+        const cfg = Model && posting.readConfig(Model);
+        return cfg ? cfg.mode : null;
+    } catch (e) {
+        return null;
+    }
+}
+
 function tally() {
     const byUser = new Map();
     return {
@@ -118,6 +135,14 @@ function tally() {
             // человеком — он только что сохранил или нажал команду, — поэтому одно
             // сообщение он получит; повторы уже фоновые и молчат.
             if (!row.byHuman || !row.requestedBy) return;
+            // РЕЖИМ `onSave`: об УСПЕХЕ не сообщаем. Документ уходит в очередь при
+            // каждом сохранении, то есть сообщение «проведено» приходило бы на
+            // каждое нажатие «Сохранить» — и возвращало бы пользователю слово,
+            // которое из интерфейса убрали вместе с кнопками (ТЗ §5.2: прячутся
+            // команды и слово «провести», а не сведения о беде). Неудача при этом
+            // сообщается по-прежнему: иначе тот, у кого нет кнопок, никак не
+            // узнает, что документ не в порядке.
+            if (ok && modeOf(row.documentTable) === 'onSave') return;
             if (!byUser.has(row.requestedBy)) {
                 byUser.set(row.requestedBy, { ok: 0, failed: 0, firstError: null, action: row.action });
             }
@@ -256,6 +281,56 @@ async function pass(ctx) {
                 stats.posted++;
                 notifyTable(row.documentTable, row.documentUID);
                 acc.add(row, true, null);
+
+                // ОПОВЕЩЕНИЯ ПО ДОКУМЕНТУ: пересчитаны внутри транзакции
+                // проведения, а пуши уходят ЗДЕСЬ — после коммита. Уведомление
+                // из незакоммиченной транзакции обещало бы то, что может
+                // откатиться.
+                //
+                // Отправляется НЕЗАВИСИМО от `byHuman`, в отличие от ответов о
+                // самом проведении: там сообщение — это ответ на попытку, и
+                // повторять его на каждом фоновом проходе незачем, а здесь это
+                // НОВЫЙ ФАКТ про документ, и рассказать о нём надо один раз —
+                // что и обеспечено отметкой `pushSentAt` в строке оповещения.
+                // Получатель: инициатор, а при фоновом пересчёте — владелец
+                // задания (§12 ТЗ оповещений).
+                try {
+                    const documentAlerts = require('./documentAlerts');
+                    const pushes = result.alertPushes || [];
+                    if (pushes.length) {
+                        await documentAlerts.flushPushes(pushes, {
+                            userId: row.requestedBy || (ctx && ctx.userId) || null
+                        });
+                    }
+                    // Открытая форма документа и открытый журнал обязаны увидеть
+                    // новые оповещения без перезагрузки страницы — тем же
+                    // каналом, которым живут списки.
+                    notifyTable(documentAlerts.TABLE, row.documentUID);
+                } catch (e) {
+                    console.error('[postingRunner] пуши по оповещениям не отправлены:',
+                        e && e.message || e);
+                }
+
+                // ДОКУМЕНТЫ, ПОРОЖДЁННЫЕ ПРОВЕДЕНИЕМ (`ctx.createOnce`): созданы в
+                // транзакции основания и теперь, после коммита, существуют — ставим
+                // их в очередь обычным путём. Проведутся они в этом же проходе
+                // (очередь читается заново на каждой итерации). Инициатор — тот же:
+                // не провёлся порождённый документ — сказать об этом надо тому, кто
+                // нажал «Сохранить» у основания.
+                for (const c of (result.created || [])) {
+                    try {
+                        await postingQueue.enqueue({
+                            table: c.table, uid: c.uid, action: posting.ACTION.POST,
+                            requestedBy: row.requestedBy || null,
+                            byHuman: !!row.byHuman,
+                            sessionID
+                        });
+                        notifyTable(c.table, c.uid);
+                    } catch (e) {
+                        console.error(`[postingRunner] ${c.table}[${c.uid}]: порождённый документ`
+                            + ` не поставлен в очередь: ${e.message}`);
+                    }
+                }
 
                 const casc = await postingCascade.run({
                     result, requestedBy: row.requestedBy || null, sessionID

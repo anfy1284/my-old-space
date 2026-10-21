@@ -97,9 +97,17 @@ function buildRegisterModelDef(reg) {
         throw new Error(`[registers] Недопустимое имя таблицы регистра "${reg.tableName}"`);
     }
 
-    const dimensions = reg.dimensions || {};
-    const resources = reg.resources || {};
-    const attributes = reg.attributes || {};
+    // Ключ, начинающийся с «//», — КОММЕНТАРИЙ, а не измерение/ресурс/реквизит:
+    // в `db.json` комментировать нечем, кроме такого ключа. Пропуск нужен здесь
+    // же, а не только при определении моделей: иначе комментарий рядом с
+    // измерением уехал бы в индекс регистра и в список измерений, то есть в
+    // группировку остатка.
+    const noComments = (obj) => Object.fromEntries(
+        Object.entries(obj || {}).filter(([k]) => k.slice(0, 2) !== '//'));
+
+    const dimensions = noComments(reg.dimensions);
+    const resources = noComments(reg.resources);
+    const attributes = noComments(reg.attributes);
     assertNoCoreField(reg, 'dimensions', Object.keys(dimensions));
     assertNoCoreField(reg, 'resources', Object.keys(resources));
     assertNoCoreField(reg, 'attributes', Object.keys(attributes));
@@ -266,13 +274,53 @@ function resolveResources(cfg, asked) {
 }
 
 /**
+ * Условие «кроме движений ЭТОГО регистратора».
+ *
+ * Нужно документу, который собирается свои движения ПЕРЕПИСАТЬ: пока он их не
+ * переписал, они лежат в регистре и портят ответ на вопрос «что осталось» —
+ * документ увидел бы собственную работу как чужую и предложил бы пустоту.
+ *
+ * Выражено четырьмя ветвями, а не одним `Op.not`, из-за трёхзначной логики SQL:
+ * `recorderTable`/`recorderUID` объявлены необязательными, а `NOT (NULL = 'x')`
+ * даёт NULL, то есть строку с пустым регистратором такое условие МОЛЧА выбросило
+ * бы из остатка. Сегодня таких строк нет — все движения пишет проведение, — но
+ * «сегодня нет» не повод строить условие, которое сломается, когда появятся.
+ */
+function excludeRecorderCondition(rec) {
+    if (!rec || !rec.table || !rec.uid) return null;
+    return {
+        [Op.or]: [
+            { recorderTable: { [Op.ne]: rec.table } },
+            { recorderUID: { [Op.ne]: rec.uid } },
+            { recorderTable: null },
+            { recorderUID: null }
+        ]
+    };
+}
+
+/**
+ * Условие «только движения этих ВИДОВ регистраторов» (`recorderTables`).
+ *
+ * В один разрез регистра пишут документы разной природы: в предоплату брони кладут
+ * деньги поступление и выплата, а снимает её счёт (зачёт). «Сколько всего внесено» —
+ * это сумма движений ДЕНЕЖНЫХ регистраторов, а «сколько не зачтено» — весь остаток;
+ * два разных вопроса к одному разрезу, и различает их только вид регистратора.
+ * Пустой список — не отбор, а его отсутствие.
+ */
+function recorderTablesCondition(list) {
+    if (!Array.isArray(list) || !list.length) return null;
+    return { recorderTable: { [Op.in]: list.map(String) } };
+}
+
+/**
  * ОСТАТОК на момент времени.
  *
  * Считается как сумма движений со знаком до указанного момента включительно. Отдельной
  * таблицы итогов нет и пока не нужно: движений мало, а таблица итогов — это второй
  * источник правды, который обязан совпадать с первым.
  *
- * @param {object} p — `{ register, dimensions, moment: {date, seq}, resources, context }`
+ * @param {object} p — `{ register, dimensions, moment: {date, seq}, resources, groupBy,
+ *   excludeRecorder: {table, uid}, recorderTables: [таблица…], context }`
  * @returns {Promise<Array<object>>} строки `{ ...измерения, ...ресурсы }`; суммы —
  *   СТРОКИ (`DECIMAL` из драйвера), складывать их только через `money.js`
  */
@@ -293,8 +341,13 @@ async function balance(p) {
         }
         if (v !== undefined) where[k] = v;
     }
-    const mc = momentCondition(p.moment);
-    const finalWhere = mc ? { [Op.and]: [where, mc] } : where;
+    // Условия СКЛЕИВАЮТСЯ через Op.and, а не присваиваются поверх: отбор по
+    // измерениям, момент и исключение регистратора — три независимых сужения, и
+    // любая замена одного другим расширила бы выборку молча.
+    const extra = [momentCondition(p.moment), excludeRecorderCondition(p.excludeRecorder),
+        recorderTablesCondition(p.recorderTables)]
+        .filter(Boolean);
+    const finalWhere = extra.length ? { [Op.and]: [where, ...extra] } : where;
 
     const attributes = [
         ...groupBy,
@@ -322,7 +375,8 @@ async function balance(p) {
  * не итог. Границы включительные с обеих сторон — период задаётся датами, а не
  * моментами: оборот «за май» не зависит от того, каким по счёту документом день начался.
  *
- * @param {object} p — `{ register, dimensions, from, to, resources, groupBy, context }`
+ * @param {object} p — `{ register, dimensions, from, to, resources, groupBy,
+ *   recorderTables: [таблица…], context }`
  * @returns {Promise<Array<object>>} строки `{ ...группировка, <r>_income, <r>_expense, <r> }`
  */
 async function turnovers(p) {
@@ -341,6 +395,8 @@ async function turnovers(p) {
     if (p.from) period[Op.gte] = p.from;
     if (p.to) period[Op.lte] = p.to;
     if (Object.getOwnPropertySymbols(period).length) where.period = period;
+    const byRecorders = recorderTablesCondition(p.recorderTables);
+    const finalWhere = byRecorders ? { [Op.and]: [where, byRecorders] } : where;
 
     const attributes = [...groupBy];
     for (const r of resources) {
@@ -352,7 +408,7 @@ async function turnovers(p) {
     return await require('../dbGateway').execute({
         operation: 'read',
         table: cfg.tableName,
-        where,
+        where: finalWhere,
         options: Object.assign({ attributes, group: groupBy, raw: true },
             txOf(p) ? { transaction: txOf(p) } : {}),
         context: p.context || {}

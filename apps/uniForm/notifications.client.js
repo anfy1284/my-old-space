@@ -29,4 +29,28 @@ async function openDocument(params) {
     }
 }
 
-return { openDocument };
+/**
+ * Выполнить действие ОПОВЕЩЕНИЯ по документу (ТЗ «Оповещения по документам», §12).
+ *
+ * Пуш копирует текст строки и её действие, поэтому клик по уведомлению делает
+ * ровно то же, что гиперссылка в панели формы. Разбор видов действия живёт в
+ * ядре (`MySpace.alerts.run`) — вторая копия однажды повела бы себя иначе на том
+ * же оповещении.
+ *
+ * Нет действия — открываем сам документ: уведомление без документа бесполезно,
+ * человек прочёл «нужна корректировка» и первое, что ему нужно, это документ.
+ */
+async function runAlertAction(params) {
+    const p = params || {};
+    try {
+        if (p.kind && window.MySpace && window.MySpace.alerts) {
+            await window.MySpace.alerts.run(p);
+            return;
+        }
+    } catch (e) {
+        console.error('[uniForm] действие оповещения не выполнено:', e && e.message);
+    }
+    await openDocument({ table: p.documentTable, uid: p.documentUID });
+}
+
+return { openDocument, runAlertAction };

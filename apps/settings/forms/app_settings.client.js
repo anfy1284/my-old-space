@@ -208,7 +208,7 @@ async function saveTo(form, target) {
         if (Object.keys(tabularSections).length > 0) data.__tabularSections = tabularSections;
     } catch (e) {}
 
-    var result = await callServer('__SERVER_SCRIPT__', 'onSave', { changes: data, tableName: 'app_settings' });
+    var result = await callServer('__SERVER_SCRIPT__', 'onSave', { changes: data });
     if (result && result.error) {
         showAlert(__t('Error: ') + result.error);
         return null;
@@ -259,6 +259,15 @@ async function refreshPersonalSnapshots() {
     }
 }
 
+/**
+ * Стандартное «Speichern» / «Speichern und schließen» ядра (событие формы
+ * `onAfterSave`): те же личные снимки, что после «Anwenden», — иначе выключатель
+ * приложения и вид календаря менялись только после перезагрузки страницы.
+ */
+async function onAfterSave() {
+    await refreshPersonalSnapshots();
+}
+
 /** Стереть всё запомненное состояние интерфейса (кнопка администратора). */
 async function clearState(ev, ctx) {
     var form = ctx.form;
@@ -285,4 +294,4 @@ function openChangePassword(ev, ctx) {
     }
 }
 
-return { onFormReady, onScopeChanged, onRecordChanged, applySettings, openChangePassword, clearState };
+return { onFormReady, onScopeChanged, onRecordChanged, applySettings, onAfterSave, openChangePassword, clearState };

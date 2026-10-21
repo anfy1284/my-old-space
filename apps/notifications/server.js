@@ -94,6 +94,9 @@ function toClient(row) {
  *        0 (умолчание) — висит до закрытия пользователем
  * @param {boolean} [params.ephemeral] — НЕ писать в таблицу: уйдёт только в
  *        открытые окна получателя и нигде не останется
+ * @param {string} [params.tag] — тег замены: прежние уведомления этого
+ *        получателя с тем же тегом снимаются (из базы и с экрана), новое встаёт
+ *        на их место. Для сообщений, где важна только последняя цифра (сводки)
  * @returns {Promise<object|null>} — уведомление в клиентском виде
  *
  * ── Почему появились ttl и ephemeral ──────────────────────────────────────────
@@ -105,7 +108,7 @@ function toClient(row) {
  * исчезает сам собой.
  */
 async function notify(params) {
-    const { userId, appName, title, text, icon, onClick, ttl, ephemeral } = params || {};
+    const { userId, appName, title, text, icon, onClick, ttl, ephemeral, tag } = params || {};
     if (!userId || !appName || !text) {
         log.error('[notifications] notify: нужны userId, appName и text');
         return null;
@@ -141,8 +144,14 @@ async function notify(params) {
         handlerFn: (onClick && onClick.fn) ? String(onClick.fn) : null,
         handlerParams: (onClick && onClick.fnParams) ? onClick.fnParams : null,
         isRead: false,
-        ttl: Number(ttl) || 0
+        ttl: Number(ttl) || 0,
+        tag: tag ? String(tag) : null
     };
+
+    // ЗАМЕНА ПО ТЕГУ: прежнее с тем же тегом устарело в тот момент, когда
+    // появилось новое, — снимаем его и из базы, и из открытых окон. Иначе
+    // сводки копятся стопкой, и человек читает вчерашнюю цифру рядом с сегодняшней.
+    if (data.tag) await removeTagged(userId, data.tag);
 
     let row;
     try {
@@ -229,6 +238,71 @@ async function clearAll(params, sessionID) {
     return { success: true };
 }
 
+/** Снять уведомления получателя с данным тегом — из базы и с экрана. */
+async function removeTagged(userId, tag) {
+    let rows = [];
+    try {
+        rows = await dbGateway.execute({
+            operation: 'read', table: TABLE,
+            where: { userId, tag },
+            options: { raw: true, attributes: ['UID'] },
+            context: { sessionID: SYSTEM_SESSION_ID }
+        }) || [];
+        if (!rows.length) return;
+        await dbGateway.execute({
+            operation: 'delete', table: TABLE,
+            where: { UID: rows.map(r => r.UID) },
+            context: { sessionID: SYSTEM_SESSION_ID }
+        });
+    } catch (e) {
+        log.error('[notifications] не удалось снять уведомления по тегу:', e && e.message);
+        return;
+    }
+    try {
+        sendSessionEventToUser(userId, { type: 'notificationRemoved', UIDs: rows.map(r => r.UID) });
+    } catch (e) { /* окна обновятся при следующей загрузке */ }
+}
+
+/**
+ * Снять уведомления с тегом У ВСЕХ получателей — из базы и с экрана.
+ *
+ * Для уведомлений о ФАКТЕ, который перестал быть правдой: оповещение по документу
+ * исчезло (причина устранена), а всплывшее о нём уведомление висело и вводило в
+ * заблуждение (прогон 17.10.2026, L3). Получателя тот, кто снимает, может не знать:
+ * пуш ушёл инициатору проведения, а причину устранил другой человек.
+ */
+async function removeByTag(tag) {
+    if (!tag) return 0;
+    let rows = [];
+    try {
+        rows = await dbGateway.execute({
+            operation: 'read', table: TABLE,
+            where: { tag: String(tag) },
+            options: { raw: true, attributes: ['UID', 'userId'] },
+            context: { sessionID: SYSTEM_SESSION_ID }
+        }) || [];
+        if (!rows.length) return 0;
+        await dbGateway.execute({
+            operation: 'delete', table: TABLE,
+            where: { UID: rows.map(r => r.UID) },
+            context: { sessionID: SYSTEM_SESSION_ID }
+        });
+    } catch (e) {
+        log.error('[notifications] не удалось снять уведомления по тегу:', e && e.message);
+        return 0;
+    }
+    const byUser = new Map();
+    for (const r of rows) {
+        if (!byUser.has(r.userId)) byUser.set(r.userId, []);
+        byUser.get(r.userId).push(r.UID);
+    }
+    for (const [userId, UIDs] of byUser) {
+        try { sendSessionEventToUser(userId, { type: 'notificationRemoved', UIDs }); }
+        catch (e) { /* окна обновятся при следующей загрузке */ }
+    }
+    return rows.length;
+}
+
 /** Убрать одно уведомление (клик по нему — оно обработано). */
 async function remove(params, sessionID) {
     const user = await globalRoot.getUserBySessionID(sessionID);
@@ -264,4 +338,4 @@ async function markRead(params, sessionID) {
     return { success: true };
 }
 
-module.exports = { notify, notifySelf, list, clearAll, remove, markRead, toClient };
+module.exports = { notify, notifySelf, list, clearAll, remove, removeByTag, markRead, toClient };

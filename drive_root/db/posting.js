@@ -18,19 +18,22 @@
  * проводится вообще, и ничего лишнего ему не добавляется (ни поля, ни команд):
  *
  *     "posting": {
- *       "mode": "manual",            // manual — есть команды; auto — очередь при каждом сохранении
+ *       "mode": "manual",            // manual — есть команды; onSave — очередь при каждом сохранении
  *       "handler": "cash.post",      // именованная функция, entityHooks.register
- *       "unpost": ["draft"],         // из каких состояний разрешено распроведение; [] — запрещено
+ *       "unpost": ["draft"],         // ключа нет — разрешено; false — запрещено; список — только из этих состояний
+ *       "confirm": { "i18n": "…" },  // переспрос ПЕРЕД проведением — у команды, а не у кнопки
+ *       "unpostConfirm": { "i18n": "…" },
  *       "captions": { "post": {...}, "unpost": {...}, "postAndClose": {...}, "state": {...} },
  *       "writes":  ["reg_cash"],     // в какие регистры пишет
  *       "writesTables": [],          // какие ещё таблицы создаёт (метятся регистратором)
+ *       "creates": ["cash_receipts"],// какие ДОКУМЕНТЫ порождает один раз (ctx.createOnce)
  *       "depends": [ { "register": "reg_cash", "dimensions": { "cashboxId": "cashboxId" } } ],
  *       "statusOnPost": null, "statusOnUnpost": null
  *     }
  *
  * ПРОВЕДЕНИЕ ВСЕГДА ОТЛОЖЕННОЕ. Синхронного нет ни в одном режиме: единственный
  * исполнитель — очередь (`postingQueue.js`), и она же единственное место, откуда
- * зовётся `runOne` этого модуля. Режим `auto` прячет только команды и слово
+ * зовётся `runOne` этого модуля. Режим `onSave` прячет только команды и слово
  * «провести»; всё остальное — очередь, возможность остаться непроведённым,
  * уведомление о неудаче — работает одинаково, иначе пользователь, которому спрятали
  * кнопку, никак не узнал бы, что документ не в порядке.
@@ -75,12 +78,38 @@ function readConfig(ModelOrDef) {
     const cfg = ec && ec.posting;
     if (!cfg) return null;
     return {
-        mode: cfg.mode === 'auto' ? 'auto' : 'manual',
+        // `onSave` — команд проведения нет, документ уходит в очередь при каждом
+        // сохранении; `manual` — проведение отдельной командой. Слово «auto» не
+        // говорило ничего: режим называется тем же словом, каким названо действие.
+        mode: cfg.mode === 'onSave' ? 'onSave' : 'manual',
         handler: cfg.handler || null,
-        unpost: Array.isArray(cfg.unpost) ? cfg.unpost : [],
+        // РАСПРОВЕДЕНИЕ РАЗРЕШЕНО ПО УМОЛЧАНИЮ (решение владельца 30.09.2026, ТЗ §2):
+        // документов, которые пользователь вправе распровести, на практике гораздо
+        // больше, чем запертых. Три значения, а не два:
+        //   ключа нет (`true`) — разрешено из любого состояния;
+        //   `false`           — запрещено совсем (случай счёта, объявлен явно);
+        //   список состояний  — разрешено только из перечисленных.
+        // Пустой список — это «разрешено ниоткуда», то есть тот же запрет; отдельным
+        // умолчанием он больше не является.
+        unpost: cfg.unpost === false ? false
+            : (Array.isArray(cfg.unpost) ? cfg.unpost : true),
         captions: cfg.captions || {},
+        // ПЕРЕСПРОС — свойство КОМАНДЫ, а не кнопки (ТЗ §14.1). Объявлен один раз
+        // здесь, и его показывает любая кнопка, которая команду выполняет: и
+        // «Провести», и «Провести и закрыть», и стандартный «ОК», когда он
+        // проводит. Пока переспрос объявляла кнопка, «Ausstellen» спрашивал, а
+        // «ОК» делал то же самое молча — и молчала как раз та кнопка, которую
+        // жмут не глядя. Не объявлено — переспроса нет ни у одной кнопки:
+        // диалог на каждое обычное проведение приучает жать «да», обесценивая
+        // переспрос там, где он важен.
+        confirm: cfg.confirm || null,
+        unpostConfirm: cfg.unpostConfirm || null,
         writes: Array.isArray(cfg.writes) ? cfg.writes : [],
         writesTables: Array.isArray(cfg.writesTables) ? cfg.writesTables : [],
+        // Документы, которые проведение ПОРОЖДАЕТ один раз (`ctx.createOnce`) — в
+        // отличие от `writesTables`, они не принадлежат регистратору и при
+        // перепроведении НЕ снимаются: поступление аванса живёт своей жизнью.
+        creates: Array.isArray(cfg.creates) ? cfg.creates : [],
         depends: Array.isArray(cfg.depends) ? cfg.depends : [],
         statusOnPost: cfg.statusOnPost || null,
         statusOnUnpost: cfg.statusOnUnpost || null,
@@ -96,6 +125,34 @@ function readConfig(ModelOrDef) {
 /** Документ объявил проведение? */
 function isPostable(ModelOrDef) {
     return !!readConfig(ModelOrDef);
+}
+
+/**
+ * Распроведение разрешено? ОДНО место, где этот вопрос решается: раньше одна и та
+ * же проверка была переписана трижды — в `runOne`, в `documentCommands.postingInfo`
+ * и в `deletionMark`, — и любая правка правила обязана была попасть во все три.
+ *
+ * Сравнивать `unpost` с состоянием можно только когда ДЕЛОВОЕ состояние есть и
+ * отличается от состояния проведения. Два случая, когда сравнивать не с чем:
+ *   - поля состояния у документа нет вовсе (`immutable` не объявлен);
+ *   - оно И ЕСТЬ состояние проведения (денежный документ). Там проверка не просто
+ *     бессмысленна, а разрушительна: постановка в очередь сама меняет `postingState`
+ *     на `queued`, потом на `error`, и «распроведение из состояния error запрещено»
+ *     становится вечным — документ остаётся в очереди навсегда.
+ *
+ * @param {object} config — результат `readConfig`
+ * @param {object|null} row — прочитанная строка документа; `null` — спрашивают только
+ *                            про ОБЪЯВЛЕНИЕ (можно ли вообще), без состояния
+ * @returns {boolean}
+ */
+function canUnpostFrom(config, row) {
+    if (!config) return false;
+    if (config.unpost === false) return false;   // запрещено объявлением
+    if (config.unpost === true) return true;     // ключа нет — разрешено
+    if (!config.unpost.length) return false;     // разрешено ниоткуда
+    if (config.statusIsPostingState) return true;
+    if (!row || !Object.prototype.hasOwnProperty.call(row, config.statusField)) return true;
+    return config.unpost.indexOf(row[config.statusField]) !== -1;
 }
 
 /**
@@ -342,6 +399,70 @@ function movementsApi(p) {
 }
 
 /**
+ * ДОКУМЕНТ, ПОРОЖДЁННЫЙ ПРОВЕДЕНИЕМ — один раз (ТЗ «Платежи брони», §3.3).
+ *
+ * Бронь, введённая с авансом, при первом успешном проведении создаёт документ
+ * поступления. `writesTables` для этого не годится: строки оттуда принадлежат
+ * документу-регистратору и снимаются при каждом перепроведении, а поступление —
+ * самостоятельный денежный документ со своим журналом изменений и замком.
+ *
+ * ОХРАНА — ФАКТ, А НЕ СОСТОЯНИЕ: в документе-основании есть поле-штамп, и UID
+ * нового документа пишется в него В ТОЙ ЖЕ ТРАНЗАКЦИИ, что и создание. Повтор
+ * проведения, каскад, массовое перепроведение второй раз не создадут — штамп уже
+ * стоит. И если порождённый документ потом удалили, перепроведение основания его
+ * НЕ воскресит: именно поэтому охрана — штамп, а не «есть ли документ со ссылкой
+ * на основание» (вопрос, ответ на который меняется от удаления).
+ *
+ * Создание идёт через шлюз ПРОВЕДЕНИЯ — то есть в его транзакции, под служебной
+ * сессией инициатора (RLS та же, что у человека), с автонумерацией, моментом
+ * времени и представлением. Проводится новый документ ПОСЛЕ коммита обычным путём
+ * (очередь) — это делает исполнитель очереди по списку `created` из результата.
+ *
+ * @param {object} p — `{ table, uid, doc, config, transaction, sessionID, created }`
+ * @returns {Function} `createOnce({ table, stamp, values })` → `{ created, uid }`
+ */
+function createOnceApi(p) {
+    const dbGateway = require('../dbGateway');
+    return async function createOnce(req) {
+        const table = req && req.table;
+        const stamp = req && req.stamp;
+        if (!table || p.config.creates.indexOf(table) === -1) {
+            throw new PostingError(`[posting] ${p.table}: таблица "${table}" не объявлена в posting.creates`
+                + ' — ядро не знает, что этот документ порождает её записи', 'CREATES_UNDECLARED',
+            'posting_err_creates_undeclared', { table: String(table || '') });
+        }
+        if (!stamp || !p.doc || !Object.prototype.hasOwnProperty.call(p.doc, stamp)) {
+            throw new PostingError(`[posting] ${p.table}: поле-штамп "${stamp}" у документа не найдено`,
+                'CREATES_NO_STAMP', 'posting_err_creates_no_stamp', { field: String(stamp || '') });
+        }
+        const already = p.doc[stamp];
+        if (already !== null && already !== undefined && String(already) !== '') {
+            return { created: false, uid: already };
+        }
+
+        const globalCtx = require('../globalServerContext');
+        const modelName = globalCtx.getModelNameForTable(table) || table;
+        const uid = require('./utilites').generateUID(modelName);
+        await postingGateway(p.transaction, p.sessionID).execute({
+            operation: 'create', table,
+            data: Object.assign({}, req.values || {}, { UID: uid })
+        });
+        // Штамп — узким правом ядра на ОДНО поле: оно служебное и человеку не
+        // принадлежит. Та же транзакция — в этом и состоит охрана.
+        await dbGateway.execute({
+            operation: 'update', table: p.table,
+            where: { UID: p.uid },
+            data: { [stamp]: uid },
+            options: { transaction: p.transaction },
+            context: { sessionID: p.sessionID, transaction: p.transaction, coreWrite: coreWrite.grant([stamp]) }
+        });
+        p.doc[stamp] = uid;
+        p.created.push({ table, uid });
+        return { created: true, uid };
+    };
+}
+
+/**
  * Снять ВСЁ, что документ когда-либо создал проведением.
  *
  * Зовётся и перед проведением, и при распроведении — одним и тем же кодом, потому что
@@ -463,29 +584,18 @@ async function runOne(p) {
 
         // 2. Допустимость действия.
         const currentState = doc[STATE_FIELD] || STATE.NOT_POSTED;
-        if (action === ACTION.UNPOST) {
-            if (!config.unpost.length) {
+        if (action === ACTION.UNPOST && !canUnpostFrom(config, doc)) {
+            // Два отказа, а не один: «этому документу распроведение запрещено
+            // вообще» и «запрещено из состояния, в котором он сейчас» — разные
+            // ответы, и валить их в один значит врать в одном из них.
+            if (config.unpost === false) {
                 throw new PostingError(`[posting] ${table}: распроведение запрещено`, 'UNPOST_DENIED',
                     'posting_refuse_unpost_denied');
             }
-            // `unpost` перечисляет ДЕЛОВЫЕ состояния, из которых распроведение
-            // разрешено. Сравнивать с ними можно только когда деловое состояние
-            // существует и отличается от состояния проведения. Два случая, когда
-            // сравнивать не с чем:
-            //   - поля состояния у документа нет вовсе (`immutable` не объявлен);
-            //   - оно И ЕСТЬ состояние проведения (денежный документ).
-            // Во втором случае проверка не просто бессмысленна, а разрушительна:
-            // постановка в очередь сама меняет `postingState` на `queued`, потом на
-            // `error`, и «распроведение из состояния "error" запрещено» становится
-            // вечным — документ остаётся в очереди навсегда и пробуется бесконечно.
-            const hasStatus = !config.statusIsPostingState
-                && Object.prototype.hasOwnProperty.call(doc, config.statusField);
             const docStatus = doc[config.statusField];
-            if (hasStatus && config.unpost.indexOf(docStatus) === -1) {
-                throw new PostingError(
-                    `[posting] ${table}: распроведение из состояния "${docStatus}" запрещено`,
-                    'UNPOST_DENIED', 'posting_err_unpost_from_state', { state: docStatus });
-            }
+            throw new PostingError(
+                `[posting] ${table}: распроведение из состояния "${docStatus}" запрещено`,
+                'UNPOST_DENIED', 'posting_err_unpost_from_state', { state: docStatus });
         }
 
         // 3. Снять всё, что документ создал раньше. Делает ядро — обработчик об этом
@@ -494,6 +604,9 @@ async function runOne(p) {
 
         // 4. Проведение: вызвать обработчик приложения.
         let written = [];
+        // Документы, порождённые этим проведением (`ctx.createOnce`): их проведёт
+        // очередь после коммита — до него их для неё ещё не существует.
+        const created = [];
         if (action === ACTION.POST) {
             if (!config.handler) {
                 throw new PostingError(`[posting] ${table}: не объявлен обработчик проведения`, 'NO_HANDLER',
@@ -520,6 +633,9 @@ async function runOne(p) {
                 // Шлюз ПРОВЕДЕНИЯ, а не голый dbGateway: подставляет транзакцию и
                 // метку «пишет проведение» (см. postingGateway).
                 dbGateway: postingGateway(tx, p.sessionID),
+                // Документ, порождаемый проведением ОДИН раз (§3.3 ТЗ платежей брони).
+                createOnce: createOnceApi({ table, uid, doc, config, transaction: tx,
+                    sessionID: p.sessionID, created }),
                 moment: { date: doc[entityMoment.DATE_FIELD], seq: doc[entityMoment.FIELD] }
             });
             // Что записалось — перечитываем, а не верим намерению: каскаду нужны
@@ -579,6 +695,56 @@ async function runOne(p) {
             });
         }
 
+        // 6б. ОПОВЕЩЕНИЯ ПО ДОКУМЕНТУ — в той же транзакции, что и движения
+        //     (ТЗ «Оповещения по документам», §6, повод 1). Оповещение есть
+        //     движение документа, адресованное человеку, и пишется оно там же,
+        //     где остальные: иначе появилось бы состояние «движения новые, а
+        //     оповещения старые», и никто бы не знал, какому из двух верить.
+        //     Пересчёт идёт ПОСЛЕ пометки на удаление (6а): помеченный документ
+        //     своих оповещений не показывает, и увидеть пометку пересчёт обязан
+        //     в этой же транзакции.
+        //     Пуши отсюда НЕ уходят — они возвращаются вызывающему: уведомление
+        //     из незакоммиченной транзакции обещало бы то, что может откатиться
+        //     (отправляет их `postingRunner` после коммита).
+        let alertPushes = [];
+        try {
+            const documentAlerts = require('./documentAlerts');
+            const res = await documentAlerts.rebuild({
+                table, uid,
+                sessionID: p.sessionID,
+                transaction: tx,
+                requestedBy: p.requestedBy || null
+            });
+            alertPushes = res.pushes || [];
+
+            // И СВЯЗАННЫЕ ДОКУМЕНТЫ: расхождение висит на БРОНИ, а корректировку
+            // выпускает СЧЁТ — пересчёт правил проводимого документа его не
+            // касается. Кого задели движения, выводится из их разреза
+            // (`relatedFromMovements`), а не из второго списка в объявлении.
+            // Каскад проведения для этого не годится: он идёт вперёд по времени,
+            // а бронь старше своего счёта.
+            const related = documentAlerts.relatedFromMovements(
+                (written || []).concat(removed || []), { table, uid });
+            for (const r of related) {
+                try {
+                    const rr = await documentAlerts.rebuild({
+                        table: r.table, uid: r.uid,
+                        sessionID: p.sessionID,
+                        transaction: tx,
+                        requestedBy: p.requestedBy || null
+                    });
+                    alertPushes = alertPushes.concat(rr.pushes || []);
+                } catch (e2) {
+                    console.error(`[posting] Оповещения связанного документа ${r.table}[${r.uid}]`
+                        + ' не пересчитаны:', e2 && e2.message || e2);
+                }
+            }
+        } catch (e) {
+            // Непосчитанные оповещения — это потеря сообщения человеку, а не
+            // потеря учёта: откатывать из-за них проведение неверно.
+            console.error('[posting] Оповещения по документу не пересчитаны:', e && e.message || e);
+        }
+
         // 7. Журнал (GoBD: проведение и распроведение — учётные операции).
         const actor = p.requestedBy || null;
         try {
@@ -604,7 +770,11 @@ async function runOne(p) {
             state: nextState,
             moment: { date: doc[entityMoment.DATE_FIELD], seq: doc[entityMoment.FIELD] },
             movements: written,
-            removed
+            removed,
+            created,
+            // Оповещения, о которых человеку ещё не говорили. Отправляются
+            // ПОСЛЕ коммита (`postingRunner`), а не здесь.
+            alertPushes
         };
     });
 }
@@ -616,6 +786,7 @@ module.exports = {
     PostingError,
     readConfig,
     isPostable,
+    canUnpostFrom,
     injectPostingState,
     injectPostingStates,
     postableTables,
@@ -624,5 +795,6 @@ module.exports = {
     clearMovements,
     postingContext,
     postingGateway,
+    createOnceApi,
     runOne
 };

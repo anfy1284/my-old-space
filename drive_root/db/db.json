@@ -844,6 +844,61 @@
             }
         },
         {
+            "name": "DbScripts",
+            "tableName": "db_scripts",
+            "//": "Журнал выполненных разовых скриптов (16.10.2026, drive_root/db/scriptLog.js). Скрипт с --apply записывает сюда себя, версию кода и итог — по копии базы прода видно, что на ней уже выполнено. Таблицу создаёт и сам scriptLog (CREATE TABLE IF NOT EXISTS): скрипт бывает нужен ДО первого старта новой версии. Колонки обязаны совпадать с теми, что он создаёт.",
+            "fields": {
+                "organizationId": {
+                    "type": "STRING",
+                    "allowNull": true,
+                    "caption": {
+                        "i18n": "dbscript_organization_field"
+                    }
+                },
+                "scriptName": {
+                    "type": "STRING",
+                    "allowNull": false,
+                    "defaultValue": "",
+                    "caption": {
+                        "i18n": "dbscript_name_field"
+                    }
+                },
+                "appliedAt": {
+                    "type": "DATE",
+                    "allowNull": false,
+                    "caption": {
+                        "i18n": "dbscript_applied_at_field"
+                    }
+                },
+                "appVersion": {
+                    "type": "STRING",
+                    "allowNull": false,
+                    "defaultValue": "",
+                    "caption": {
+                        "i18n": "dbver_app_version_field"
+                    }
+                },
+                "frameworkVersion": {
+                    "type": "STRING",
+                    "allowNull": false,
+                    "defaultValue": "",
+                    "caption": {
+                        "i18n": "dbver_framework_version_field"
+                    }
+                },
+                "summary": {
+                    "type": "TEXT",
+                    "allowNull": true,
+                    "caption": {
+                        "i18n": "dbscript_summary_field"
+                    }
+                }
+            },
+            "options": {
+                "timestamps": true
+            }
+        },
+        {
             "name": "SystemDataTypes",
             "tableName": "system_data_types",
             "entityConfig": {
@@ -1391,6 +1446,146 @@
                             "nextAttemptAt",
                             "date",
                             "seq"
+                        ]
+                    }
+                ]
+            }
+        },
+        {
+            "//": "ОПОВЕЩЕНИЯ ПО ДОКУМЕНТАМ (ТЗ tmp/ТЗ_ОПОВЕЩЕНИЯ_ПО_ДОКУМЕНТАМ.md). Оповещение — ДВИЖЕНИЕ документа, адресованное человеку: его помечает регистратор (documentTable + documentUID), ядро снимает старые и пишет новые в той же транзакции, что и движения регистров. Поэтому состояния «движения новые, а оповещения старые» не существует по построению. Снятые строки УДАЛЯЮТСЯ физически: иначе через год это самая большая таблица в базе при нулевой пользе.",
+            "name": "DocumentAlerts",
+            "tableName": "document_alerts",
+            "fields": {
+                "documentTable": {
+                    "type": "STRING",
+                    "allowNull": false,
+                    "caption": {
+                        "i18n": "alert_document_table_field"
+                    }
+                },
+                "documentUID": {
+                    "type": "STRING",
+                    "allowNull": false,
+                    "caption": {
+                        "i18n": "alert_document_field"
+                    }
+                },
+                "organizationId": {
+                    "//": "Реквизит доступа. Без него чужие оповещения видны всем; в excluded_tables таблицу НЕ добавлять.",
+                    "type": "STRING",
+                    "allowNull": true,
+                    "caption": {
+                        "i18n": "alert_organization_field"
+                    }
+                },
+                "ruleCode": {
+                    "//": "Код правила — и область переписывания: заполнение счёта не вправе затереть то, что записало проведение.",
+                    "type": "STRING",
+                    "allowNull": false,
+                    "caption": {
+                        "i18n": "alert_rule_field"
+                    }
+                },
+                "severity": {
+                    "type": "STRING",
+                    "allowNull": false,
+                    "defaultValue": "warning",
+                    "caption": {
+                        "i18n": "alert_severity_field"
+                    }
+                },
+                "sortOrder": {
+                    "//": "Порядок в пределах (документ + правило); он же ключ сопоставления при перезаписи (ТЗ §7).",
+                    "type": "INTEGER",
+                    "allowNull": false,
+                    "defaultValue": 0,
+                    "caption": {
+                        "i18n": "alert_sort_order_field"
+                    }
+                },
+                "textKey": {
+                    "//": "КЛЮЧ перевода, а не готовая строка (ТЗ §4 разрешает выбрать при реализации). Оповещение адресовано человеку, а читают один документ несколько людей с разными языками: готовый текст означал бы, что язык строки принадлежит тому, кто последним вызвал пересчёт.",
+                    "type": "STRING",
+                    "allowNull": false,
+                    "caption": {
+                        "i18n": "alert_text_field"
+                    }
+                },
+                "textVars": {
+                    "type": "JSON",
+                    "allowNull": true,
+                    "caption": {
+                        "i18n": "alert_text_vars_field"
+                    }
+                },
+                "actionApp": {
+                    "type": "STRING",
+                    "allowNull": true,
+                    "caption": {
+                        "i18n": "alert_action_app_field"
+                    }
+                },
+                "actionKind": {
+                    "//": "openRecord / openNew / openForm / call. Действие — приложение + ИМЯ метода + параметры, никогда UID скрипта: loadScript выдаёт новый UID на каждом старте процесса.",
+                    "type": "STRING",
+                    "allowNull": true,
+                    "caption": {
+                        "i18n": "alert_action_kind_field"
+                    }
+                },
+                "actionParams": {
+                    "type": "JSON",
+                    "allowNull": true,
+                    "caption": {
+                        "i18n": "alert_action_params_field"
+                    }
+                },
+                "actionCaption": {
+                    "//": "Тоже КЛЮЧ перевода — подпись гиперссылки видит человек.",
+                    "type": "STRING",
+                    "allowNull": true,
+                    "caption": {
+                        "i18n": "alert_action_caption_field"
+                    }
+                },
+                "pushWanted": {
+                    "type": "BOOLEAN",
+                    "allowNull": false,
+                    "defaultValue": false,
+                    "caption": {
+                        "i18n": "alert_push_wanted_field"
+                    }
+                },
+                "pushSentAt": {
+                    "//": "Живёт в СТРОКЕ, и именно поэтому перезапись на месте (ТЗ §7) не шлёт пуш повторно, а создание — шлёт.",
+                    "type": "DATE",
+                    "allowNull": true,
+                    "caption": {
+                        "i18n": "alert_push_sent_field"
+                    }
+                }
+            },
+            "options": {
+                "timestamps": true,
+                "indexes": [
+                    {
+                        "fields": [
+                            "documentTable",
+                            "documentUID"
+                        ]
+                    },
+                    {
+                        "fields": [
+                            "documentTable",
+                            "documentUID",
+                            "ruleCode",
+                            "sortOrder"
+                        ]
+                    },
+                    {
+                        "fields": [
+                            "organizationId",
+                            "severity"
                         ]
                     }
                 ]

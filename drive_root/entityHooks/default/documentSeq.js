@@ -60,7 +60,8 @@ module.exports = async function documentSeq(request, params, context) {
     if (!Model) return;
 
     if (request.operation === 'update') {
-        const uid = request.where && (request.where.UID || request.where.uid);
+        // Не `request.where.UID`: под RLS условие обёрнуто в Op.and (whereUid.js).
+        const uid = require('../../db/whereUid').uidOf(request.where);
         if (!uid) return;
 
         let current = null;

@@ -433,6 +433,53 @@ async function handleRequest(req, res) {
         return;
     }
 
+    // --- Endpoint: POST /logout — выход (16.10.2026) ---
+    // Раньше выйти было нельзя вовсе: cookie сессии HttpOnly, пункта меню не было, и
+    // второй человек за тем же компьютером работал под чужим именем. Сессия удаляется
+    // из базы и из кэшей (снимок пользователя тоже), cookie гасится; следующий запрос
+    // получит новую гостевую сессию и форму входа.
+    if (req.method === 'POST' && req.url === '/logout') {
+        try {
+            const m = (req.headers.cookie || '').match(/(?:^|; )sessionID=([^;]+)/i);
+            const sid = m ? decodeURIComponent(m[1]) : null;
+            if (sid) {
+                const sm = require('./db/sessionManager');
+                await require('./dbGateway').execute({
+                    operation: 'delete', table: 'sessions', where: { sessionId: sid },
+                    context: { sessionID: '__SYS_INTERNAL__' }
+                });
+                try { sm.sessionCache.delete(sid); } catch (e) {}
+                try { await require('./globalServerContext').invalidateSessionUser(sid); } catch (e) {}
+            }
+        } catch (e) {
+            console.error('[logout]', e && e.message || e);
+        }
+        res.writeHead(200, {
+            'Content-Type': 'application/json',
+            'Set-Cookie': 'sessionID=; Path=/; HttpOnly; Max-Age=0',
+            'Cache-Control': 'no-store'
+        });
+        res.end(JSON.stringify({ ok: true }));
+        return;
+    }
+
+    // --- Endpoint: GET /server-now — «сейчас» по часам и в поясе СЕРВЕРА ---
+    // Правило владельца 15.10.2026: дата, которая формируется автоматически,
+    // берётся только с сервера, никогда с клиента. Кнопка «Сегодня» в календаре
+    // спрашивает её здесь. Отдаём «как на часах» (без зоны) — в той же форме, в
+    // какой поле даты отправляет введённое человеком.
+    if (req.method === 'GET' && req.url === '/server-now') {
+        const d = new Date();
+        const p = (n) => String(n).padStart(2, '0');
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+        res.end(JSON.stringify({
+            ymd: d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()),
+            hh: p(d.getHours()),
+            mi: p(d.getMinutes())
+        }));
+        return;
+    }
+
     // --- Endpoint: POST /server-call — вызов серверной функции из serverScriptStore ---
     if (req.method === 'POST' && req.url === '/server-call') {
         let body = '';
@@ -447,10 +494,16 @@ async function handleRequest(req, res) {
                 return;
             }
 
-            const { uid, fn, fnParams } = data;
-            if (!uid || !fn) {
+            // Два способа назвать метод, и оба именованные:
+            //   { uid, fn }        — скрипт по имени (serverScriptStore)
+            //   { app, form, fn }  — МЕТОД ФОРМЫ (drive_root/formMethods).
+            // Свободной строки с UID скрипта у метода формы нет: клиент зовёт метод
+            // по имени формы, а не по идентификатору, выданному на этот запуск процесса.
+            const { uid, app: formApp, form: formName, fn, fnParams } = data;
+            const isFormCall = !!(formApp && formName);
+            if ((!uid && !isFormCall) || !fn) {
                 res.writeHead(400, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ error: 'uid and fn are required' }));
+                res.end(JSON.stringify({ error: 'uid (or app+form) and fn are required' }));
                 return;
             }
 
@@ -475,21 +528,32 @@ async function handleRequest(req, res) {
                     return;
                 }
 
-                const entry = serverScriptStore.getServerScript(uid, userRole);
-                if (!entry) {
-                    res.writeHead(403, { 'Content-Type': 'application/json' });
-                    res.end(JSON.stringify({ error: 'Forbidden or script not found' }));
-                    return;
-                }
+                let method = null;
+                if (isFormCall) {
+                    method = require('./formMethods').resolve({ app: formApp, form: formName, method: fn, userRole });
+                    if (typeof method !== 'function') {
+                        res.writeHead(404, { 'Content-Type': 'application/json' });
+                        res.end(JSON.stringify({ error: `Method "${fn}" not found for form "${formApp}/${formName}"` }));
+                        return;
+                    }
+                } else {
+                    const entry = serverScriptStore.getServerScript(uid, userRole);
+                    if (!entry) {
+                        res.writeHead(403, { 'Content-Type': 'application/json' });
+                        res.end(JSON.stringify({ error: 'Forbidden or script not found' }));
+                        return;
+                    }
 
-                if (typeof entry.scriptObj[fn] !== 'function') {
-                    res.writeHead(404, { 'Content-Type': 'application/json' });
-                    res.end(JSON.stringify({ error: `Function "${fn}" not found in script` }));
-                    return;
+                    if (typeof entry.scriptObj[fn] !== 'function') {
+                        res.writeHead(404, { 'Content-Type': 'application/json' });
+                        res.end(JSON.stringify({ error: `Function "${fn}" not found in script` }));
+                        return;
+                    }
+                    method = entry.scriptObj[fn];
                 }
 
                 const ctx = { sessionID, user, role: userRole };
-                const result = await entry.scriptObj[fn](fnParams, ctx);
+                const result = await method(fnParams, ctx);
 
                 res.writeHead(200, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify({ result: result !== undefined ? result : null }));

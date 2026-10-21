@@ -1,0 +1,86 @@
+{
+    "dc_app_caption": {
+        "en": "Document check",
+        "ru": "Проверка документов",
+        "de": "Belegprüfung",
+        "pl": "Sprawdzenie dokumentów"
+    },
+    "dc_hint": {
+        "en": "Everything the program knows about your documents right now. A notice disappears by itself once its cause is gone.",
+        "ru": "Всё, что программа знает о ваших документах сейчас. Оповещение исчезает само, когда причина устранена.",
+        "de": "Alles, was das Programm jetzt über Ihre Belege weiß. Ein Hinweis verschwindet von selbst, sobald seine Ursache behoben ist.",
+        "pl": "Wszystko, co program wie teraz o Twoich dokumentach. Powiadomienie znika samo, gdy przyczyna zostanie usunięta."
+    },
+    "dc_refresh": {
+        "en": "Refresh",
+        "ru": "Обновить",
+        "de": "Aktualisieren",
+        "pl": "Odśwież"
+    },
+    "dc_do_action": {
+        "en": "Do it",
+        "ru": "Выполнить",
+        "de": "Ausführen",
+        "pl": "Wykonaj"
+    },
+    "dc_open_document": {
+        "en": "Open the document",
+        "ru": "Открыть документ",
+        "de": "Beleg öffnen",
+        "pl": "Otwórz dokument"
+    },
+    "dc_filter_severity": {
+        "en": "Severity",
+        "ru": "Важность",
+        "de": "Wichtigkeit",
+        "pl": "Ważność"
+    },
+    "dc_filter_kind": {
+        "en": "Document type",
+        "ru": "Вид документа",
+        "de": "Belegart",
+        "pl": "Typ dokumentu"
+    },
+    "dc_filter_all": {
+        "en": "All",
+        "ru": "Все",
+        "de": "Alle",
+        "pl": "Wszystkie"
+    },
+    "dc_table_caption": {
+        "en": "Notices",
+        "ru": "Оповещения",
+        "de": "Hinweise",
+        "pl": "Powiadomienia"
+    },
+    "dc_col_kind": {
+        "en": "Type",
+        "ru": "Вид",
+        "de": "Art",
+        "pl": "Rodzaj"
+    },
+    "dc_col_document": {
+        "en": "Document",
+        "ru": "Документ",
+        "de": "Beleg",
+        "pl": "Dokument"
+    },
+    "dc_col_date": {
+        "en": "Date",
+        "ru": "Дата",
+        "de": "Datum",
+        "pl": "Data"
+    },
+    "dc_col_text": {
+        "en": "Notice",
+        "ru": "Оповещение",
+        "de": "Hinweis",
+        "pl": "Powiadomienie"
+    },
+    "dc_col_action": {
+        "en": "Action",
+        "ru": "Действие",
+        "de": "Aktion",
+        "pl": "Działanie"
+    }
+}

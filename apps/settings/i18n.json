@@ -64,5 +64,11 @@
         "ru": "Удалено строк:",
         "de": "Zeilen gelöscht:",
         "pl": "Usunięto wierszy:"
+    },
+    "settings_table_picker_caption": {
+        "en": "Select table",
+        "ru": "Выбор таблицы",
+        "de": "Tabelle auswählen",
+        "pl": "Wybór tabeli"
     }
 }

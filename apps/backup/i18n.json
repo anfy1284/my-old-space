@@ -785,6 +785,30 @@
         "de": "DBMS",
         "pl": "SZBD"
     },
+    "dbscript_organization_field": {
+        "en": "Organization",
+        "ru": "Организация",
+        "de": "Organisation",
+        "pl": "Organizacja"
+    },
+    "dbscript_name_field": {
+        "en": "Script",
+        "ru": "Скрипт",
+        "de": "Skript",
+        "pl": "Skrypt"
+    },
+    "dbscript_applied_at_field": {
+        "en": "Applied at",
+        "ru": "Выполнен",
+        "de": "Ausgeführt am",
+        "pl": "Wykonano"
+    },
+    "dbscript_summary_field": {
+        "en": "Result",
+        "ru": "Итог",
+        "de": "Ergebnis",
+        "pl": "Wynik"
+    },
     "dbver_app_version_field": {
         "en": "Application version",
         "ru": "Версия приложения",

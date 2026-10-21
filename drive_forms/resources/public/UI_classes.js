@@ -1483,6 +1483,18 @@ if (typeof window !== 'undefined') {
 
         function genId(name) { return name + '-' + Date.now() + '-' + (++_idCounter); }
 
+        /**
+         * Устойчивый ключ произвольного объекта параметров — для личности окна.
+         * Ключи сортируются: `{a:1,b:2}` и `{b:2,a:1}` это одни и те же параметры,
+         * и два окна вместо одного из-за порядка полей были бы необъяснимы.
+         */
+        function _stableKey(obj) {
+            if (obj === null || obj === undefined) return '';
+            if (typeof obj !== 'object') return String(obj);
+            if (Array.isArray(obj)) return '[' + obj.map(_stableKey).join(',') + ']';
+            return '{' + Object.keys(obj).sort().map(k => k + ':' + _stableKey(obj[k])).join(',') + '}';
+        }
+
         // --- Non-blocking global busy indicator (ретро-индикатор «бегущая дорожка») ---
         // Показывает бегущий прогрессбар при длительных асинхронных операциях
         // (открытие окна, генерация счёта), не блокируя интерфейс. Ref-counted:
@@ -1846,6 +1858,85 @@ if (typeof window !== 'undefined') {
             },
 
             /**
+             * ДЕЙСТВИЕ ОПОВЕЩЕНИЯ (ТЗ «Оповещения по документам», §8).
+             *
+             *   MySpace.alerts.run(action)
+             *
+             * Одно место на три потребителя: гиперссылка в панели формы, строка
+             * обработки «Проверка документов» и клик по пуш-уведомлению. Три копии
+             * этого разбора однажды повели бы себя по-разному на одном и том же
+             * оповещении.
+             *
+             * Действие — это `{ приложение, форма/метод, параметры }`, и НИКОГДА
+             * ссылка на скрипт: `loadScript` выдаёт новый UID на каждом старте
+             * процесса, а оповещение живёт в базе и переживает перезапуск.
+             *
+             * | `openRecord` | открыть существующий документ                        |
+             * | `openNew`    | позвать метод-сборщик и открыть НЕСОХРАНЁННУЮ форму  |
+             * | `openForm`   | открыть именованную форму приложения                 |
+             * | `call`       | позвать метод приложения (переспрос обязателен)      |
+             *
+             * `openNew` — тот же механизм, которым ядро открывает сторно и
+             * коррекцию (`prefill`/`prefillTabular`): передумал и закрыл окно — в
+             * базе не осталось ничего, ни черновика, ни занятого номера.
+             */
+            alerts: {
+                async run(action) {
+                    if (!action || !action.kind) return;
+                    const p = action.params || {};
+                    const open = (params) => window.MySpace.open('uniForm', params);
+                    try {
+                        if (action.kind === 'openRecord') {
+                            const table = p.table || action.documentTable;
+                            const uid = p.uid || action.documentUID;
+                            if (!table || !uid) return;
+                            return await open({ mode: 'record', tableName: table, recordID: uid });
+                        }
+                        if (action.kind === 'openForm') {
+                            if (!action.app || !p.form) return;
+                            return await open({ app: action.app, form: p.form, params: p.params || {} });
+                        }
+                        if (action.kind === 'openNew') {
+                            // Собрать документ может только приложение: ядро не
+                            // знает, из чего он делается. Метод ФОРМЫ — по адресу,
+                            // а не по идентификатору скрипта.
+                            if (!action.app || !p.form || !p.method) return;
+                            const res = await callFormMethod(action.app, p.form, p.method, p.params || {});
+                            if (res && res.error) { showAlert(res.error); return; }
+                            // Сообщения сборщика (услуга без цены, «всё уже
+                            // выставлено») показываем ДО открытия формы: иначе
+                            // недостача денег в документе останется незамеченной.
+                            for (const key of ['skippedNotice', 'alreadyNotice', 'message']) {
+                                if (res && res[key]) { try { await showAlert(res[key]); } catch (_) {} }
+                            }
+                            return await open({
+                                mode: 'record',
+                                tableName: p.table,
+                                prefill: res && res.prefill,
+                                prefillTabular: res && res.prefillTabular
+                            });
+                        }
+                        if (action.kind === 'call') {
+                            if (!action.app || !p.form || !p.method) return;
+                            // Переспрос обязателен: это единственный вид действия,
+                            // который что-то ДЕЛАЕТ, не показав человеку, что
+                            // именно.
+                            const question = p.confirm || __t('Run the action?');
+                            const ok = await showConfirm(question);
+                            if (!ok) return;
+                            const res = await callFormMethod(action.app, p.form, p.method, p.params || {});
+                            if (res && res.error) showAlert(res.error);
+                            else if (res && res.message) showAlert(res.message);
+                            return res;
+                        }
+                    } catch (e) {
+                        console.error('[MySpace.alerts] действие не выполнено:', e && e.message || e);
+                        showAlert(__t('Error: ') + (e && e.message || ''));
+                    }
+                }
+            },
+
+            /**
              * Снимок интерфейса.
              *
              *   await MySpace.snapshot.serialize()  → { html, css, width, height }
@@ -2024,6 +2115,36 @@ if (typeof window !== 'undefined') {
                 try { if (descriptor && typeof descriptor.init === 'function') descriptor.init(); } catch (e) { console.error('MySpace.register.init error', e); }
             },
 
+            /**
+             * МОДАЛЬНОЕ открытие диалога с ВОЗВРАТОМ результата.
+             *
+             *   const amount = await MySpace.openModal('uniForm',
+             *       { app: 'booking', form: 'prepaymentDialog', params: { bookingId } });
+             *
+             * Промис резолвится тем, что диалог отдал через `form.setResult(...)`
+             * (метод формы возвращает `{ result }`), либо `undefined`, если окно
+             * закрыли, ничего не выбрав. Ждать ответа обязан уметь любой диалог,
+             * который что-то возвращает вызывающей форме, — иначе вызывающему
+             * остаётся гадать, чем всё кончилось.
+             */
+            async openModal(name, params, options) {
+                const id = await this.open(name, params, Object.assign({}, options || {}, { modal: true }));
+                const inst = instances[id];
+                const form = inst && (inst.form || inst);
+                if (!form) return undefined;
+                try { if (typeof form.setModal === 'function') form.setModal(true); } catch (e) {}
+                if (form._result !== undefined) return form._result;
+                return await new Promise((resolve) => {
+                    form._resultResolve = resolve;
+                    // Окно закрыли, не ответив — это тоже ответ: «ничего».
+                    const origClose = form.close ? form.close.bind(form) : null;
+                    form.close = function (...args) {
+                        try { if (typeof form._resultResolve === 'function') { const f = form._resultResolve; form._resultResolve = null; f(form._result); } } catch (e) {}
+                        return origClose ? origClose(...args) : undefined;
+                    };
+                });
+            },
+
             async open(name, params, options) {
                 const desc = apps[name];
                 if (!desc) throw new Error('MySpace: app not registered: ' + name);
@@ -2062,6 +2183,16 @@ if (typeof window !== 'undefined') {
                     singletonKey = name + ':' + (p.mode || '') + ':' + (p.dbTable || p.tableName || '');
                 } else if (name === 'uniForm') {
                     const p = params || {};
+                    // ЛИЧНОСТЬ ОКНА ИМЕНОВАННОЙ ФОРМЫ складывается из адреса И
+                    // переданных параметров: два диалога аванса по РАЗНЫМ броням —
+                    // это два окна, а по одной и той же — одно. Модальный диалог не
+                    // дедуплицируется вовсе: он ждёт ответа, и вернуть вместо нового
+                    // окна уже открытое значило бы отдать ответ не тому, кто спросил.
+                    if (p.form) {
+                        if (!(options && options.modal)) {
+                            singletonKey = 'uniForm:form:' + (p.app || '') + ':' + p.form + ':' + _stableKey(p.params);
+                        }
+                    } else {
                     const table = p.dbTable || p.tableName || p.table || '';
                     if (table) {
                         const recId = p.recordID || p.recordId || p.id || '';
@@ -2073,12 +2204,26 @@ if (typeof window !== 'undefined') {
                             singletonKey = 'uniForm:record:' + table + ':' + recId;
                         }
                     }
+                    }
                 }
 
+                // Окно, открытое как НОВАЯ запись, ключа не получило (UID ещё не было),
+                // а после сохранения показывает уже конкретную запись. Поэтому окно
+                // записи ищется и по тому, что форма показывает СЕЙЧАС: иначе
+                // «Beleg öffnen» на только что созданной брони открывал второе окно
+                // (прогон 17.10.2026, M6).
+                const showsRecord = (inst) => {
+                    if (!singletonKey || singletonKey.indexOf('uniForm:record:') !== 0) return false;
+                    const f = inst && (inst.form || inst);
+                    if (!f || !f._dataMap) return false;
+                    const t = f.dbTable || f.tableName || '';
+                    const u = f._dataMap.UID && f._dataMap.UID.value;
+                    return !!(t && u && singletonKey === 'uniForm:record:' + t + ':' + u);
+                };
                 if (singletonKey) {
                     for (const k in instances) {
                         const inst = instances[k];
-                        if (inst && inst._singletonKey === singletonKey) {
+                        if (inst && (inst._singletonKey === singletonKey || showsRecord(inst))) {
                             // Check that the form is still alive in the DOM
                             const form = inst.form || inst;
                             const isAlive = form && form.element && document.contains(form.element);
@@ -2245,9 +2390,17 @@ class Form extends UIObject {
 
     activate() {
         if (this.element) {
-            // If there is any other modal form open, don't allow activation of this form
-            const modalOpen = Form._allForms.some(f => f !== this && f.isModal && f.element && f.element.parentElement);
-            if (modalOpen) return; // keep modality: ignore activation requests
+            // Пока открыт модальный диалог, активировать другое окно нельзя — но
+            // ОТВЕТИТЬ на клик надо. Прежде клик (в том числе по кнопке в панели
+            // задач) просто игнорировался: экран молчал, и человек не знал, что
+            // его о чём-то спросили. Поднимаем диалог — он и есть ответ на вопрос
+            // «почему не переключается».
+            const modalOpen = Form._allForms.find(f => f !== this && f.isModal && f.element && f.element.parentElement);
+            if (modalOpen) {
+                try { Form._keepModalsOnTop(); } catch (e) {}
+                try { if (modalOpen.element) modalOpen.element.focus(); } catch (e) {}
+                return; // keep modality: ignore activation requests
+            }
             // Deactivate all other forms
             Form._allForms.forEach(form => {
                 if (form !== this) {
@@ -2281,6 +2434,9 @@ class Form extends UIObject {
         this.title = title;
         if (this.titleTextElement) {
             this.titleTextElement.textContent = title;
+            // Заголовок однострочный и обрезается многоточием — полный текст обязан
+            // остаться доступен, иначе обрезка прячет данные, а не оформление.
+            try { this.titleTextElement.title = title || ''; } catch (e) {}
         } else if (this.titleBar) {
             this.titleBar.textContent = title;
         }
@@ -2372,8 +2528,164 @@ class Form extends UIObject {
      * развёрнутого окна якоря нет — реакции не было вовсе.
      */
     _onWindowResize() {
-        if (this.isMaximized) { this._applyMaximizedGeometry(); return; }
-        if (this.anchorToWindow) this.updatePositionOnResize();
+        if (this.isMaximized) {
+            this._applyMaximizedGeometry();
+        } else {
+            if (this.anchorToWindow) this.updatePositionOnResize();
+            this._keepOnDesktop();
+        }
+        if (typeof this.reapplyTableHeights === 'function') {
+            try { requestAnimationFrame(() => this.reapplyTableHeights()); } catch (e) {}
+        }
+    }
+
+    /**
+     * ОКНО ВСЕГДА НА РАБОЧЕМ СТОЛЕ (15.10.2026). Одно правило на всех, кто двигает
+     * окно: подгонку по содержимому, восстановление запомненной геометрии, каскад и
+     * изменение размера браузера. Раньше каскад сдвигал окно на высоту заголовка,
+     * не глядя на край, и запомненное широкое окно уезжало за правую границу — его
+     * поля обрывались на краю экрана, а рамку и кнопки окна было не достать.
+     *
+     * Не шире и не выше рабочего стола; положение — так, чтобы окно целиком было
+     * видно. Развёрнутое окно живёт по своему правилу (_applyMaximizedGeometry).
+     */
+    _keepOnDesktop() {
+        if (this.isMaximized || !this.element || typeof window === 'undefined') return;
+        const top = Form.topOffset || 0;
+        const availW = window.innerWidth;
+        const availH = window.innerHeight - top - (Form.bottomOffset || 0);
+        if (!(availW > 0) || !(availH > 0)) return;
+        const w = Math.min(Math.round(this.width) || 0, availW);
+        const h = Math.min(Math.round(this.height) || 0, availH);
+        const x = Math.max(0, Math.min(Math.round(this.x) || 0, availW - w));
+        const y = Math.max(top, Math.min(Math.round(this.y) || 0, top + availH - h));
+        if (w !== this.width) { this.setWidth(w); this.element.style.width = w + 'px'; }
+        if (h !== this.height) { this.setHeight(h); this.element.style.height = h + 'px'; }
+        if (x !== this.x) { this.setX(x); this.element.style.left = x + 'px'; }
+        if (y !== this.y) { this.setY(y); this.element.style.top = y + 'px'; }
+    }
+
+    /**
+     * НАИМЕНЬШАЯ ШИРИНА СОДЕРЖИМОГО — ниже неё окно не сжимается (15.10.2026).
+     *
+     * Окно уже своих полей показывало их обрезанными под горизонтальной прокруткой
+     * («Einstellungen»: выпадающий список уходил за край). Меряем так же, как
+     * подгонка по содержимому: окно в нулевую ширину, содержимое переполняет его,
+     * `scrollWidth` отдаёт ширину, уже которой содержимое не бывает. Скрытые
+     * вкладки на время замера встают в поток (`ui-measuring-min`, style.css):
+     * окно, подогнанное под первую вкладку, иначе обрезало бы вторую. Желаемая
+     * ширина многострочных полей (`ui-measuring`) здесь НЕ включается — это
+     * пожелание, а не предел: поле сжимается вместе с окном.
+     *
+     * @returns {number} ширина окна в пикселях (0 — замерить не удалось)
+     */
+    measureMinContentWidth() {
+        if (!this.element || !this.contentArea) return 0;
+        const el = this.element, ca = this.contentArea;
+        const prev = [el.style.width, el.style.height, ca.style.width, ca.style.height];
+        // Развёрнутые окна (документы, журналы) свою панель переносят законно — им
+        // ширина экрана; одной строкой меряется панель окна-диалога.
+        const nowrapBar = this._windowState !== 'maximized';
+        let w = 0;
+        try {
+            el.style.width = '0px';
+            el.style.height = 'auto';
+            ca.style.width = 'auto';
+            ca.style.height = 'auto';
+            el.classList.add('ui-measuring-min');
+            if (nowrapBar) el.classList.add('ui-measuring-nowrap-bar');
+            const frame = (el.offsetWidth || 0) - (ca.offsetWidth || 0);
+            w = Math.max(ca.scrollWidth || 0, ca.clientWidth || 0) + Math.max(0, frame) + 4;
+            // УТОЧНЕНИЕ НА НАЙДЕННОЙ ШИРИНЕ. Замер «в нулевую ширину» недооценивает
+            // группы-сетки (подписи `max-content` + поле фиксированной ширины): на
+            // найденной ширине поле «Standard-Steuersatz» вылезало из рамки на 34px
+            // (прогон 17.10.2026). Ставим окно в найденную ширину, смотрим остаток
+            // переполнения внутри и прибавляем — пока не сойдётся.
+            for (let i = 0; i < 4 && w > 0; i++) {
+                el.style.width = w + 'px';
+                let excess = 0;
+                for (const g of ca.querySelectorAll('.ui-group, .ui-tabs-pane, .ui-input-container, .ui-toolbar:not(.table-toolbar)')) {
+                    const d = (g.scrollWidth || 0) - (g.clientWidth || 0);
+                    if (d > excess) excess = d;
+                }
+                if (excess <= 1) break;
+                w += excess;
+            }
+        } catch (e) {
+            w = 0;
+        } finally {
+            try { el.classList.remove('ui-measuring-min'); el.classList.remove('ui-measuring-nowrap-bar'); } catch (e) {}
+            el.style.width = prev[0]; el.style.height = prev[1];
+            ca.style.width = prev[2]; ca.style.height = prev[3];
+        }
+        this._minContentWidth = Math.ceil(w) || 0;
+        return this._minContentWidth;
+    }
+
+    /**
+     * ПЕРЕСЧИТАТЬ ВЫСОТЫ ТАБЛИЦ окна (`Table._applyDeclaredHeight`).
+     *
+     * Первый расчёт таблица делает сама, пока форма ещё строится, — и «обвязку»
+     * (шапка, панель) меряет в неустоявшемся окне: нижняя граница списка счетов
+     * брони выходила 833px, и развёрнутая форма уезжала под прокрутку. Поэтому
+     * пересчёт повторяется, когда размер окна уже окончателен: в конце построения,
+     * при показе вкладки, при развороте и восстановлении. Пересчёт идемпотентен.
+     *
+     * @param {Element} [root] — только таблицы внутри этого узла (показанная вкладка)
+     */
+    reapplyTableHeights(root) {
+        try {
+            const scope = root || this.contentArea;
+            if (!scope) return;
+            // Сначала ТАБЛИЦЫ, потом граница вкладок: граница меряет естественную
+            // высоту панелей, а в ней — уже применённые высоты таблиц. В обратном
+            // порядке она снималась по «сырым» таблицам (1516px у брони).
+            for (const el of scope.querySelectorAll('.ui-dynamictable')) {
+                const t = el._mosTable;
+                if (t && typeof t._applyDeclaredHeight === 'function') t._applyDeclaredHeight();
+            }
+            if (!root && this.contentArea) {
+                // ИЗНУТРИ НАРУЖУ: вложенные вкладки (строки счёта внутри «Allgemein»)
+                // фиксируются раньше внешних — внешние меряют их уже с новой границей.
+                // В порядке документа внешняя снимала 2109px по старой границе внутренней.
+                const all = Array.from(this.contentArea.querySelectorAll('.ui-tabs')).reverse();
+                for (const el of all) {
+                    if (el._mosTabs && typeof el._mosTabs.lockHeight === 'function') el._mosTabs.lockHeight();
+                }
+            }
+        } catch (e) {}
+    }
+
+    /**
+     * Заказать пересчёт высот (reapplyTableHeights) на следующий кадр — ОДИН, сколько
+     * бы таблиц ни попросило в этом кадре. Сам пересчёт новых заказов не делает,
+     * поэтому зацикливания нет.
+     */
+    scheduleRelayout() {
+        if (this._relayoutPending) return;
+        this._relayoutPending = true;
+        const run = () => {
+            this._relayoutPending = false;
+            this.reapplyTableHeights();
+        };
+        try { requestAnimationFrame(run); } catch (e) { setTimeout(run, 0); }
+    }
+
+    /** Нижняя граница ширины окна: содержимое, но не шире рабочего стола. */
+    getMinWidth() {
+        // Если содержимое прокручивается по вертикали, полоса прокрутки отнимает
+        // ширину у полей — её добавляем к пределу.
+        let sb = 0;
+        try {
+            const ca = this.contentArea;
+            if (ca && ca.scrollHeight > ca.clientHeight + 1) {
+                const cs = window.getComputedStyle(ca);
+                sb = Math.max(0, (ca.offsetWidth - ca.clientWidth)
+                    - (parseFloat(cs.borderLeftWidth) || 0) - (parseFloat(cs.borderRightWidth) || 0));
+            }
+        } catch (e) { sb = 0; }
+        const own = Math.max(120, (this._minContentWidth || 0) + sb);
+        return (typeof window !== 'undefined') ? Math.min(own, window.innerWidth) : own;
     }
 
     /** Геометрия развёрнутого окна — одно определение на всех потребителей. */
@@ -2437,6 +2749,15 @@ class Form extends UIObject {
     setModal(modal) {
         this.isModal = modal;
         if (this.element) {
+            // Окно объявляет себя модальным ПОСЛЕ того, как базовый `Draw` выдал
+            // ему z-индекс (`ModalForm.Draw` зовёт `setModal` уже из своего тела).
+            // К этому моменту `Form._keepModalsOnTop` успел поднять ПРЕЖНИЕ
+            // диалоги выше — поэтому новый спрашивает верхний слой сам, иначе
+            // второй вопрос подряд открывался бы под первым.
+            if (modal) {
+                this.z = ++Form._globalZIndex;
+                this.element.style.zIndex = this.z;
+            }
             this.updateModalState();
         }
     }
@@ -2877,7 +3198,9 @@ class Form extends UIObject {
 
                             // Right
                             if (this.resizeDirection.right) {
-                                const newWidth = e.clientX - this.x;
+                                // Не уже содержимого (getMinWidth): иначе поля обрезаются
+                                // под горизонтальной прокруткой.
+                                const newWidth = Math.max(e.clientX - this.x, this.getMinWidth());
                                 // Проверяем минимальную ширину с учетом заголовка
                                 if (this.titleBar) {
                                     const titleBarHeight = this.titleBar.offsetHeight;
@@ -2899,7 +3222,9 @@ class Form extends UIObject {
 
                             // Left
                             if (this.resizeDirection.left) {
-                                const newWidth = (this.x + this.width) - e.clientX;
+                                const rightEdge = this.x + this.width;
+                                const newWidth = Math.max(rightEdge - e.clientX, this.getMinWidth());
+                                const leftX = rightEdge - newWidth;
                                 if (newWidth > 100) {
                                     // Проверка заголовка
                                     if (this.titleBar) {
@@ -2910,13 +3235,13 @@ class Form extends UIObject {
                                         if (newTitleBarHeight > titleBarHeight || newWidth < 120) {
                                             this.element.style.width = tempWidth;
                                         } else {
-                                            this.setX(e.clientX);
+                                            this.setX(leftX);
                                             this.setWidth(newWidth);
                                             this.element.style.left = this.x + 'px';
                                             this.element.style.width = this.width + 'px';
                                         }
                                     } else {
-                                        this.setX(e.clientX);
+                                        this.setX(leftX);
                                         this.setWidth(newWidth);
                                         this.element.style.left = this.x + 'px';
                                         this.element.style.width = this.width + 'px';
@@ -2962,6 +3287,8 @@ class Form extends UIObject {
                         this.resizeDirection = null;
                         // Call onResize after resize completes
                         this.onResize();
+                        // Новый размер — новая естественная высота вкладок и таблиц.
+                        if (typeof this.reapplyTableHeights === 'function') this.reapplyTableHeights();
                         this._rememberGeometry();
                     }
                 });
@@ -2982,6 +3309,9 @@ class Form extends UIObject {
         try {
             Form._resolveOverlap(this);
         } catch (e) {}
+        // Каждое окно следит за размером браузера: уменьшили — окно остаётся на
+        // рабочем столе (_keepOnDesktop), а не уезжает за край.
+        try { this._ensureWindowResizeHandler(); } catch (e) {}
 
         // Now register this form in the global list
         Form._allForms.push(this);
@@ -3054,6 +3384,14 @@ class Form extends UIObject {
         this.z = ++Form._globalZIndex;
         this.element.style.zIndex = this.z;
 
+        // Новое окно НЕ ИМЕЕТ ПРАВА закрыть собой модальный диалог: пока на него
+        // не ответили, активировать что-либо другое нельзя (`activate` отказывает),
+        // и спрятанный диалог означает мёртвый экран — окна не переключаются, а
+        // причина не видна. Ровно это и случилось в прогоне 16.10.2026: «Hinweis»
+        // расчёта счёта уехал под окно счёта, остался только кнопкой в панели задач,
+        // и клики по ней ничего не поднимали.
+        try { Form._keepModalsOnTop(); } catch (e) {}
+
         // Dispatch creation event
         if (typeof window !== 'undefined') {
             window.dispatchEvent(new CustomEvent('form-created', { detail: { form: this } }));
@@ -3096,6 +3434,31 @@ class Form extends UIObject {
 
         // Activate next top form below in z-order
         Form.activateTopVisibleForm();
+    }
+
+    /**
+     * МОДАЛЬНЫЕ ОКНА — ВЕРХНИЙ СЛОЙ, и это не украшение.
+     *
+     * Модальность здесь держится на `activate()`: пока открыт модальный диалог,
+     * активировать другое окно нельзя. Значит окно, оказавшееся ПОВЕРХ диалога,
+     * спрятало единственное, с чем можно работать, — экран перестаёт отвечать, и
+     * человеку неоткуда узнать почему.
+     *
+     * Поэтому порядок восстанавливается в одном месте — здесь, — а не оговорками
+     * в каждом, кто открывает окно. Взаимный порядок самих диалогов сохраняется
+     * (последний спрошенный остаётся выше), и подложка каждого едет вместе с ним:
+     * она блокирует ровно то, что лежит ниже этого диалога.
+     */
+    static _keepModalsOnTop() {
+        const modals = Form._allForms.filter(f =>
+            f && f.isModal && f.element && f.element.parentElement);
+        if (!modals.length) return;
+        modals.sort((a, b) => (a.z || 0) - (b.z || 0));
+        for (const f of modals) {
+            f.z = ++Form._globalZIndex;
+            f.element.style.zIndex = f.z;
+            if (f.modalOverlay) f.modalOverlay.style.zIndex = f.z - 1;
+        }
     }
 
     // Find the top-most visible (non-minimized) form by z-index and activate it.
@@ -3182,6 +3545,29 @@ class Form extends UIObject {
      * подрезается по видимой области: иначе оно открылось бы за краем экрана, и достать
      * его пользователь бы не смог.
      */
+    /** Высота окна, при которой содержимое помещается без прокрутки, — при ширине `w`. */
+    _naturalHeightAt(w) {
+        if (!this.element || !this.contentArea) return 0;
+        const el = this.element, ca = this.contentArea;
+        const prev = [el.style.width, el.style.height, ca.style.width, ca.style.height];
+        let h = 0;
+        try {
+            el.style.width = w + 'px';
+            el.style.height = 'auto';
+            ca.style.width = '100%';
+            ca.style.height = 'auto';
+            const titleH = this.titleBar ? (this.titleBar.offsetHeight || 0) : 0;
+            // Те же поля, что у setSizeToContent (padH 20, +2 на дробные высоты).
+            h = Math.ceil(titleH + Math.max(ca.scrollHeight || 0, ca.offsetHeight || 0) + 22);
+        } catch (e) {
+            h = 0;
+        } finally {
+            el.style.width = prev[0]; el.style.height = prev[1];
+            ca.style.width = prev[2]; ca.style.height = prev[3];
+        }
+        return h;
+    }
+
     _restoreGeometry() {
         if (!this.stateKey) return false;
         let g = null;
@@ -3194,8 +3580,19 @@ class Form extends UIObject {
         }
 
         const availH = window.innerHeight - Form.topOffset - Form.bottomOffset;
-        const w = Math.max(160, Math.min(Number(g.w) || 0, window.innerWidth));
-        const h = Math.max(80, Math.min(Number(g.h) || 0, availH));
+        // Не уже содержимого: запомненная ширина могла остаться от другого состава
+        // формы (новое поле, другой язык подписей) — и окно открывалось бы с
+        // обрезанными полями.
+        const w = Math.max(160, this.getMinWidth(), Math.min(Number(g.w) || 0, window.innerWidth));
+        let h = Math.max(80, Math.min(Number(g.h) || 0, availH));
+        // Окно, которое ядро подгоняет ПО СОДЕРЖИМОМУ (`centered`), не открывается
+        // ниже своего содержимого: запомненная высота могла остаться от другого
+        // состава (другой уровень настроек), и повторное открытие «Einstellungen»
+        // давало полосу прокрутки там, где всё помещалось (прогон 17.10.2026, J3).
+        if (this._windowState === 'centered') {
+            const nat = this._naturalHeightAt(w);
+            if (nat > h) h = Math.min(nat, availH);
+        }
         if (!w || !h) return false;
 
         const x = Math.max(0, Math.min(Number(g.x) || 0, window.innerWidth - w));
@@ -3247,6 +3644,8 @@ class Form extends UIObject {
             // Развёрнутое окно обязано следить за размером вьюпорта (см. _onWindowResize).
             this._ensureWindowResizeHandler();
         }
+        // Размер окна сменился — таблицы пересчитывают свою высоту по новому месту.
+        try { requestAnimationFrame(() => this.reapplyTableHeights()); } catch (e) {}
         // Развернули или свернули — это тоже выбор пользователя, его помним.
         this._rememberGeometry();
         // Иконка кнопки должна отражать текущее состояние (развернуть / восстановить).
@@ -3496,7 +3895,26 @@ class Form extends UIObject {
         const maxHeight = (typeof options.maxHeight === 'number') ? options.maxHeight
             : ((typeof window !== 'undefined' ? window.innerHeight : 800) - Form.topOffset - Form.bottomOffset - 8);
 
-        const titleH = this.titleBar ? this.titleBar.offsetHeight || 0 : 0;
+        // ШИРИНА ЗАГОЛОВКА — тоже нижняя граница окна, и её надо ИЗМЕРИТЬ.
+        // Окно, которое уже собственного заголовка, показывает «Anzahlung hinz…»
+        // там, где места хватало. Но и раздувать окно под длинное представление
+        // документа нельзя — поэтому вклад заголовка ограничен сверху: дальше
+        // работает многоточие (CSS `.ui-title`).
+        const maxTitleWidth = (typeof options.maxTitleWidth === 'number') ? options.maxTitleWidth : 420;
+        let titleWidth = 0;
+        try {
+            if (this.titleBar) {
+                for (const el of this.titleBar.children) {
+                    // scrollWidth текста — его интринсик-ширина, даже когда он обрезан.
+                    titleWidth += Math.max(el.scrollWidth || 0, el.offsetWidth || 0);
+                    const cs = window.getComputedStyle(el);
+                    titleWidth += (parseFloat(cs.marginLeft) || 0) + (parseFloat(cs.marginRight) || 0);
+                }
+                const cs = window.getComputedStyle(this.titleBar);
+                titleWidth += (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0) + 8;
+            }
+        } catch (e) { titleWidth = 0; }
+        if (titleWidth > maxTitleWidth) titleWidth = maxTitleWidth;
 
         // Сохраняем inline-стили для восстановления (мы временно меняем и width, и height).
         const prevEWidth  = this.element.style.width      || '';
@@ -3521,15 +3939,22 @@ class Form extends UIObject {
             // MultilineTextBox: `--mos-pref-width`). В рабочем состоянии такого порога
             // быть не должно — иначе поле не сжимается и вылезает за окно.
             this.element.classList.add('ui-measuring');
+            // Скрытые вкладки — в поток: окно подгоняется под ШИРОЧАЙШУЮ вкладку, а
+            // не под первую (иначе вторая открывалась обрезанной).
+            this.element.classList.add('ui-measuring-min');
         } catch (e) {
             // ignore
         }
 
         const contentWidth = Math.max(this.contentArea.scrollWidth || 0, this.contentArea.clientWidth || 0);
-        let targetWidth = Math.max(minWidth, Math.ceil(contentWidth + padW));
+        let targetWidth = Math.max(minWidth, Math.ceil(titleWidth), Math.ceil(contentWidth + padW));
         if (targetWidth > maxWidth) targetWidth = maxWidth;
 
-        try { this.element.classList.remove('ui-measuring'); } catch (e) {}
+        try { this.element.classList.remove('ui-measuring'); this.element.classList.remove('ui-measuring-min'); } catch (e) {}
+
+        // Не уже уточнённого минимума (`measureMinContentWidth`): замер выше видит
+        // только переполнение всего содержимого и пропускал поле, вылезшее из группы.
+        if ((this._minContentWidth || 0) > targetWidth) targetWidth = Math.min(this._minContentWidth, maxWidth);
 
         // ── Фаза 2: высота контента при ИТОГОВОЙ ширине ─────────────────────────────────────
         // Фиксируем ширину на targetWidth, contentArea — на 100% (как в обычной отрисовке),
@@ -3543,8 +3968,17 @@ class Form extends UIObject {
             // ignore
         }
 
+        // Высота титлбара меряется ЗДЕСЬ, при итоговой ширине, а не в начале: до
+        // установки ширины она отвечает на другой вопрос. Пока заголовок умел
+        // переноситься, разница была в целую строку — ровно она и оставалась
+        // пустой полосой под содержимым.
+        const titleH2 = this.titleBar ? (this.titleBar.offsetHeight || titleH) : titleH;
         const contentHeight = Math.max(this.contentArea.scrollHeight || 0, this.contentArea.offsetHeight || 0);
-        let targetHeight = Math.max(minHeight, Math.ceil(titleH + contentHeight + padH));
+        // +2 — запас на дробные высоты: `scrollHeight` округляется, и окно выходило
+        // на пиксель ниже содержимого. Этот пиксель включал вертикальную прокрутку,
+        // она отъедала 16px ширины, и поля вылезали под горизонтальную
+        // («Einstellungen», 15.10.2026).
+        let targetHeight = Math.max(minHeight, Math.ceil(titleH2 + contentHeight + padH + 2));
         if (targetHeight > maxHeight) targetHeight = maxHeight;
 
         // Восстанавливаем исходные inline-стили перед штатным применением размеров ниже.
@@ -3577,6 +4011,7 @@ class Form extends UIObject {
         // Reposition if anchored
         if (this.anchorToWindow) this.updatePositionOnResize();
         if (this.proportionalLayout) this.updateProportionalLayout();
+        this._keepOnDesktop();
     }
 }
 
@@ -3626,6 +4061,9 @@ Form._resolveOverlap = function(form) {
         }
         iter++;
     } while (moved && iter < maxIter);
+    // Каскад не выводит окно за край: сдвиг на высоту заголовка у широкого окна
+    // уводил его правую часть за экран.
+    try { if (typeof form._keepOnDesktop === 'function') form._keepOnDesktop(); } catch (e) {}
 };
 
 // Activate top form after page load
@@ -3753,10 +4191,32 @@ Form.prototype.doAction = function(action, params) {
  * @returns {Promise<*>}     - Результат серверной функции
  */
 window.callServer = async function(uid, fn, fnParams) {
+    return _serverCall({ uid, fn, fnParams });
+};
+
+/**
+ * Вызов МЕТОДА ФОРМЫ — именованного, по адресу формы.
+ *
+ * Свободной строки с UID скрипта здесь нет намеренно: UID выдаётся заново на
+ * каждый запуск процесса, а адрес формы постоянен. Правило проекта: API — это
+ * именованные методы, а не анонимные ссылки.
+ *
+ *   await callFormMethod('booking', 'prepaymentDialog', 'execute', { … })
+ *
+ * @param {string} app  — приложение-владелец формы
+ * @param {string} form — имя формы (канон `record:<таблица>` или своё)
+ * @param {string} fn   — имя метода
+ * @param {*} fnParams
+ */
+window.callFormMethod = async function(app, form, fn, fnParams) {
+    return _serverCall({ app, form, fn, fnParams });
+};
+
+async function _serverCall(body) {
     const resp = await fetch('/server-call', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ uid, fn, fnParams }),
+        body: JSON.stringify(body),
     });
     if (!resp.ok) {
         let errMsg = resp.status;
@@ -3765,12 +4225,16 @@ window.callServer = async function(uid, fn, fnParams) {
     }
     const data = await resp.json();
     return data.result;
-};
+}
 
 // Команды, остающиеся живыми у формы, запертой на время проведения. Кнопка
 // «Отменить проведение» обязана работать: иначе документ, застрявший в очереди,
 // нельзя вынуть из неё из его же формы.
 const POSTING_ALLOWED_COMMANDS = ['unpost', 'postingInfo'];
+
+// Команды ПРОВЕДЕНИЯ. Переспрос у них объявлен документом, а не кнопкой: одно
+// действие — один вопрос, каким бы путём его ни начали (ТЗ §14.1).
+const POSTING_COMMANDS = ['post', 'unpost', 'postAndClose'];
 
 class DataForm extends Form {
     constructor(appName) {
@@ -3797,6 +4261,80 @@ class DataForm extends Form {
         this._postingPhase = null;  // 'queued' | 'posting' | null — приписка в заголовке
         this._postingLocked = null; // кого заперли МЫ (чтобы снять ровно это)
         this._postingWatch = false; // опрос окончания проведения уже идёт
+        this._formApp = null;      // приложение-владелец формы (адрес)
+        this._formName = null;     // имя формы (адрес)
+        this._formAttributes = new Set();   // имена реквизитов формы
+        this._formAttributeDecls = null;    // их объявление (подпись, обязательность)
+        this._resultResolve = null;         // модальный диалог: кому отдать результат
+        this._result = undefined;           // что диалог вернул вызывающей стороне
+    }
+
+    /**
+     * Вызвать СЕРВЕРНЫЙ МЕТОД ЭТОЙ формы по имени.
+     *
+     * Форма знает свой адрес (приложение + имя), поэтому метод зовётся именем, а не
+     * идентификатором скрипта: UID выдаётся заново на каждый запуск процесса, а
+     * адрес постоянен.
+     */
+    async callMethod(name, params) {
+        if (!this._formApp || !this._formName) {
+            throw new Error('[DataForm.callMethod] у формы нет адреса — методы формы доступны только форме, открытой по адресу');
+        }
+        return await callFormMethod(this._formApp, this._formName, name, params);
+    }
+
+    /**
+     * Значения РЕКВИЗИТОВ ФОРМЫ — тех полей, которых нет ни в одной таблице.
+     * Отдаёт именно ЗНАЧЕНИЯ (а не подписи), включая пустые и нулевые: «не заполнено»
+     * и «ноль» — разные ответы, и решает, что с ними делать, серверный метод формы.
+     */
+    attributeValues() {
+        const out = {};
+        for (const name of this._formAttributes) {
+            const rec = this._dataMap && this._dataMap[name];
+            out[name] = (rec && rec.value !== undefined) ? rec.value : null;
+        }
+        return out;
+    }
+
+    /**
+     * Подписи незаполненных ОБЯЗАТЕЛЬНЫХ реквизитов формы.
+     *
+     * НОЛЬ — это значение, а не «пусто»: поле суммы с нулём заполнено, и решать,
+     * годится ли такая сумма, обязан серверный метод формы — словами, а не
+     * молчаливым «заполните».
+     *
+     * У ДАТЫ пустое значение — `0001-01-01`, а не NULL, поэтому она проверяется
+     * своим способом (`MySpace.isEmptyDate`). Прогонять через него строку или
+     * число нельзя: он отвечает «это не дата», а спрашивают его о другом — так
+     * заполненная сумма и выбранный способ оплаты объявлялись незаполненными.
+     */
+    missingRequiredAttributes() {
+        const out = [];
+        for (const decl of (this._formAttributeDecls || [])) {
+            if (!decl || !decl.required) continue;
+            const rec = this._dataMap && this._dataMap[decl.name];
+            const v = rec ? rec.value : null;
+            let empty = (v === null || v === undefined || v === '');
+            if (!empty && decl.type === 'date') {
+                try { if (window.MySpace && MySpace.isEmptyDate && MySpace.isEmptyDate(v)) empty = true; } catch (e) {}
+            }
+            if (empty) out.push(decl.caption || decl.name);
+        }
+        return out;
+    }
+
+    /**
+     * Ответ диалога вызывающей стороне. `MySpace.openModal` резолвится этим значением.
+     * Без модального открытия просто запоминается на форме.
+     */
+    setResult(value) {
+        this._result = value;
+        if (typeof this._resultResolve === 'function') {
+            const fn = this._resultResolve;
+            this._resultResolve = null;
+            try { fn(value); } catch (e) {}
+        }
     }
 
     // Override setTitle to keep track of the base (non-modified) title
@@ -3907,7 +4445,12 @@ class DataForm extends Form {
             try { return c.getValue(); } catch (e) { /* контрол ещё не готов */ }
         }
         const rec = this._dataMap && this._dataMap[name];
-        return rec ? rec.value : null;
+        if (rec) return rec.value;
+        // Состояние проведения — служебный реквизит: в данных формы его нет, оно
+        // приходит отдельным полем спецификации. Условия формы (`visibleWhen`,
+        // `enabledWhen`) обязаны его видеть так же, как обычное поле.
+        if (name === 'postingState' && this._postingState) return this._postingState;
+        return null;
     }
 
     /** Записать значение в контрол (и в данные формы, чтобы они не разошлись). */
@@ -4091,6 +4634,12 @@ class DataForm extends Form {
      * проведение при этом законная операция, а не ошибка. Иконка не меняется
      * никогда: кнопку узнают по месту и значку.
      *
+     * ДОКУМЕНТ, КОТОРЫЙ НЕЛЬЗЯ РАСПРОВЕСТИ, «Провести и закрыть» не получает
+     * (ТЗ §14.1): у него «ОК» — это «Сохранить и закрыть», а проведение живёт
+     * только на своей кнопке, с переспросом. Совмещать необратимое действие с
+     * закрытием окна нельзя — закрывают окно не глядя. Отдельного признака для
+     * этого не нужно: правило выводится из объявления `posting.unpost`.
+     *
      * В СПИСКЕ и в форме ВЫБОРА «ОК» значит другое («выбрать», «закрыть»), и там
      * кнопка не трогается — отсюда проверка `isRecordForm`.
      */
@@ -4098,7 +4647,9 @@ class DataForm extends Form {
         const btn = this._okButton;
         if (!btn) return;
         if (!this._isRecordForm) return;
-        const postCaption = (this._postingCaptions || {}).postAndClose;
+        const postCaption = this._postingCanUnpost
+            ? (this._postingCaptions || {}).postAndClose
+            : null;
         const text = postCaption || __t('Save and close');
         this._okAction = postCaption ? 'okPost' : 'ok';
         try {
@@ -4159,7 +4710,10 @@ class DataForm extends Form {
      * общий и уже существующий источник правды о состоянии. Тот же приём, что у
      * `scheduler/engine.waitForRun`.
      */
-    async watchPosting() {
+    async watchPosting(opts) {
+        // `quiet` — документ режима `onSave`: проведение человеку не показывают,
+        // значит ни замка формы, ни фазы в заголовке; только дождаться и перечитать.
+        const quiet = !!(opts && opts.quiet);
         const uidEntry = this._dataMap && this._dataMap['UID'];
         const uid = uidEntry && uidEntry.value;
         const table = this.dbTable || '';
@@ -4188,12 +4742,12 @@ class DataForm extends Form {
                 // ровно то, ради чего он её открыл.
                 const failed = res.state === 'error';
                 if (res.phase && !failed) {
-                    this.setPostingBusy(res.phase, res.queueAction);
+                    if (!quiet) this.setPostingBusy(res.phase, res.queueAction);
                 } else {
                     // Строки очереди нет — проведение закончилось (успехом или
                     // отказом). Замок снимаем и перечитываем запись: состояние,
                     // движения и замок неизменности могли измениться.
-                    this.setPostingBusy(null);
+                    if (!quiet) this.setPostingBusy(null);
                     // Состояние проведения — и в контрол (если он на форме есть), и
                     // В ДАННЫЕ ФОРМЫ. Контрола у служебного реквизита нет, а
                     // `enabledWhen`/`visibleWhen` читают значение через
@@ -4218,6 +4772,18 @@ class DataForm extends Form {
                             this.setControlValue(res.statusField, res.status);
                         }
                     } catch (e) {}
+                    // Реквизиты, которые записал САМ обработчик проведения («Ausgestellt
+                    // am» у счёта), — перечитываем данные формы, если человек их не
+                    // правит (форма во время проведения заперта, но правка могла
+                    // начаться до команды). Раньше дата выставления появлялась только
+                    // после повторного открытия (прогон 17.10.2026, E4).
+                    if (!this._modified && !failed) {
+                        try {
+                            const cap = await this._reloadFormData(null);
+                            this._modified = false;
+                            if (cap) { this._originalTitle = cap; this._applyPostingTitle(); }
+                        } catch (e) { console.error('[DataForm] перечитывание после проведения:', e); }
+                    }
                     try { this.refreshEnabledWhen(); } catch (e) {}
                     // Form-level событие «проведение закончилось» (events.onPostingFinished).
                     // Нужно приложению, у которого за проведением следует ЕГО действие:
@@ -4387,6 +4953,23 @@ class DataForm extends Form {
         if (!tabsCtrl || !decl || typeof decl !== 'object') return;
         if (!this._visibleWhen) this._visibleWhen = [];
         this._visibleWhen.push({ tabs: tabsCtrl, index: tabIndex, decl });
+        // Вкладка с условием РОЖДАЕТСЯ в нужном виде, а не мелькает до первого
+        // пересчёта: данные записи к этому моменту уже загружены. Условие по
+        // таблицам формы (выделение, текущая строка) здесь посчитать нельзя — их
+        // ещё нет, такие ждут общего пересчёта.
+        try {
+            if (!this._declRefersToTables(decl) && !this._evalEnabledWhen(decl)) {
+                tabsCtrl.setTabVisible(tabIndex, false);
+            }
+        } catch (e) {}
+    }
+
+    /** Условие смотрит на таблицы формы (выделение, строки)? */
+    _declRefersToTables(decl) {
+        if (!decl || typeof decl !== 'object') return false;
+        if (Array.isArray(decl.all)) return decl.all.some(d => this._declRefersToTables(d));
+        if (Array.isArray(decl.any)) return decl.any.some(d => this._declRefersToTables(d));
+        return !!(decl.selection || decl.currentRow || decl.rowsIn || decl.table);
     }
 
     /**
@@ -4399,6 +4982,13 @@ class DataForm extends Form {
         if (!controlName || !decl || typeof decl !== 'object') return;
         if (!this._visibleWhen) this._visibleWhen = [];
         this._visibleWhen.push({ control: controlName, decl });
+        // Как у вкладки: элемент сразу в нужном виде, без мелькания до пересчёта.
+        try {
+            if (!this._declRefersToTables(decl) && !this._evalEnabledWhen(decl)) {
+                const c = this.getControl(controlName);
+                if (c && typeof c.setVisible === 'function') c.setVisible(false);
+            }
+        } catch (e) {}
     }
 
     /**
@@ -4413,9 +5003,26 @@ class DataForm extends Form {
     }
 
     _evalEnabledWhen(decl) {
+        // СОСТАВНЫЕ УСЛОВИЯ: `{ all: [...] }` — выполнены все, `{ any: [...] }` — хотя
+        // бы одно. Тот же язык условий, только вложенный: «поля аванса видны, пока
+        // запись новая ИЛИ (аванс не превращён в документ И запись не проведена)».
+        if (Array.isArray(decl.all)) return decl.all.every(d => d && this._evalEnabledWhen(d));
+        if (Array.isArray(decl.any)) return decl.any.some(d => d && this._evalEnabledWhen(d));
+        // «Запись есть в базе» (`{ saved: true }`) / «ещё нет» (`{ saved: false }`).
+        // Вкладка платежей у НЕСОХРАНЁННОЙ брони не о чем: платёж ссылается на
+        // запись, которой ещё нет. После первого сохранения условие пересчитывается
+        // (doAction('save') → refreshEnabledWhen), и вкладка появляется без
+        // переоткрытия окна.
+        if (decl.saved === true || decl.saved === false) return !this._isNew === decl.saved;
         // Условие по значению поля записи (состояние документа).
         if (decl.field) {
             const v = this.getControlValue(decl.field);
+            // `empty` — «у типа своё пустое» (как везде в ядре): строка "", число 0,
+            // булево false, пустая дата. Сравнивать с конкретным «0» нельзя: число
+            // приходит то «0», то «0.00», то 0.
+            if (decl.empty === true || decl.empty === false) {
+                return this._isEmptyValue(v) === decl.empty;
+            }
             const cur = (v === null || v === undefined) ? '' : String(v);
             if (Array.isArray(decl.in) && decl.in.map(String).indexOf(cur) === -1) return false;
             if (Array.isArray(decl.notIn) && decl.notIn.map(String).indexOf(cur) !== -1) return false;
@@ -4447,6 +5054,17 @@ class DataForm extends Form {
             }
         }
         return true;
+    }
+
+    /** Пустое значение по своему типу: "", null, 0 (в любом написании), false, пустая дата. */
+    _isEmptyValue(v) {
+        if (v === null || v === undefined || v === false) return true;
+        if (typeof v === 'number') return v === 0;
+        const s = String(v).trim();
+        if (s === '' || s === 'false') return true;
+        if (/^-?0+([.,]0*)?$/.test(s)) return true;
+        try { if (typeof MySpace !== 'undefined' && MySpace.isEmptyDate && /^\d{4}-\d{2}-\d{2}/.test(s)) return MySpace.isEmptyDate(s); } catch (e) {}
+        return false;
     }
 
     // ── Команда документа: `"command": "storno" | "correct"` на кнопке ────────────
@@ -4499,13 +5117,103 @@ class DataForm extends Form {
         try { if (typeof tbl.refresh === 'function') await tbl.refresh(); } catch (e) {}
     }
 
+    /**
+     * ДЕКЛАРАТИВНАЯ КНОПКА, зовущая метод формы: `"method": "execute"` в лейауте.
+     *
+     * Всё, что вокруг вызова одинаково у любой такой кнопки, делает ядро:
+     * переспрос, проверка обязательных реквизитов формы, «сохранить перед
+     * командой», индикатор ожидания и разбор ответа. Приложению остаётся сам метод.
+     *
+     * Ответ метода (всё необязательно):
+     *   { ok: false, error }  — показать ошибку и ничего не делать
+     *   { message }           — показать сообщение
+     *   { result }            — отдать вызывающей стороне (модальный диалог)
+     *   { close: true }       — закрыть окно
+     *   { open: { appName, params } } — открыть окно (что именно — решает сервер)
+     *
+     * @param {string} methodName
+     * @param {object} [opts] — { confirm, requiresSaved }
+     */
+    async runFormMethod(methodName, opts) {
+        const o = opts || {};
+        if (!this._formApp || !this._formName) {
+            console.error('[runFormMethod] у формы нет адреса:', methodName);
+            return;
+        }
+
+        // Обязательные РЕКВИЗИТЫ ФОРМЫ проверяются здесь, а не в методе: иначе
+        // каждый метод переписывал бы одну и ту же проверку, и однажды забыл бы.
+        const missing = this.missingRequiredAttributes();
+        if (missing.length) {
+            if (typeof showAlert === 'function') showAlert(__t('Please fill in: ') + missing.join(', '));
+            return;
+        }
+
+        // Текст подтверждения приходит УЖЕ ПЕРЕВЕДЁННЫМ (см. runDocumentCommand).
+        if (o.confirm !== false && o.confirm && typeof showConfirm === 'function') {
+            const ok = await showConfirm(o.confirm);
+            if (!ok) return;
+        }
+
+        // «Сохранить перед командой»: серверный метод работает с базой, а не с тем,
+        // что на экране. У формы без предмета сохранять нечего — `needsSave()` там
+        // всегда false, и ветка сама себя выключает.
+        if (o.requiresSaved !== false && this.needsSave && this.needsSave()) {
+            await this.doAction('save');
+            if (this.needsSave()) return; // ошибка уже показана
+        }
+
+        const busy = (window.MySpace && window.MySpace.showBusy) ? window.MySpace.showBusy(__t('Please wait…')) : null;
+        let res;
+        try {
+            const uidEntry = this._dataMap && this._dataMap['UID'];
+            res = await this.callMethod(methodName, {
+                attributes: this.attributeValues(),
+                params: this._openParams || {},
+                recordID: (uidEntry && uidEntry.value) || null,
+                tableName: this.dbTable || null
+            });
+        } catch (e) {
+            if (typeof showAlert === 'function') showAlert(__t('Error: ') + (e && e.message ? e.message : String(e)));
+            return;
+        } finally {
+            if (busy != null && window.MySpace && window.MySpace.hideBusy) window.MySpace.hideBusy(busy);
+        }
+
+        if (res && res.ok === false) {
+            if (typeof showAlert === 'function') showAlert(res.error || __t('Unknown error'));
+            return;
+        }
+        if (res && res.message && typeof showAlert === 'function') showAlert(res.message);
+        if (res && Object.prototype.hasOwnProperty.call(res, 'result')) this.setResult(res.result);
+        if (res && res.open && res.open.appName && window.MySpace && typeof window.MySpace.open === 'function') {
+            try { await window.MySpace.open(res.open.appName, res.open.params || {}); }
+            catch (e) { console.error('[runFormMethod] окно не открылось:', e && e.message); }
+        }
+        if (res && res.close) {
+            this._closing = true;
+            this._modified = false;
+            this.close();
+        }
+        return res;
+    }
+
+    /**
+     * Выполнить КОМАНДУ ДОКУМЕНТА (`post`, `unpost`, `postAndClose`, `storno`, …).
+     *
+     * Возвращает `false`, если команда НЕ БЫЛА ОТПРАВЛЕНА — человек отказался в
+     * переспросе или несохранённое не записалось. Вызывающему это нужно: кнопка
+     * «Выставить и напечатать» запоминает намерение печатать ДО вызова, и без
+     * ответа «не поехало» это намерение пережило бы отказ и напечатало бы счёт
+     * при следующем, ни о чём не просившем проведении.
+     */
     async runDocumentCommand(command, confirmText) {
         const uidEntry = this._dataMap && this._dataMap['UID'];
         const uid = uidEntry && uidEntry.value;
         const table = this.dbTable || '';
         if (!uid || !table) {
             if (typeof showAlert === 'function') showAlert(__t('Please save the record first'));
-            return;
+            return false;
         }
 
         // Текст подтверждения приходит УЖЕ ПЕРЕВЕДЁННЫМ: `confirm` на кнопке —
@@ -4514,20 +5222,32 @@ class DataForm extends Form {
         // файле — не функция, а маркер, который заменяется при выдаче файла
         // регуляркой по ЛИТЕРАЛУ; с переменной он доживает до браузера и падает
         // с «__t is not defined».
-        // `"confirm": false` на кнопке — команда без переспроса. Нужно проведению:
-        // сторно и «недействителен» необратимы и переспроса стоят, а «провести» —
-        // обычное действие, и лишний диалог на каждое нажатие только приучает
-        // жать «да» не глядя, обесценивая переспрос там, где он важен.
-        if (confirmText !== false && typeof showConfirm === 'function') {
-            const ok = await showConfirm(confirmText || __t('Execute the command?'));
-            if (!ok) return;
+        // `"confirm": false` на кнопке — команда без переспроса. Нужно сторно и
+        // «недействителен»: они необратимы и переспроса стоят, а обычная команда
+        // лишним диалогом только приучает жать «да» не глядя, обесценивая
+        // переспрос там, где он важен.
+        //
+        // У КОМАНД ПРОВЕДЕНИЯ переспрос кнопке не принадлежит вовсе (ТЗ §14.1).
+        // Он объявлен один раз у документа (`posting.confirm` / `unpostConfirm`)
+        // и приезжает в подписях команд, поэтому текст кнопки здесь ИГНОРИРУЕТСЯ:
+        // иначе одно и то же действие ведёт себя по-разному в зависимости от того,
+        // какой кнопкой его начали, и молчит как раз стандартный «ОК» — тот, что
+        // жмут не глядя. Не объявлено — не спрашивает ни одна кнопка.
+        let confirmAsked = confirmText;
+        if (POSTING_COMMANDS.indexOf(command) !== -1) {
+            const caps = this._postingCaptions || {};
+            confirmAsked = (command === 'unpost' ? caps.unpostConfirm : caps.confirm) || false;
+        }
+        if (confirmAsked !== false && typeof showConfirm === 'function') {
+            const ok = await showConfirm(confirmAsked || __t('Execute the command?'));
+            if (!ok) return false;
         }
 
         // Несохранённые правки записываются ДО команды: сервер работает с базой,
         // а не с тем, что на экране.
         if (this.needsSave()) {
             await this.doAction('save');
-            if (this.needsSave()) return; // ошибка уже показана
+            if (this.needsSave()) return false; // ошибка уже показана
         }
 
         const busy = (window.MySpace && window.MySpace.showBusy) ? window.MySpace.showBusy(__t('Please wait…')) : null;
@@ -4627,6 +5347,7 @@ class DataForm extends Form {
                 console.error('[runDocumentCommand] форма не закрылась', e);
             }
         }
+        return res;
     }
 
     /** Пересчитать доступность всех элементов с `enabledWhen`. Зовётся ядром, не приложением. */
@@ -4769,23 +5490,51 @@ class DataForm extends Form {
         }, debounceMs);
     }
 
-    // Override close to prompt discard if modified
+    /**
+     * ЗАКРЫТИЕ ОКНА С НЕСОХРАНЁННЫМИ ПРАВКАМИ — вопрос «сохранить?», а не
+     * «выбросить?» (решение владельца 17.10.2026).
+     *
+     * Вопрос «Ungespeicherte Änderungen verwerfen?» с ответами «да/нет» ставил
+     * человека перед выбором, которого он не делал: он закрывал окно, а не
+     * решал выбрасывать работу. Хуже того, «сохранить и закрыть» в этом вопросе
+     * не было вовсе — приходилось отменять закрытие, жать «Speichern» и
+     * закрывать снова.
+     *
+     * Теперь ответов три, и каждый — действие: сохранить и закрыть, закрыть без
+     * сохранения, остаться. Третий обязателен: без него закрытие крестиком
+     * мимо кнопки стоило бы либо работы, либо лишней записи в базу.
+     *
+     * Сохранение может не состояться (обязательный реквизит, отказ сервера) —
+     * тогда окно ОСТАЁТСЯ открытым: признак успеха берём у самой формы
+     * (`_modified` снято сохранением), а не у того, что кнопку нажали.
+     */
     close() {
         if (this._closing) { super.close(); return; }
         if (!this._modified) { this._closing = true; super.close(); return; }
-        // Show confirmation dialog
         const self = this;
-        if (typeof showConfirm === 'function') {
-            showConfirm(__t('Discard unsaved changes?'), () => {
-                self._closing = true;
-                self._modified = false;
-                if (self._originalTitle) super.setTitle.call(self, self._originalTitle);
-                super.close.call(self);
+        const finish = () => {
+            self._closing = true;
+            self._modified = false;
+            if (self._originalTitle) Form.prototype.setTitle.call(self, self._originalTitle);
+            Form.prototype.close.call(self);
+        };
+        if (typeof showChoice === 'function') {
+            showChoice(__t('Save changes before closing?'), [
+                { key: 'save', caption: __t('Save'),
+                  icon: '/apps/general_icons/resources/public/16x16/save.png' },
+                { key: 'discard', caption: __t('Do not save'),
+                  icon: '/apps/general_icons/resources/public/16x16/cancel.png' },
+                { key: 'cancel', caption: __t('Cancel') }
+            ], async (key) => {
+                if (key === 'save') {
+                    try { await self.doAction('save'); } catch (e) { return; }
+                    if (!self._modified) finish();
+                    return;
+                }
+                if (key === 'discard') finish();
             });
         } else {
-            this._closing = true;
-            this._modified = false;
-            super.close();
+            finish();
         }
     }
 
@@ -4861,7 +5610,10 @@ class DataForm extends Form {
             try { this.refreshEnabledWhen(); } catch (e) {}
             // Последняя открытая вкладка — ПОСЛЕ пересчёта видимости: запомненная вкладка
             // могла стать скрытой, и открывать её нельзя.
-            try {
+            // НОВАЯ запись начинается с первой вкладки: заполнение идёт сверху, и пустая
+            // бронь, открытая на «Zusatz» прошлой брони, сбивала (прогон 17.10.2026, M2).
+            // Запоминание вкладки — для работы с уже существующими записями.
+            if (!this._isNew) try {
                 for (const k in this.controlsMap) {
                     const c = this.controlsMap[k];
                     if (c && typeof c.restoreActiveTab === 'function') c.restoreActiveTab();
@@ -4927,6 +5679,16 @@ class DataForm extends Form {
         // Реестр одноразовый: ре-рендер лейаута (смена режима, refresh после
         // сохранения) не должен повторно дёргать обработчики.
         this._prefilled = null;
+        // Признак «обработчик зовут из-за ПРОГРАММНОГО заполнения, а не правки
+        // человека» — обработчику, который на правку человека задаёт вопрос
+        // (счёт: «брони изменились — перезаполнить?»), спрашивать тут не о чем:
+        // документ только что собран из этих самых данных.
+        this._firingPrefilled = true;
+        try { await this._firePrefilledChangeEventsInner(pf); }
+        finally { this._firingPrefilled = false; }
+    }
+
+    async _firePrefilledChangeEventsInner(pf) {
         const { fieldBindings, columnBindings } = this._collectChangeBindings();
 
         // Последовательно (await), а не залпом: обработчики читают и дописывают одни
@@ -4991,6 +5753,10 @@ class DataForm extends Form {
     }
 
     destroy() {
+        // Подписка на поток серверных событий — наша, и снимать её обязаны мы:
+        // иначе закрытая форма продолжает перечитывать свои оповещения.
+        try { if (this._alertsUnsub) { this._alertsUnsub(); this._alertsUnsub = null; } } catch (e) {}
+        try { if (this._fkLookupUnsub) { this._fkLookupUnsub(); this._fkLookupUnsub = null; } } catch (e) {}
         // Remove the default-button keydown listener before the base teardown.
         try {
             if (this._defaultBtnHandler) {
@@ -5007,19 +5773,78 @@ class DataForm extends Form {
     // The in-flight promise is cached, so concurrently-rendered cells of the same
     // column share a single request instead of firing one per cell. totalRows = -1
     // signals an error (callers then fall back to the "..." selector).
-    async _fetchFkLookup(table) {
+    async _fetchFkLookup(table, where) {
         if (!this._fkLookupCache) this._fkLookupCache = {};
-        if (!this._fkLookupCache[table]) {
-            this._fkLookupCache[table] = (async () => {
+        this._watchFkLookups();
+        // Отобранный список (`selection.where`) кэшируется под своим ключом: у
+        // сезонов отеля A и отеля B — разные списки одной таблицы.
+        const cacheKey = where ? table + '|' + JSON.stringify(where) : table;
+        if (!this._fkLookupCache[cacheKey]) {
+            this._fkLookupCache[cacheKey] = (async () => {
                 try {
-                    const resp = await callServerMethod('uniForm', 'getLookupList', { tableName: table, firstRow: 0, visibleRows: 50 });
+                    const req = { tableName: table, firstRow: 0, visibleRows: 50 };
+                    if (where) req.where = where;
+                    const resp = await callServerMethod('uniForm', 'getLookupList', req);
                     const rows = (resp && resp.rows) || [];
                     const total = (resp && typeof resp.totalRows === 'number') ? resp.totalRows : rows.length;
                     return { totalRows: total, items: rows.map(r => ({ value: r.UID, caption: r.display })) };
                 } catch (e) { return { totalRows: -1, items: [] }; }
             })();
         }
-        return this._fkLookupCache[table];
+        return this._fkLookupCache[cacheKey];
+    }
+
+    /**
+     * Кэш списков выбора живёт, пока таблица не изменилась: событие `dataChanged`
+     * той же таблицы (тот канал, которым обновляются журналы) выбрасывает её списки,
+     * и следующее открытие «▾» спросит сервер заново. Подписка одна на форму.
+     */
+    _watchFkLookups() {
+        if (this._fkLookupUnsub || !window.MySpaceEvents || typeof window.MySpaceEvents.on !== 'function') return;
+        try {
+            this._fkLookupUnsub = window.MySpaceEvents.on((d) => {
+                if (!d || d.type !== 'dataChanged' || !d.tableName || !this._fkLookupCache) return;
+                for (const key of Object.keys(this._fkLookupCache)) {
+                    if (key === d.tableName || key.indexOf(d.tableName + '|') === 0) delete this._fkLookupCache[key];
+                }
+            });
+        } catch (e) { /* без потока событий список обновится при следующем открытии формы */ }
+    }
+
+    /**
+     * УСЛОВИЕ ОТБОРА СПИСКА ВЫБОРА (`selection.where`, 16.10.2026).
+     *
+     * Лейаут пишет `{ "hotelId": "{hotelId}" }`: в списке — только записи, у которых
+     * реквизит равен значению поля этой формы (сезоны отеля прайс-листа). Значение
+     * `{поле}` берётся из строки табличной части (`row`), а если там такого нет — из
+     * поля формы. Пустое значение условие НЕ сужает: отель ещё не выбран — показываем
+     * всё, что видно по правам, иначе выбрать было бы нечего.
+     *
+     * @returns {object|null} — равенства для сервера или null, если сужать нечем
+     */
+    _resolveSelectionWhere(where, row) {
+        if (!where || typeof where !== 'object') return null;
+        const out = {};
+        for (const [k, v] of Object.entries(where)) {
+            let val = v;
+            const m = (typeof v === 'string') ? /^\{(\w+)\}$/.exec(v) : null;
+            if (m) {
+                const f = m[1];
+                if (row && Object.prototype.hasOwnProperty.call(row, f)) val = row[f];
+                else {
+                    val = null;
+                    try { if (typeof this.getControlValue === 'function') val = this.getControlValue(f); } catch (e) {}
+                    if ((val === null || val === undefined || val === '') && this._dataMap && this._dataMap[f]) {
+                        const rec = this._dataMap[f];
+                        val = (rec && typeof rec === 'object' && 'value' in rec) ? rec.value : rec;
+                    }
+                }
+                if (val && typeof val === 'object') val = (val.UID !== undefined) ? val.UID : (val.value !== undefined ? val.value : null);
+            }
+            if (val === null || val === undefined || val === '') continue;
+            out[k] = val;
+        }
+        return Object.keys(out).length ? out : null;
     }
 
     // Фиксированная ширина контрола ввода по properties.width (число, px).
@@ -5317,6 +6142,15 @@ class DataForm extends Form {
                 const sel = (properties && properties.selection) ? properties.selection : null;
                 if (sel) propClone2.selection = sel;
                 if (properties && properties.noQuickSearch) propClone2.quickSearch = false;
+                // Условие отбора (`selection.where`): выпадающий список строится по нему
+                // сразу, а список «…» спросит его в момент открытия — значение поля
+                // формы к тому времени могло измениться.
+                const selWhereRow = item && item.__row ? item.__row : null;
+                const selWhere = (sel && sel.where) ? this._resolveSelectionWhere(sel.where, selWhereRow) : null;
+                if (sel && sel.where) {
+                    const formSelf = this;
+                    propClone2.resolveSelectionWhere = () => formSelf._resolveSelectionWhere(sel.where, selWhereRow);
+                }
 
                 // ── Selector buttons ────────────────────────────────────────────
                 // "..." = showSelectionButton (opens the list form). Dropdown =
@@ -5336,7 +6170,7 @@ class DataForm extends Form {
                 } else if (sel && sel.table) {
                     // AUTO — decided once per table (cached on the form), so every
                     // other field/cell on the same table reuses it (no per-cell calls).
-                    const lk = await this._fetchFkLookup(sel.table);
+                    const lk = await this._fetchFkLookup(sel.table, selWhere);
                     if (lk.totalRows >= 0 && lk.totalRows < 10) { useList = true; listItemsSel = lk.items; }
                     else { useSelect = true; }
                 } else {
@@ -5346,10 +6180,18 @@ class DataForm extends Form {
                 propClone2.listMode = useList;
                 if (useList) {
                     if (!listItemsSel && sel && sel.table) {
-                        const lk = await this._fetchFkLookup(sel.table); // forced list/both — reuse cached names
+                        const lk = await this._fetchFkLookup(sel.table, selWhere); // forced list/both — reuse cached names
                         listItemsSel = lk.items;
                     }
                     propClone2.listItems = listItemsSel || [];
+                    if (sel && sel.table) {
+                        const formSelf = this;
+                        propClone2.listItemsLoader = async () => {
+                            const w = (sel.where) ? formSelf._resolveSelectionWhere(sel.where, selWhereRow) : null;
+                            const lk = await formSelf._fetchFkLookup(sel.table, w);
+                            return lk && lk.totalRows >= 0 ? lk.items : null;
+                        };
+                    }
                 }
                 
                 const ctrlSel = new TextBox(contentArea, propClone2);
@@ -5566,8 +6408,18 @@ class DataForm extends Form {
                         btn.onClick = (ev) => {
                             try { if (this && typeof this.doAction === 'function') this.doAction(action, params); } catch (e) {}
                         };
+                    } else if (item.method) {
+                        // Кнопка, зовущая МЕТОД ФОРМЫ по имени. Ни клиентского
+                        // обработчика, ни строки с UID скрипта: адрес формы известен
+                        // ядру, проверки и разбор ответа тоже его (см. runFormMethod).
+                        const formSelfM = this;
+                        const methodName = item.method;
+                        const mConfirm = (item.confirm === false) ? false
+                            : ((item.confirm && typeof item.confirm === 'object') ? (item.confirm.i18n || null) : (item.confirm || null));
+                        const mRequiresSaved = item.requiresSaved;
+                        btn.onClick = () => { formSelfM.runFormMethod(methodName, { confirm: mConfirm, requiresSaved: mRequiresSaved }); };
                     }
-                    // Если action нет — onClick будет назначен через _wireItemEvents (events.onClick)
+                    // Если ни action, ни method — onClick назначит _wireItemEvents (events.onClick)
                 } catch (e) {}
 
                 try { if (item.name) this.controlsMap[item.name] = btn; } catch (e) {}
@@ -5590,7 +6442,12 @@ class DataForm extends Form {
                 cmdBarEl.classList.add('ui-toolbar');
                 // Компенсируем padding contentArea (10px) — тулбар должен быть вплотную
                 // к верхнему и боковым краям формы, как в классических диалогах рабочего стола.
-                cmdBarEl.style.margin = '-10px -10px 5px -10px';
+                // Нижний отступ ОТРИЦАТЕЛЬНЫЙ: контейнер раздвигает детей `gap: 14px`, и
+                // при прежних +5px под панелью стояла дыра в 19px (владелец, 14.10.2026).
+                // -10px оставляет 4px до ЛЮБОГО следующего элемента — вкладок, строки
+                // пометки, панели оповещений, — и ни одному из них больше не нужна
+                // своя заплатка, которая знает про панель над собой.
+                cmdBarEl.style.margin = '-10px -10px -10px -10px';
                 contentArea.appendChild(cmdBarEl);
 
                 const hiddenCmdBtns = Array.isArray(item.hiddenButtons) ? item.hiddenButtons : [];
@@ -5689,6 +6546,18 @@ class DataForm extends Form {
                         btn.onClick = cmdSelection
                             ? () => { formCmd.runSelectionCommand(cmdName, cmdSelection, cmdConfirm); }
                             : () => { formCmd.runDocumentCommand(cmdName, cmdConfirm); };
+                    }
+                    // Кнопка командной панели, зовущая МЕТОД ФОРМЫ: `"method": "…"`.
+                    // Тот же механизм, что у кнопки внизу формы, — сложная форма
+                    // держит команды наверху, маленький диалог кнопки внизу, но
+                    // вызывается одно и то же.
+                    if (exBtn.method && !(exBtn.events && exBtn.events.onClick) && !exBtn.onClick) {
+                        const formMth = this;
+                        const exMethod = exBtn.method;
+                        const exConfirm = (exBtn.confirm === false) ? false
+                            : ((exBtn.confirm && typeof exBtn.confirm === 'object') ? (exBtn.confirm.i18n || null) : (exBtn.confirm || null));
+                        const exRequiresSaved = exBtn.requiresSaved;
+                        btn.onClick = () => { formMth.runFormMethod(exMethod, { confirm: exConfirm, requiresSaved: exRequiresSaved }); };
                     }
                     // Подключаем события (events.onClick, top-level onXxx) через стандартный механизм
                     try {
@@ -5799,18 +6668,16 @@ class DataForm extends Form {
                         autoActivateFirstRow: props.autoActivateFirstRow !== false
                     };
                     const rel = new DynamicTable(relConf);
+                    // Высота списка — props.visibleRows строк, по ОБЩЕМУ правилу таблиц
+                    // (_applyDeclaredHeight): столько просит, уступает до пола и растёт
+                    // со свободным местом, если рядом нет главной таблицы. DynamicTable
+                    // перекрывает this.visibleRows своим «строк на загрузку», поэтому
+                    // объявление кладём в declaredRows явно. Раньше тело зажималось
+                    // min/max-высотой, и в развёрнутом окне список счетов брони стоял
+                    // полоской в 10 строк над пустотой (15.10.2026).
+                    rel.declaredRows = props.visibleRows || 8;
                     try { if (typeof rel.setCaption === 'function') rel.setCaption(caption); } catch (e) {}
                     try { if (typeof rel.Draw === 'function') rel.Draw(contentArea); } catch (e) {}
-                    // Высота списка — props.visibleRows строк (DynamicTable перекрывает
-                    // this.visibleRows своим значением «строк на загрузку», поэтому
-                    // высоту тела задаём явно; прокрутка внутри — виртуальная).
-                    try {
-                        if (rel.bodyContainer) {
-                            const h = ((props.visibleRows || 8) * (props.rowHeight || 25)) + 'px';
-                            rel.bodyContainer.style.minHeight = h;
-                            rel.bodyContainer.style.maxHeight = h;
-                        }
-                    } catch (e) {}
                     if (item.name) this.controlsMap[item.name] = rel;
                     try {
                         if (!this._tables) this._tables = [];
@@ -5864,6 +6731,14 @@ class DataForm extends Form {
                         dtConf.saveOnEdit = dtConf.editable === true && dtConf.readOnly !== true;
                         if (dtConf.saveOnEdit && !dtConf.editMode) dtConf.editMode = 'cell-immediate';
                         dtConf.showToolbar = (dtConf.showToolbar === undefined) ? true : dtConf.showToolbar;
+                        // Журнал выбора с условием отбора поля (`selection.where`): фильтр
+                        // приходит параметром открытия.
+                        try {
+                            const op = this._openParams || {};
+                            if (this.selectMode === true && Array.isArray(op.initialFilter) && !dtConf.initialFilter) {
+                                dtConf.initialFilter = op.initialFilter;
+                            }
+                        } catch (e) {}
                         const tbl = new DynamicTable(dtConf);
                         try { if (typeof tbl.setCaption === 'function') tbl.setCaption(caption); } catch (e) {}
                         try { if (typeof tbl.Draw === 'function') tbl.Draw(contentArea); } catch (e) {}
@@ -5875,8 +6750,18 @@ class DataForm extends Form {
                             const form = this;
                             if (!this._tables) this._tables = [];
                             this._tables.push(tbl);
+                            // СПИСОК ВНУТРИ ФОРМЫ ЗАПИСИ (платежи брони на вкладке
+                            // «Zahlungen») — чужие записи, а не «текущая запись» формы.
+                            // Связка ниже копирует ВСЕ одноимённые поля активной строки в
+                            // поля формы: щелчок по поступлению вписывал в бронь его номер
+                            // и клиента без подписи (UID), и «Speichern» записывал их в базу
+                            // (21.10.2026, бронь Seiler получила номер поступления 00048).
+                            // Связка нужна только форме-журналу, где строка и есть запись.
+                            if (this._isRecordForm) {
+                                // ничего: ни главной таблицы, ни переноса полей строки
+                            } else {
                             if (!this.table) this.table = tbl; // Первая таблица - главная
-                            
+
                             // Устанавливаем callback для автоматического обновления _currentRecord
                             tbl.onRowActivate = function(rowIndex) {
                                 try {
@@ -5889,6 +6774,7 @@ class DataForm extends Form {
                                     console.error('[DataForm] table onRowActivate error:', e);
                                 }
                             };
+                            }
                         } catch (e) {
                             console.error('[DataForm] failed to setup table integration:', e);
                         }
@@ -5943,6 +6829,9 @@ class DataForm extends Form {
                             };
                             // Помечаем как мастер — _activateFirstRows() активирует их раньше деталей.
                             tbl._isMaster = true;
+                            // Связь нужна и удалению строки: подчинённые строки уходят вместе
+                            // с ней, с вопросом (recordDelete в Table.doAction).
+                            tbl._masterLink = { targets: masterForTargets, masterField, detailField };
                         }
                     }
                 } catch (e) {
@@ -6084,6 +6973,16 @@ class DataForm extends Form {
                 try {
                     const line = new InfoLine(contentArea, properties || {});
                     line.setCaption(caption);
+                    // Объявлено `data` — текст берётся из ДАННЫХ формы, а подпись
+                    // лейаута остаётся запасной (пока значение не пришло). Так
+                    // пометка умеет говорить «выставлено больше, чем заказано:
+                    // 44,10 €», не собирая этот текст во втором месте.
+                    if (item.data && this._dataMap
+                        && Object.prototype.hasOwnProperty.call(this._dataMap, item.data)) {
+                        const rec = this._dataMap[item.data];
+                        const v = (rec && rec.value !== undefined) ? rec.value : rec;
+                        if (v !== null && v !== undefined && v !== '') line.setValue(v);
+                    }
                     line.Draw(contentArea);
                     // Объявлено условие показа — рождается скрытой: пересчёт `visibleWhen`
                     // покажет её, если условие выполнено, и пометка не мигнёт на чужом документе.
@@ -6144,6 +7043,13 @@ class DataForm extends Form {
                 }
                 break;
             }
+            // РЕКВИЗИТ ФОРМЫ БЕЗ КОНТРОЛА (`{ "type": "attribute", "name": …,
+            // "attribute": true }`): значение, которое человек не видит, но от
+            // которого зависит форма — «можно ли ещё ввести аванс прямо в брони».
+            // Считает его сервер (`onLoadAttributes`), читают условия
+            // (`visibleWhen`/`enabledWhen`) из данных формы. Рисовать нечего.
+            case 'attribute':
+                break;
             default:
                 console.warn('Unknown layout item type:', item.type);
         }
@@ -6349,6 +7255,57 @@ class DataForm extends Form {
         } catch (e) { console.error('[DataForm] onReady handler error:', e); }
     }
 
+    /**
+     * Построить панель оповещений документа (ТЗ оповещений §10).
+     *
+     * Панель — ЧАСТЬ РАМКИ: ядро вставляет её в область содержимого формы само,
+     * сразу ПОД командной панелью (решение владельца 02.10.2026), и лейаут о ней
+     * не знает. Командную панель ищем по уже отрисованному узлу, а не по
+     * элементу лейаута: её может не быть вовсе — тогда панель становится первой.
+     */
+    _drawAlertsPanel(contentArea) {
+        if (!Array.isArray(this._alerts)) return;   // у таблицы нет правил — нет и панели
+        const host = contentArea || this.getContentArea();
+        if (!host) return;
+
+        const panel = new DocumentAlertsPanel(this);
+        const el = panel.Draw(null);
+        const bar = host.querySelector(':scope > .ui-toolbar');
+        if (bar && bar.nextSibling) host.insertBefore(el, bar.nextSibling);
+        else if (bar) host.appendChild(el);
+        else host.insertBefore(el, host.firstChild);
+
+        this._alertsPanel = panel;
+        panel.setAlerts(this._alerts);
+
+        // ЖИВОЕ ОБНОВЛЕНИЕ тем же каналом, которым живут списки: документ
+        // провёлся в фоне, расхождение появилось или исчезло — открытая форма
+        // показывает это без перезагрузки страницы. Перечитываем ТОЛЬКО
+        // оповещения: пересобирать всю спецификацию формы значило бы переписать
+        // и данные, которые человек в этот момент правит.
+        try {
+            this._alertsUnsub = window.MySpaceEvents.on((d) => {
+                if (!d || d.type !== 'dataChanged' || d.tableName !== 'document_alerts') return;
+                this.refreshAlerts();
+            });
+        } catch (e) { /* без потока событий панель всё равно работает */ }
+    }
+
+    /** Перечитать оповещения документа и показать их. */
+    async refreshAlerts() {
+        if (!this._alertsPanel) return;
+        const table = this.dbTable || this.tableName || null;
+        const uid = (this._dataMap && this._dataMap['UID'] && this._dataMap['UID'].value) || null;
+        if (!table || !uid) return;
+        try {
+            const res = await callServerMethod('uniForm', 'documentAlerts', { tableName: table, recordID: uid });
+            this._alerts = (res && res.alerts) || [];
+            this._alertsPanel.setAlerts(this._alerts);
+        } catch (e) {
+            console.warn('[alerts] не перечитаны:', e && e.message);
+        }
+    }
+
     async loadData() {
         try {
             const d = await callServerMethod(this.appName, 'getData', {});
@@ -6375,12 +7332,31 @@ class DataForm extends Form {
     async loadLayout() {
         try {
             const both = await this.getLayoutWithData();
+            // ФОРМА НЕ НАЙДЕНА — внятная ошибка, а не пустое окно. У именованной
+            // формы автоформы не бывает: строить её не из чего, и молчаливое пустое
+            // окно в этом случае — худший из возможных ответов.
+            if (both && both.error) {
+                this.layout = [];
+                this.showLoading = false;
+                this._loadError = both.error;
+                if (typeof showAlert === 'function') showAlert(both.error);
+                return;
+            }
             if (both && (Array.isArray(both.layout) || Array.isArray(both.data))) {
                 this.layout = Array.isArray(both.layout) ? both.layout : (both.layout && Array.isArray(both.layout.layout) ? both.layout.layout : []);
                 try { this._datasetId = both.datasetId || null; } catch (e) { this._datasetId = null; }
                 try { this._isNew = !!both.isNew; } catch (e) { this._isNew = false; }
                 try { this._clientScript = both.clientScript || null; } catch (e) {}
                 try { this._formEvents = both.events || null; } catch (e) { this._formEvents = null; }
+                // АДРЕС формы: по нему клиент зовёт её серверные методы.
+                try { this._formApp = both.formApp || null; this._formName = both.formName || null; } catch (e) {}
+                // РЕКВИЗИТЫ ФОРМЫ — поля, которых нет ни в одной таблице. Держим их
+                // объявление, чтобы `collectData` не отправила их в запись, а кнопка
+                // с `method` проверила обязательные перед вызовом.
+                try {
+                    this._formAttributeDecls = Array.isArray(both.formAttributes) ? both.formAttributes : null;
+                    this._formAttributes = new Set((this._formAttributeDecls || []).map(a => a && a.name).filter(Boolean));
+                } catch (e) { this._formAttributeDecls = null; this._formAttributes = new Set(); }
                 try { this._prefilled = both.prefilled || null; } catch (e) { this._prefilled = null; }
                 try { this._lock = both.lock || null; } catch (e) { this._lock = null; }
                 // Документ мог уже стоять в очереди, когда форму открыли (её закрыли
@@ -6392,9 +7368,30 @@ class DataForm extends Form {
                 try {
                     this._postingState = both.postingState || null;
                     this._postingCaptions = both.postingCaptions || null;
+                    // Разрешено ли распроведение ОБЪЯВЛЕНИЕМ документа. Отвечает
+                    // сервер: объявление лежит в модели, клиент его не видит.
+                    this._postingCanUnpost = !!both.postingCanUnpost;
+                    this._postingMode = both.postingMode || null;
                     this._isRecordForm = !!both.isRecordForm;
-                    if (both.postingState === 'queued') this._pendingPostingWatch = true;
+                    // В режиме `onSave` очередь человеку не показывается: ни замка
+                    // формы, ни фазы в заголовке окна. Документ уходит в очередь при
+                    // КАЖДОМ сохранении, и замок сообщал бы о проведении именно
+                    // тому, от кого его прячут. Своей задачи замок здесь и не
+                    // выполняет: он защищает от «проведено по старым данным, пока
+                    // правил не сохранив» — но такой документ перепроведёт
+                    // следующее же сохранение, а закрыться от правки он не может,
+                    // замка неизменности у него нет. О НЕУДАЧЕ при этом сообщают
+                    // по-прежнему: уведомление от исполнителя очереди и пометка на
+                    // форме при открытии документа в состоянии «ошибка».
+                    if (both.postingState === 'queued' && both.postingMode !== 'onSave') {
+                        this._pendingPostingWatch = true;
+                    }
                 } catch (e) {}
+                // ОПОВЕЩЕНИЯ ПО ДОКУМЕНТУ. Массив (возможно пустой) — у таблицы
+                // объявлены правила, панель рисуется; `null` — правил нет вовсе,
+                // и панели не будет: пустая панель обещает сведения, которых не
+                // бывает.
+                try { this._alerts = Array.isArray(both.alerts) ? both.alerts : null; } catch (e) { this._alerts = null; }
                 try { this._rowTones = Array.isArray(both.rowTones) ? both.rowTones : null; } catch (e) { this._rowTones = null; }
                 try { this._windowState = both.windowState || null; } catch (e) {}
                 // Apply app caption (human-readable translated name) and icon
@@ -6461,13 +7458,31 @@ class DataForm extends Form {
         }
     }
 
+    /**
+     * Данные ЗАПИСИ для сохранения.
+     *
+     * РЕКВИЗИТЫ ФОРМЫ сюда не попадают: они живут только в форме и в базу не идут
+     * никогда. Отсекаются здесь ЯВНО, по их объявлению, а не по совпадению имён с
+     * колонками — иначе поле формы, случайно названное как колонка, молча уехало бы
+     * в запись. Их значения забирает `attributeValues()` и отдаёт методу формы.
+     *
+     * У ФОРМЫ БЕЗ ПРЕДМЕТА отсекать нечего и не от чего: записи у неё нет, и
+     * реквизиты — это ВСЁ, что на ней есть (`collectFormAttributes(..., allFields)`).
+     * Такая форма сохраняет себя своим методом `onSave`, то есть её сохранение и
+     * есть работа реквизитов. Отсечение здесь означало, что «Сохранить» на форме
+     * настроек отправляет пустые изменения, сервер честно пишет «ничего не
+     * изменилось» и отвечает «ок»: ни один уровень настроек не сохранялся, и
+     * никакой ошибки при этом не было (найдено живым прогоном 16.10.2026).
+     */
     collectData() {
         const data = {};
+        const hasSubject = !!(this.dbTable || this.tableName);
         for (const key in this.controlsMap) {
             const ctrl = this.controlsMap[key];
             if (!ctrl) continue;
-            
+
             const fieldName = (ctrl.element && ctrl.element.dataset) ? ctrl.element.dataset.field : null;
+            if (hasSubject && fieldName && this._formAttributes && this._formAttributes.has(fieldName)) continue;
             if (fieldName) {
                 let val = null;
                 if (typeof ctrl.getValue === 'function') {
@@ -6484,6 +7499,17 @@ class DataForm extends Form {
     }
 
     async doAction(action, params) {
+        // ОДНО СОХРАНЕНИЕ ЗА РАЗ (16.10.2026). Две команды подряд («Speichern», сразу
+        // «Anzahlung hinzufügen», которая тоже сохраняет) отправляли НОВУЮ запись
+        // дважды — вторая вставка падала на первичном ключе сырой ошибкой базы
+        // (прогон сценариев, бронь). Следующее сохранение ждёт текущее: после него
+        // запись уже не новая, и второе сохранение становится правкой.
+        if (action === 'save' && !(params && params.__saveInner)) {
+            while (this._saveInFlight) { try { await this._saveInFlight; } catch (e) { /* ждём только окончания */ } }
+            const p = this.doAction('save', Object.assign({}, params || {}, { __saveInner: true }));
+            this._saveInFlight = p;
+            try { return await p; } finally { if (this._saveInFlight === p) this._saveInFlight = null; }
+        }
         if (action === 'runScript') {
             const uid      = params && params.uid;
             const fn       = params && params.fn;
@@ -6523,51 +7549,24 @@ class DataForm extends Form {
         }
         // «Провести и закрыть» под стандартной кнопкой «ОК» проводимого документа.
         // Сохранение внутри: команда всегда работает с тем, что лежит в базе, а не
-        // с тем, что на экране (см. runDocumentCommand).
+        // с тем, что на экране (см. runDocumentCommand). Переспрос НЕ подавляем:
+        // он принадлежит команде, и «ОК» обязан спросить ровно то же, что спросила
+        // бы отдельная кнопка того же действия.
         if (action === 'okPost') {
-            await this.runDocumentCommand('postAndClose', false);
+            await this.runDocumentCommand('postAndClose');
             return;
         }
 
         if (action === 'ok') {
+            // «Speichern und schließen» — команда уже названа: сохранить и закрыть.
+            // Раньше у СУЩЕСТВУЮЩЕЙ записи она переспрашивала «Daten wurden geändert.
+            // Änderungen speichern?» — человек только что нажал «сохранить», и вопрос
+            // звучал как сбой (прогон сценариев 16.10.2026, формы организации и отеля).
+            // Переспрос остаётся там, где намерение НЕ названо: закрытие крестиком и Esc.
+            if (this._modified) await this.doAction('save');
             if (!this._modified) {
-                // Изменений нет — просто закрываем
                 this._closing = true;
                 this.close();
-            } else if (this._isNew) {
-                // Новая запись (ещё не в БД) — подтверждение "Сохранить изменения?" не нужно:
-                // заполнение новой формы и есть намерение сохранить. Просто пишем и закрываем.
-                // Подтверждение оставлено только для правки уже существующих записей (ветка ниже).
-                await this.doAction('save');
-                if (!this._modified) {
-                    this._closing = true;
-                    this.close();
-                }
-            } else {
-                // Есть изменения в существующей записи — спрашиваем "Сохранить?"
-                const self = this;
-                if (typeof showConfirm === 'function') {
-                    showConfirm(__t('Data has been modified. Save changes?'), async () => {
-                        // "Да" — сохранить, затем закрыть
-                        await self.doAction('save');
-                        if (!self._modified) {
-                            self._closing = true;
-                            self.close();
-                        }
-                    }, () => {
-                        // "Нет" — закрыть без сохранения
-                        self._closing = true;
-                        self._modified = false;
-                        if (self._originalTitle) super.setTitle(self._originalTitle);
-                        self.close();
-                    });
-                } else {
-                    await this.doAction('save');
-                    if (!this._modified) {
-                        this._closing = true;
-                        this.close();
-                    }
-                }
             }
             return;
         }
@@ -6594,7 +7593,11 @@ class DataForm extends Form {
                 const res = await this.applyChanges(data);
                 if (res && res.ok) {
                     if (res.warnings && res.warnings.length > 0) {
-                        const msg = __t('Saved, but some rows were not written:\n') + res.warnings.join('\n');
+                        // Перевод строки — ВНЕ ключа: `__t` подставляется по тексту
+                        // исходника, где `\n` — два символа, а в ключе из JSON — один,
+                        // и ключ не находился: пользователь видел английский текст с
+                        // буквальным «\n» (21.10.2026).
+                        const msg = __t('Saved, but some rows were not written:') + '\n' + res.warnings.join('\n');
                         if (typeof showAlert === 'function') showAlert(msg);
                         else alert(msg);
                     }
@@ -6603,15 +7606,108 @@ class DataForm extends Form {
                     // таблицы (ключи вида ts_booking_rooms__r0__roomId). Если обновить их
                     // через setValue(UID, undefined), они потеряют отображаемые имена.
                     // Поэтому обновляем ТОЛЬКО контролы, чьё поле реально пришло от сервера.
-                    let refreshedCaption = null;
+                    // Страницу перезагружает метод формы, а не кнопка: так «Speichern und
+                    // schließen» и «Anwenden» ведут себя одинаково (смена своего языка
+                    // интерфейса на форме настроек — бандлы переводятся под язык сессии).
+                    // Раньше это знала только кнопка «Anwenden», и после стандартного
+                    // сохранения интерфейс оставался на старом языке до F5 (прогон 17.10.2026, A4).
+                    if (res.reloadPage) { window.location.reload(); return; }
+                    const refreshedCaption = await this._reloadFormData(data);
+                    // Сбрасываем флаг изменённости и снимаем блокировку
+                    this._modified = false;
+                    this._suppressModified = false;
+                    // Условия формы — по СВЕЖИМ данным: запись перестала быть новой
+                    // (вкладка «только у сохранённой» появляется без переоткрытия окна),
+                    // реквизиты формы пересчитаны сервером.
+                    try { this.refreshEnabledWhen(); } catch (e) {}
+                    // Документ режима `onSave` ушёл в очередь этим сохранением, и его
+                    // проведение может записать в него самого (штамп порождённого
+                    // документа) и в то, что форма показывает (внесённый аванс). Ждём
+                    // окончания ТИХО — без замка формы и без фазы в заголовке (в этом
+                    // режиме проведение человеку не показывают) — и перечитываем форму.
+                    if (this._postingMode === 'onSave') {
+                        try { this.watchPosting({ quiet: true }); } catch (e) {}
+                    }
+                    // Клиентское событие формы «сохранено» (`clientEvents.onAfterSave`) —
+                    // для того, что живёт вне формы и устарело от записи: снимки личных
+                    // настроек на клиенте. Раньше их перечитывала только своя кнопка
+                    // «Anwenden», и после «Speichern» календарь не поворачивался до F5
+                    // (прогон 17.10.2026, D8).
                     try {
-                        const freshBoth = await callServerMethod(this.appName, 'getLayoutWithData', { datasetId: this._datasetId });
+                        const afterBinding = this._formEvents && this._formEvents.onAfterSave;
+                        if (afterBinding && !afterBinding.serverScript) await this.callClientBinding(afterBinding, [res]);
+                    } catch (e) { console.error('[DataForm] onAfterSave handler error:', e); }
+                    // После сохранения сервер возвращает обновлённый заголовок (для документов —
+                    // ед. число + представление name, напр. «Buchung 00001 Herr Kaiser …»). Применяем.
+                    if (refreshedCaption) {
+                        this._originalTitle = refreshedCaption;
+                        super.setTitle(refreshedCaption);
+                    } else if (this._originalTitle) {
+                        super.setTitle(this._originalTitle);
+                    }
+                } else {
+                    const errMsg = (res && res.error ? res.error : __t('Unknown error'));
+                    if (typeof showAlert === 'function') showAlert(__t('Save error: ') + errMsg);
+                    else alert(__t('Save error: ') + errMsg);
+                }
+            } catch (e) {
+                if (typeof showAlert === 'function') showAlert(__t('Save error: ') + e.message);
+                else alert(__t('Save error: ') + e.message);
+            }
+            return;
+        }
+        if (action === 'cancel') {
+            this.close();
+            return;
+        }
+        return super.doAction(action, params);
+    }
+
+    /**
+     * Перечитать данные открытой формы с сервера БЕЗ перерисовки DOM и вернуть
+     * свежий заголовок окна (или null).
+     *
+     * Вызывается после сохранения и после окончания проведения: обработчик
+     * проведения сам пишет реквизиты документа («Ausgestellt am» у счёта), и
+     * раньше форма показывала их только после повторного открытия (прогон
+     * 17.10.2026, E4).
+     *
+     * @param {object|null} current — что сейчас на форме (нужно форме без предмета)
+     */
+    async _reloadFormData(current) {
+        let refreshedCaption = null;
+        const prevSuppress = this._suppressModified;
+                    try {
+                        // У ФОРМЫ БЕЗ ПРЕДМЕТА перечитывать нечего, кроме неё самой, и
+                        // перечитывается она с параметров ОТКРЫТИЯ. Всё, что человек выбрал
+                        // на ней после открытия (уровень и запись на форме настроек),
+                        // терялось: окно показывало «Benutzer» с вкладками организации
+                        // (прогон 17.10.2026, S10). Поэтому вместе с запросом едет то, что
+                        // сейчас на форме, — метод `onLoadData` получает его как `current`.
+                        const refreshReq = { datasetId: this._datasetId };
+                        if (!(this.dbTable || this.tableName) && current) refreshReq.current = current;
+                        const freshBoth = await callServerMethod(this.appName, 'getLayoutWithData', refreshReq);
                         if (freshBoth && freshBoth.appCaption) refreshedCaption = freshBoth.appCaption;
                         if (freshBoth && Array.isArray(freshBoth.data)) {
                             if (freshBoth.datasetId) this._datasetId = freshBoth.datasetId;
                             // После записи в БД запись перестаёт быть новой — последующее
                             // закрытие через OK уже спросит подтверждение (как для существующих).
                             this._isNew = !!freshBoth.isNew;
+                            // Состояние проведения — тоже: сохранение ставит документ в
+                            // очередь, и условия формы (`visibleWhen`) читают его отсюда.
+                            if (freshBoth.postingState) this._postingState = freshBoth.postingState;
+                            // ПАНЕЛЬ ОПОВЕЩЕНИЙ после первого сохранения: у новой записи её
+                            // не было (говорить ещё не о чем), а перерисовки формы нет —
+                            // и оповещение, уже лежащее в базе, появлялось только после
+                            // повторного открытия (прогон 17.10.2026, D3). Строим её здесь;
+                            // дальше её ведёт подписка на `document_alerts`.
+                            try {
+                                if (Array.isArray(freshBoth.alerts)) {
+                                    this._alerts = freshBoth.alerts;
+                                    if (this._alertsPanel) this._alertsPanel.setAlerts(this._alerts);
+                                    else this._drawAlertsPanel();
+                                }
+                            } catch (e) { console.error('[alerts] панель после сохранения:', e); }
                             // Собираем имена скалярных полей из свежего ответа.
                             // Табличные части тоже обновляем — но массив строк мутируем
                             // НА МЕСТЕ (сохраняя ссылку: её держит замыкание renderBodyRows
@@ -6674,33 +7770,8 @@ class DataForm extends Form {
                             }
                         }
                     } catch(reloadErr) { console.error('[DataForm] data refresh after save error', reloadErr); }
-                    // Сбрасываем флаг изменённости и снимаем блокировку
-                    this._modified = false;
-                    this._suppressModified = false;
-                    // После сохранения сервер возвращает обновлённый заголовок (для документов —
-                    // ед. число + представление name, напр. «Buchung 00001 Herr Kaiser …»). Применяем.
-                    if (refreshedCaption) {
-                        this._originalTitle = refreshedCaption;
-                        super.setTitle(refreshedCaption);
-                    } else if (this._originalTitle) {
-                        super.setTitle(this._originalTitle);
-                    }
-                } else {
-                    const errMsg = (res && res.error ? res.error : __t('Unknown error'));
-                    if (typeof showAlert === 'function') showAlert(__t('Save error: ') + errMsg);
-                    else alert(__t('Save error: ') + errMsg);
-                }
-            } catch (e) {
-                if (typeof showAlert === 'function') showAlert(__t('Save error: ') + e.message);
-                else alert(__t('Save error: ') + e.message);
-            }
-            return;
-        }
-        if (action === 'cancel') {
-            this.close();
-            return;
-        }
-        return super.doAction(action, params);
+        this._suppressModified = prevSuppress;
+        return refreshedCaption;
     }
 
     async Draw(parent) {
@@ -6733,6 +7804,17 @@ class DataForm extends Form {
 
         await this.renderLayout();
 
+        // ПАНЕЛЬ ОПОВЕЩЕНИЙ — часть рамки формы (ТЗ оповещений §10): ядро
+        // вставляет её САМО, сразу под командной панелью, и лейаут о ней не знает.
+        // После `renderLayout`, а не внутри: место определяется по уже
+        // отрисованной командной панели, а не по порядку элементов лейаута
+        // (её может не быть вовсе — тогда панель становится первой).
+        try { this._drawAlertsPanel(contentArea); } catch (e) { console.error('[alerts] панель не построена:', e); }
+
+        // Наименьшая ширина содержимого — ДО восстановления геометрии: запомненное
+        // окно не должно открыться уже своих полей (getMinWidth).
+        try { this.measureMinContentWidth(); } catch (e) {}
+
         // Запомненные положение и размер сильнее умолчания из лейаута: пользователь
         // подвинул окно сам, и открыть его снова «как положено» значит стереть его выбор.
         let geometryRestored = false;
@@ -6751,7 +7833,11 @@ class DataForm extends Form {
                 // anchor is already present).
                 this.setAnchorToWindow('center');
                 if (typeof this.setSizeToContent === 'function') {
-                    this.setSizeToContent({ minWidth: 420, padH: 6 });
+                    // Пола в 420px здесь больше НЕТ: он был выдуманным числом и давал
+                    // маленькому диалогу (сумма, дата, две кнопки) пустую полосу
+                    // справа шириной с половину окна. Нижнюю границу теперь задаёт
+                    // измеримое: заголовок с кнопками титлбара и само содержимое.
+                    this.setSizeToContent({ padH: 6 });
                 }
             }
         } catch (e) {}
@@ -6762,6 +7848,46 @@ class DataForm extends Form {
         // (центр экрана), легли бы стопкой. Развёрнутое (maximized) окно — на весь экран,
         // каскад не нужен.
         try { if (!this.isMaximized) Form._resolveOverlap(this); } catch (e) {}
+
+        // Окно, открытое по умолчанию (не подогнанное и не развёрнутое), тоже не уже
+        // своего содержимого — и целиком на рабочем столе.
+        try {
+            if (!this.isMaximized && this.element) {
+                const minW = this.getMinWidth();
+                if ((this.width || 0) < minW) {
+                    this.setWidth(minW);
+                    this.element.style.width = minW + 'px';
+                }
+                this._keepOnDesktop();
+            }
+        } catch (e) {}
+
+        // Высоты таблиц — по окончательному размеру окна (см. reapplyTableHeights).
+        //
+        // И ПРЕДЕЛ ШИРИНЫ ТОЖЕ: он замерен выше, пока форма ещё строилась, а это
+        // не замер (тот же урок, что с высотами). Запомненная геометрия
+        // ограничивается слишком слабым пределом, и окно открывается уже своих
+        // полей — у «Einstellungen» кнопки «Anwenden» и «Passwort ändern»
+        // переезжали на вторую строку, причём только при повторном открытии
+        // (прогон 16.10.2026, J3). Повторный замер идёт ДО первой отрисовки
+        // (кадр rAF) и только РАСШИРЯЕТ окно: запомненную пользователем ширину
+        // сужать нельзя, а обрезать его поля — нельзя тем более.
+        try {
+            requestAnimationFrame(() => {
+                try {
+                    if (!this.isMaximized && this.element) {
+                        this.measureMinContentWidth();
+                        const minW = this.getMinWidth();
+                        if ((this.width || 0) < minW) {
+                            this.setWidth(minW);
+                            this.element.style.width = minW + 'px';
+                            this._keepOnDesktop();
+                        }
+                    }
+                } catch (e) {}
+                this.reapplyTableHeights();
+            });
+        } catch (e) {}
 
         // Show form now that layout is ready and window state applied
         try { if (this.element) this.element.style.visibility = 'visible'; } catch (e) {}
@@ -6865,7 +7991,15 @@ class Button extends UIObject {
     }
 
     setCaption(caption) {
+        // Подсказка, повторявшая подпись, меняется вместе с ней (16.10.2026): кнопка
+        // «Speichern und schließen» показывала подсказку «OK» — подпись поменяли после
+        // создания, подсказку забыли. Своя, отличная от подписи подсказка не трогается.
+        const followsCaption = !this.tooltip || this.tooltip === this.caption;
         this.caption = caption;
+        if (followsCaption) {
+            this.tooltip = caption;
+            if (this.element) this.element.title = caption || '';
+        }
         if (this.element) {
             this.updateButtonContent();
         }
@@ -6874,7 +8008,7 @@ class Button extends UIObject {
     getCaption() {
         return this.caption;
     }
-    
+
     setIcon(iconPath) {
         this.icon = iconPath;
         this.showIcon = !!iconPath;
@@ -7414,6 +8548,21 @@ if (typeof window !== 'undefined') {
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 
 class TextBox extends FormInput {
+    /**
+     * Текст числа → строка для Number(): пробелы убраны, запятая — десятичный знак,
+     * точки при наличии запятой — разделители тысяч («1.234,56» → «1234.56»).
+     * Статический метод класса, а не присваивание снаружи: присваивание выше
+     * объявления класса роняло весь файл (TDZ, 16.10.2026).
+     */
+    static normalizeNumberText(txt) {
+        let t = String(txt).replace(/[\s\u00a0']/g, '');
+        if (t.indexOf(',') !== -1) {
+            if (t.indexOf('.') !== -1) t = t.replace(/\./g, '');
+            t = t.replace(/,/g, '.');
+        }
+        return t;
+    }
+
 
     constructor(parentElement = null, properties = {}) {
         super(parentElement, properties);
@@ -7477,11 +8626,10 @@ class TextBox extends FormInput {
         this._dateBtn = null;
         this._calPopup = null;
         this._calOpen = false;
-        // Показывать ли время. Реквизит ДАННЫХ, а не формы: у одних дат время есть
-        // по смыслу (момент запуска задания, отметка времени), у других его нет вовсе
-        // (дата документа, срок оплаты). Поэтому умолчание — выключено, а включается
-        // осознанно: полем модели (`showTime` в db.json, едет метаданными до всех
-        // потребителей) либо properties элемента лейаута.
+        // Показывать ли время. У одних дат время есть по смыслу (момент запуска
+        // задания, дата ДОКУМЕНТА — её форме ставит ядро, uniForm.applyDocumentDateTime),
+        // у других его нет (срок оплаты). Поэтому умолчание — выключено, а включается
+        // метаданными колонки/автоформы либо properties элемента лейаута.
         if (typeof this.showTime === 'undefined') this.showTime = !!(properties && properties.showTime);
         this._dd = '';        // day part (0-2 digits as string)
         this._mm = '';        // month part (0-2 digits as string)
@@ -7498,7 +8646,14 @@ class TextBox extends FormInput {
     }
 
     setValue(val, display) {
-        if (this.isDate) { this._setDateFromAny(val); return; }
+        if (this.isDate) {
+            this._setDateFromAny(val);
+            // Запоминаем пришедшее значение: если человек дату не менял, вернуть
+            // надо ЕГО, а не пересобранное из частей — части теряют секунды, и
+            // простое сохранение документа сдвигало бы его момент (date, seq).
+            this._dateOrig = (val || val === 0) ? { value: val, key: this._getDateDisplay() } : null;
+            return;
+        }
         this.rawValue = val;
         // if val is an object with name/display, use it
         let displayVal = display;
@@ -7528,7 +8683,11 @@ class TextBox extends FormInput {
         if (this.digitsOnly) {
             const txt = this.getText();
             if (txt === '' || txt === null || txt === undefined) return null;
-            const n = Number(txt);
+            // Немецкая запись числа (16.10.2026): «100,5» — это сто с половиной, а не
+            // 1005. Прогон сценариев поймал сумму ×100 в поле «Betrag». Запятая —
+            // десятичный знак; если есть и точки, и запятая («1.234,56») — точки
+            // разделяют тысячи. Правило то же, что у сервера (money.parseLocaleNumber).
+            const n = Number(TextBox.normalizeNumberText(txt));
             return isNaN(n) ? txt : n;
         }
         // For regular text/number inputs, return what the user actually typed
@@ -7551,6 +8710,21 @@ class TextBox extends FormInput {
                 try { this.element.value = this.text; } catch (_) {}
             }
         }
+        this._syncOpenButton();
+    }
+
+    /**
+     * Кнопка «Datensatz öffnen» доступна только при выбранной записи. На пустом поле
+     * она молча ничего не делала, а её значок (лупа) читается как «найти» — человек
+     * жал на неё, ожидая окна выбора (прогон 17.10.2026, B1).
+     */
+    _syncOpenButton() {
+        const b = this._openBtn;
+        if (!b) return;
+        const v = this.rawValue;
+        const empty = (v === undefined || v === null || v === '');
+        b.disabled = empty;
+        b.style.opacity = empty ? '0.4' : '';
     }
 
     getText() {
@@ -7595,6 +8769,17 @@ class TextBox extends FormInput {
             this.element.readOnly = readOnly;
         }
     }
+
+    // ФОН ПОЛЯ ПО `readOnly` НЕ МЕНЯЕТСЯ — и не должен. Здесь стояла попытка
+    // приглушать нередактируемое поле «как неактивное»; она была снята в тот же
+    // день (владелец, 25.09.2026), потому что признак `readOnly` в этом
+    // фреймворке означает ДВЕ РАЗНЫЕ вещи:
+    //   1) значение менять нельзя вообще (дата выставления счёта, предоплата);
+    //   2) текст не НАБИРАЮТ, его выбирают — выпадающий список и селектор записи
+    //      строятся как TextBox с `readOnly: true` (см. ветку `listMode` ниже).
+    // Второе — обычное рабочее поле, и красить его в «недоступно» неверно.
+    // Если когда-нибудь понадобится отличать первое, признак нужен СВОЙ, а не
+    // этот: один признак на два разных факта разводит их молча.
 
     /**
      * Запирание уже отрисованного поля (документ провели в открытом окне).
@@ -7761,6 +8946,7 @@ class TextBox extends FormInput {
                     obtn.addEventListener('click', (ev) => { try { ev.stopPropagation(); ev.preventDefault(); this.openCurrentRecord(); } catch (_) {} });
                     this._openBtn = obtn;
                     this.inputContainer.appendChild(this._openBtn);
+                    this._syncOpenButton();
                     try {
                         const syncOpenBtn = (b) => {
                             try {
@@ -8091,6 +9277,25 @@ class TextBox extends FormInput {
                                 // Запертое поле не открывает список ни по кнопке, ни по
                                 // фокусу: кнопки уже нет, но фокус на поле остаётся.
                                 if (this.locked) return;
+                                // Список ссылки на справочник берётся В МОМЕНТ ОТКРЫТИЯ, а не
+                                // при отрисовке: в уже открытой брони не было клиентов,
+                                // заведённых минутой позже (прогон 17.10.2026, D1/B1).
+                                // Загрузчик — кэш формы, который сбрасывается событием
+                                // `dataChanged` своей таблицы, так что лишних запросов нет.
+                                if (typeof this.listItemsLoader === 'function' && !this._listItemsFresh) {
+                                    if (this._listLoading) return;
+                                    this._listLoading = true;
+                                    Promise.resolve()
+                                        .then(() => this.listItemsLoader())
+                                        .then((items) => { if (Array.isArray(items)) this.listItems = items; })
+                                        .catch(() => {})
+                                        .then(() => {
+                                            this._listLoading = false;
+                                            this._listItemsFresh = true;
+                                            try { this._openList(); } finally { this._listItemsFresh = false; }
+                                        });
+                                    return;
+                                }
                                 // build popup
                                 const popup = document.createElement('div');
                                 popup.className = 'textbox-list-popup';
@@ -8779,9 +9984,17 @@ class TextBox extends FormInput {
                             cleaned = sign + v;
                         }
                         if (cleaned !== e.target.value) {
+                            // Каретку сдвигаем РОВНО на столько символов, сколько
+                            // нормализация убрала, а не всегда на один. Замена запятой
+                            // на точку длину не меняет: сдвиг «на один назад» уводил
+                            // каретку перед точку, и следующая цифра попадала в целую
+                            // часть — «100,5» превращалось в «1005.» (найдено живым
+                            // прогоном 16.10.2026 на денежных полях).
                             const pos = e.target.selectionStart || 0;
+                            const removed = (e.target.value || '').length - cleaned.length;
+                            const next = Math.min(cleaned.length, Math.max(0, pos - removed));
                             e.target.value = cleaned;
-                            try { e.target.setSelectionRange(Math.max(0, pos - 1), Math.max(0, pos - 1)); } catch (_) {}
+                            try { e.target.setSelectionRange(next, next); } catch (_) {}
                         }
                         this.text = cleaned;
                     } else {
@@ -9205,9 +10418,15 @@ class TextBox extends FormInput {
             if (d >= 1 && d <= 31 && m >= 1 && m <= 12 && y >= 1000) {
                 const ymd = y + '-' + String(m).padStart(2, '0') + '-' + String(d).padStart(2, '0');
                 if (!this.showTime) return ymd;
-                // Локальное время БЕЗ суффикса зоны: «2026-08-02T15:30» и `new Date()`,
-                // и Sequelize трактуют как местное. С «Z» момент уехал бы на смещение
-                // зоны — пользователь ввёл 15:30 по своим часам, а не по Гринвичу.
+                // Не трогали — отдаём пришедшее как есть (с секундами).
+                const o = this._dateOrig;
+                if (o && o.key === this._getDateDisplay()) {
+                    return (o.value instanceof Date) ? o.value.toISOString() : o.value;
+                }
+                // Время БЕЗ суффикса зоны — «как на часах», а в момент его переводит
+                // СЕРВЕР в своём поясе решения (`timeZone` в server.config.json).
+                // Правило владельца 15.10.2026: дата и время берутся с сервера, не с
+                // клиента — часы и пояс браузера здесь не участвуют.
                 const hh = (this._HH || '00').padStart(2, '0');
                 const mi = (this._MI || '00').padStart(2, '0');
                 return ymd + 'T' + hh + ':' + mi;
@@ -9751,11 +10970,20 @@ class TextBox extends FormInput {
         btnToday.style.cssText = 'background:' + base + ';border-top:2px solid ' + light + ';border-left:2px solid ' + light + ';' +
             'border-right:2px solid ' + dark + ';border-bottom:2px solid ' + dark + ';' +
             'cursor:default;padding:1px 10px;font-size:11px;font-family:MS Sans Serif,sans-serif;';
-        btnToday.addEventListener('click', (e) => {
+        btnToday.addEventListener('click', async (e) => {
             e.stopPropagation();
-            this._dd = String(todayD).padStart(2, '0');
-            this._mm = String(todayM).padStart(2, '0');
-            this._yyyy = String(todayY);
+            // «Сегодня» — по часам СЕРВЕРА (правило владельца 15.10.2026: дата,
+            // сформированная автоматически, берётся только с сервера). Часы и пояс
+            // браузера могут врать; не ответил сервер — не подставляем ничего.
+            let now = null;
+            try {
+                const r = await fetch('/server-now', { cache: 'no-store' });
+                if (r.ok) now = await r.json();
+            } catch (_) { now = null; }
+            const ymd = now && /^(\d{4})-(\d{2})-(\d{2})$/.exec(now.ymd || '');
+            if (!ymd) { this._closeCalendar(); return; }
+            this._yyyy = ymd[1]; this._mm = ymd[2]; this._dd = ymd[3];
+            if (this.showTime) { this._HH = now.hh; this._MI = now.mi; }
             this._ensureTimeParts();
             this._updateDateDisplay();
             try { if (this.element) this.element.dispatchEvent(new Event('input', { bubbles: true })); } catch (_) {}
@@ -9795,12 +11023,18 @@ class TextBox extends FormInput {
         try {
             const selMeta = this.selection || {};
             const table = selMeta.table || null;
+            // Список выбора может быть и ИМЕНОВАННОЙ формой приложения
+            // (`selection: { app, form }`): бывают справочники, которых нет в базе —
+            // список таблиц системы, например. Раньше под такой выбор заводилась
+            // таблица-призрак, только чтобы у формы был адрес.
+            const selApp = selMeta.app || null;
+            const selForm = selMeta.form || null;
 
-            // Поле с кнопкой «...», но БЕЗ справочника (selection.table) — это поле
-            // с кастомным редактором: дефолтное действие ничего не открывает, а свой
-            // обработчик навешивается через events: { onSelectionStart: 'fn' } (он
+            // Поле с кнопкой «...», но БЕЗ справочника (ни таблицы, ни формы) — это
+            // поле с кастомным редактором: дефолтное действие ничего не открывает, а
+            // свой обработчик навешивается через events: { onSelectionStart: 'fn' } (он
             // выполнится по цепочке после этого no-op). Напр. редактор формул.
-            if (!table) return;
+            if (!table && !selForm) return;
 
             const setSelected = (rec) => {
                 try {
@@ -9817,7 +11051,18 @@ class TextBox extends FormInput {
                         const cb = this.handleSelection.bind(this);
                         const textBoxId = this.element ? this.element.id : 'unknown';
                         console.log('[TextBox.onSelectionStart] Creating callback for TextBox:', textBoxId);
-                        const id = await window.MySpace.open('uniForm', { mode: 'list', dbTable: table, onSelectCallBack: cb, selectMode: true, readOnly: true });
+                        const openParams = selForm
+                            ? { app: selApp, form: selForm, params: selMeta.params || {}, onSelectCallBack: cb, selectMode: true, readOnly: true }
+                            : { mode: 'list', dbTable: table, onSelectCallBack: cb, selectMode: true, readOnly: true };
+                        // Условие отбора (`selection.where`) — фильтром журнала выбора.
+                        try {
+                            const w = (typeof this.resolveSelectionWhere === 'function') ? this.resolveSelectionWhere() : null;
+                            if (w && !selForm) {
+                                openParams.initialFilter = Object.entries(w).map(([field, value]) =>
+                                    ({ field, operator: '=', value, type: 'server' }));
+                            }
+                        } catch (e) {}
+                        const id = await window.MySpace.open('uniForm', openParams);
                         console.log('[TextBox.onSelectionStart] Opened uniForm instance:', id, 'for TextBox:', textBoxId);
                         const inst = (window.MySpace && typeof window.MySpace.getInstance === 'function') ? window.MySpace.getInstance(id) : null;
                     } catch (e) { console.error('[TextBox.onSelectionStart] ERROR opening uniForm for table:', table, e); }
@@ -10811,6 +12056,11 @@ class RadioButton extends UIObject {
             this.circle.style.alignItems = 'center';
             this.circle.style.justifyContent = 'center';
             this.circle.style.marginRight = '6px';
+            // Кружок — флекс-элемент рядом с подписью: при подписи в две строки флекс
+            // сжимал его по ширине, и кнопка становилась овалом (прогон 17.10.2026,
+            // «Saisonpreis bei Aufenthalt über Saisongrenzen»). Размер у него постоянный.
+            this.circle.style.flexShrink = '0';
+            this.circle.style.boxSizing = 'content-box';
 
             // The dot
             this.circleIcon = document.createElement('div');
@@ -11806,7 +13056,7 @@ async function deleteOrMarkRecord(tableName, recordId, onDone, force) {
     // Прямое удаление затребовано явно (Shift+Del) — не спрашиваем, каким
     // способом, но переспрашиваем сам факт: действие необратимо.
     if (force === 'direct') {
-        if (!canDirect) { showAlert(probe.markRefusal || __t('Direct deletion is not allowed for this object')); return; }
+        if (!canDirect) { showAlert(probe.directRefusal || probe.markRefusal || __t('Direct deletion is not allowed for this object')); return; }
         window.showConfirm(__t('Delete this record permanently? This cannot be undone.'), () => run('direct'));
         return;
     }
@@ -12077,6 +13327,8 @@ class CheckBox extends FormInput {
             wrapper.style.position = 'relative';
             wrapper.style.width = '13px';
             wrapper.style.height = '13px';
+            // Во флекс-строке с длинной подписью не сжимается (см. кружок RadioButton).
+            wrapper.style.flexShrink = '0';
             // Отступ справа нужен только при наличии текста-подписи. В ячейке таблицы
             // (без подписи) он создаёт лишнее пустое место и мешает центрированию.
             const _cbHasLabel = ((this.label && this.label.length) || (this.caption && this.caption.length));
@@ -12869,16 +14121,73 @@ class Table extends UIObject {
             const activeIdx = this._activeRowIndex;
             if (activeIdx < 0) return true;
             const rows = this.data_getRows(this.dataKey);
-            if (Array.isArray(rows) && activeIdx < rows.length) {
-                rows.splice(activeIdx, 1);
+            if (!Array.isArray(rows) || activeIdx >= rows.length) return true;
+            const removeOwn = () => {
+                const removed = rows.splice(activeIdx, 1)[0];
                 this._activeRowIndex = -1;
                 this.data_updateValue(this.dataKey, rows);
                 try { if (typeof this._invokeRenderBodyRows === 'function') this._invokeRenderBodyRows(); } catch (_) {}
                 try { if (this.appForm && typeof this.appForm.setModified === 'function') this.appForm.setModified(true); } catch (_) {}
-            }
+                // Событие таблицы «строку удалили» (`events.onRowDeleted` в лейауте):
+                // удаление — такое же изменение табличной части, как правка ячейки,
+                // но колоночного `onChange` у него нет. Счёт по нему предлагает
+                // перезаполниться, когда из «Buchungen» убрали бронь.
+                try { if (typeof this.onRowDeleted === 'function') this.onRowDeleted(removed); } catch (e) { console.error('[Table] onRowDeleted:', e); }
+            };
+            // ПОДЧИНЁННЫЕ СТРОКИ (`masterFor`): гости и услуги номера брони. Раньше они
+            // оставались в форме невидимыми и молча пропадали при сохранении —
+            // человек, хотевший сменить номер, терял гостей без единого слова
+            // (прогон 17.10.2026, Q4; решение владельца 19.10.2026: спросить и удалить
+            // вместе). Сменить номер — значит поправить его в самой строке.
+            const dependents = this._dependentRowsOf(rows[activeIdx]);
+            if (!dependents.total) { removeOwn(); return true; }
+            const parts = dependents.list.map(d => (d.caption ? d.caption + ': ' : '') + d.rows.length).join(', ');
+            const text = __t('Together with this row its dependent rows will be deleted') + ' (' + parts + '). ' + __t('Continue?');
+            const run = () => {
+                for (const d of dependents.list) {
+                    const arr = d.table.data_getRows(d.table.dataKey);
+                    if (!Array.isArray(arr)) continue;
+                    for (let i = arr.length - 1; i >= 0; i--) if (d.rows.indexOf(arr[i]) !== -1) arr.splice(i, 1);
+                    try { d.table.data_updateValue(d.table.dataKey, arr); } catch (_) {}
+                    try { if (typeof d.table._invokeRenderBodyRows === 'function') d.table._invokeRenderBodyRows(); } catch (_) {}
+                }
+                removeOwn();
+            };
+            window.showConfirm(text, run);
             return true;
         }
         return false;
+    }
+
+    /**
+     * Строки таблиц-деталей (`masterFor`), ссылающиеся на строку этой таблицы.
+     * Подпись таблицы — заголовок её группы на форме («Gäste», «Leistungen»).
+     * @returns {{ total: number, list: Array<{ table, caption, rows }> }}
+     */
+    _dependentRowsOf(row) {
+        const out = { total: 0, list: [] };
+        const link = this._masterLink;
+        const form = this.appForm;
+        if (!link || !row || !link.detailField || !form || !form.controlsMap) return out;
+        const key = row[link.masterField || 'UID'];
+        if (key === undefined || key === null || key === '') return out;
+        for (const name of link.targets || []) {
+            const t = form.controlsMap[name];
+            if (!t || typeof t.data_getRows !== 'function') continue;
+            const all = t.data_getRows(t.dataKey);
+            if (!Array.isArray(all)) continue;
+            const mine = all.filter(r => r && String(r[link.detailField]) === String(key));
+            if (!mine.length) continue;
+            let caption = '';
+            try {
+                const g = t.element && t.element.closest('fieldset');
+                const lg = g && g.querySelector(':scope > legend');
+                caption = lg ? String(lg.textContent || '').trim() : '';
+            } catch (e) { caption = ''; }
+            out.list.push({ table: t, caption, rows: mine });
+            out.total += mine.length;
+        }
+        return out;
     }
 
     // ── Текущая строка как СВОЙСТВО таблицы ────────────────────────────────────────
@@ -13832,6 +15141,9 @@ class Table extends UIObject {
 
         const cellItem = Object.assign({}, col);
         cellItem.data = cellKey;
+        // Строка — для условия отбора списка выбора (`selection.where` с `{поле}`
+        // строки, см. DataForm._resolveSelectionWhere).
+        cellItem.__row = row || null;
         // renderItem регистрирует контрол в controlsMap по item.name || item.data.
         // Серверные колонки (relatedList и др.) несут name поля модели ('number',
         // 'date', ...) — без подмены ячейка вытесняет из controlsMap одноимённый
@@ -14200,9 +15512,21 @@ class Table extends UIObject {
                     img.style.flex = '0 0 auto';
                     if (!col.iconOnly) img.style.marginRight = '4px';
                     // Значок узнают не с первого дня — подсказка при наведении.
+                    // `iconTitleField` — подсказка ИЗ СТРОКИ: у колонки
+                    // оповещений название уровня человек и так видит по цвету, а
+                    // знать ему надо, ЧТО именно не в порядке, и этот текст у
+                    // каждой строки свой. Статичная `iconTitles` остаётся
+                    // запасным вариантом (колонка состояния).
                     try {
-                        const titles = col.iconTitles || null;
-                        const t = titles && titles[key];
+                        let t = null;
+                        if (col.iconTitleField && row
+                            && Object.prototype.hasOwnProperty.call(row, col.iconTitleField)) {
+                            t = row[col.iconTitleField] || null;
+                        }
+                        if (!t) {
+                            const titles = col.iconTitles || null;
+                            t = titles ? titles[key] : null;
+                        }
                         if (t) img.title = (typeof t === 'string') ? t : (t.caption || t.text || '');
                     } catch (e) {}
                     cellContainer.insertBefore(img, cellContainer.firstChild);
@@ -14994,6 +16318,11 @@ class Table extends UIObject {
                     // он принимает за неё, открывает настройки фильтров).
                     { action: 'listRefresh',  caption: __t('Refresh'),  icon: '/apps/general_icons/resources/public/16x16/refresh.png', dynamicOnly: true },
                     { action: 'listSettings', caption: __t('Settings'), icon: '/apps/general_icons/resources/public/16x16/settings.png' },
+                    // «Провести» выделенное — у ЖУРНАЛА ДОКУМЕНТОВ и у ПОДЧИНЁННОГО списка
+                    // документов (вкладка «Zahlungen» брони). Рождается скрытой: журнал ли
+                    // это, таблица узнаёт с первыми данными (`_syncDocumentButtons`).
+                    // У списка одного вида команда стоит на его форме (`postMany`).
+                    { action: 'recordPost',   caption: __t('Post selected'), icon: '/apps/general_icons/resources/public/16x16/post.png', dynamicOnly: true, startHidden: true },
                     { action: 'recordDelete', caption: __t('Delete'),   icon: '/apps/general_icons/resources/public/16x16/delete.png' },
                     // ── Выделение: три кнопки, и они ОБЯЗАТЕЛЬНЫ у любой таблицы
                     // с множественным выбором. Выделение мышью с Ctrl умеет не
@@ -15018,6 +16347,7 @@ class Table extends UIObject {
                     if (this.locked && (btnDef.action === 'recordAdd' || btnDef.action === 'recordDelete')) continue;
                     const btn = new Button(toolbarContainer, { caption: btnDef.caption, tooltip: btnDef.caption, icon: btnDef.icon, showIcon: !!btnDef.icon, showText: false });
                     btn.Draw(toolbarContainer);
+                    if (btnDef.startHidden && btn.element) btn.element.style.display = 'none';
                     const action = btnDef.action;
                     const self = this;
                     // Кнопку запоминаем: при запирании уже отрисованной таблицы
@@ -15272,13 +16602,21 @@ class Table extends UIObject {
                     const FLOOR_ROWS = 3;
                     const floorPx = chrome + Math.min(FLOOR_ROWS, this.declaredRows || FLOOR_ROWS) * this.rowHeight + 4;
                     if (this.declaredRows && this.declaredRows > 0) {
-                        // ОБЪЯВЛЕНО — СТОЛЬКО И ПОКАЗЫВАЕМ, ПОКА ЕСТЬ МЕСТО.
-                        // Не растёт (иначе таблица с тремя строками данных
-                        // занимает пол-экрана), но УСТУПАЕТ до пола, когда экран
+                        // ОБЪЯВЛЕНО — СТОЛЬКО ПРОСИТ, И УСТУПАЕТ до пола, когда экран
                         // маленький: на ноутбуке 725×585 верхняя таблица держала
                         // все восемь строк, нижняя лежала на полу, и форма всё
                         // равно прокручивалась.
-                        w.style.flex = '0 1 auto';
+                        //
+                        // РАСТЁТ ли — решает, есть ли на форме ГЛАВНАЯ таблица (без
+                        // объявления, 15.10.2026). Есть — свободное место её, а эта
+                        // держит своё (иначе таблица с тремя строками данных
+                        // занимает пол-экрана рядом с обрезанной главной). Нет —
+                        // свободное место развёрнутого окна делят объявленные, в
+                        // доле объявленного: восемь строк брони и четырнадцать
+                        // «Проверки документов» больше не стоят посреди пустоты.
+                        const grow = !Table._formHasMainTable(w);
+                        w.style.flex = grow ? (this.declaredRows + ' 1 auto') : '0 1 auto';
+                        if (grow) Table._growChain(w);
                         w.style.height = (chrome + this.declaredRows * this.rowHeight + 4) + 'px';
                         w.style.minHeight = floorPx + 'px';
                         bodyContainer.style.minHeight = (Math.min(FLOOR_ROWS, this.declaredRows) * this.rowHeight) + 'px';
@@ -15291,6 +16629,7 @@ class Table extends UIObject {
                         // осталось» — и нехватка ложится на того, кто просил много.
                         w.style.flex = '1 1 0';
                         w.style.height = 'auto';
+                        Table._growChain(w);
                         w.style.minHeight = floorPx + 'px';
                         bodyContainer.style.minHeight = (FLOOR_ROWS * this.rowHeight) + 'px';
                     }
@@ -15306,22 +16645,57 @@ class Table extends UIObject {
             });
             // Also adjust on window resize and once now
             try { window.addEventListener('resize', adjustHeaderForScrollbar); } catch (e) {}
+            // И КАЖДЫЙ РАЗ, когда меняется размер самого тела. Полоса прокрутки
+            // появляется не только при изменении окна: форма пересчитывает высоты
+            // таблиц уже ПОСЛЕ отрисовки (`reapplyTableHeights` — по окончании загрузки
+            // списков на соседних вкладках), и тело получает полосу без единого
+            // события `resize`. Шапка оставалась с резервом, снятым до этого (2 px
+            // вместо 17), и её колонки съезжали вправо относительно строк (бронь со
+            // строками гостей и услуг, 21.10.2026). Появление полосы меняет ширину
+            // содержимого тела — это и ловит наблюдатель.
+            try {
+                if (typeof ResizeObserver === 'function') {
+                    // Своего destroy у таблицы нет: наблюдатель снимает себя сам, когда
+                    // тело ушло из документа (окно закрыто).
+                    this._headerScrollbarRO = new ResizeObserver(() => {
+                        if (!bodyContainer.isConnected) { try { this._headerScrollbarRO.disconnect(); } catch (e) {} return; }
+                        adjustHeaderForScrollbar();
+                    });
+                    this._headerScrollbarRO.observe(bodyContainer);
+                }
+            } catch (e) {}
             try { 
                 // Call after layout to ensure scrollbar presence is measured correctly
+                // Первое применение высоты таблицей заказывает пересчёт ВСЕЙ формы:
+                // граница высоты вкладок могла быть снята раньше, по таблице ещё без
+                // высоты (у счёта — 1701px при окне 601, 15.10.2026).
+                const relayoutForm = () => {
+                    try {
+                        const formEl = wrapper.closest && wrapper.closest('.ui-form');
+                        const form = formEl && formEl._formInstance;
+                        if (form && typeof form.scheduleRelayout === 'function') form.scheduleRelayout();
+                    } catch (e) {}
+                };
                 if (window.requestAnimationFrame) {
                     window.requestAnimationFrame(() => {
                         adjustHeaderForScrollbar();
                         this._applyDeclaredHeight();
+                        relayoutForm();
                     });
                 }
                 setTimeout(() => {
                     adjustHeaderForScrollbar();
                     this._applyDeclaredHeight();
+                    relayoutForm();
                 }, 0);
             } catch (e) {}
 
             // Save references
             this.element = wrapper;
+            // Обратная ссылка: соседние таблицы формы спрашивают, есть ли среди них
+            // главная (_formHasMainTable), — по DOM, потому что порядок их отрисовки
+            // не определён.
+            wrapper._mosTable = this;
             this.headerContainer = headerContainer;
             this.bodyContainer = bodyContainer;
             this.tableElement = bodyTable;
@@ -15450,7 +16824,8 @@ class Table extends UIObject {
 // клик по пустой ячейке — новая бронь с этой даты как датой заезда.
 //
 // Данные тянет сам через window.callServer(serverScript, loadFn, { hotelId, from, to })
-// → { hotels:[{UID,name}], hotelId, rooms:[{UID,number}], events:[...], from, to, orientation }.
+// → { hotels:[{UID,name}], hotelId, rooms:[{UID,number,name}], events:[...], from, to, orientation }.
+// Подпись ресурса — `name` (представление), при его отсутствии `number`.
 // Выбор/открытие записи — тем же путём, что DynamicTable.onSelectOrOpen.
 class Calendar extends UIObject {
     constructor(parentElement = null, properties = {}) {
@@ -15517,7 +16892,25 @@ class Calendar extends UIObject {
     }
     _addDays(d, n) { const x = new Date(d.getTime()); x.setDate(x.getDate() + n); return x; }
     _dayDiff(a, b) { return Math.round((this._parse(b) - this._parse(a)) / 86400000); }
-    _todayYmd() { const t = new Date(); return this._ymd(new Date(t.getFullYear(), t.getMonth(), t.getDate())); }
+    /**
+     * «Сегодня» — по часам СЕРВЕРА (правило владельца 15.10.2026). Календарь
+     * подсвечивал и перематывал к дате браузера, хотя сервер жил уже 20.10
+     * (прогон 17.10.2026, D2). Дату спрашивает `_fetchServerToday` до первой
+     * загрузки и при «Heute»; часы браузера — только если сервер не ответил, и
+     * тогда календарь всё равно пуст: данных без сервера нет.
+     */
+    _todayYmd() {
+        if (this._serverToday) return this._serverToday;
+        const t = new Date(); return this._ymd(new Date(t.getFullYear(), t.getMonth(), t.getDate()));
+    }
+    async _fetchServerToday() {
+        try {
+            const r = await fetch('/server-now', { cache: 'no-store' });
+            if (!r.ok) return;
+            const now = await r.json();
+            if (now && /^\d{4}-\d{2}-\d{2}$/.test(now.ymd || '')) this._serverToday = now.ymd;
+        } catch (_) { /* остаётся прежнее значение */ }
+    }
 
     // ── Построение DOM ───────────────────────────────────────────────────────
     Draw(container) {
@@ -15556,15 +16949,28 @@ class Calendar extends UIObject {
 
             // Авто-расширение диапазона дат при скролле к краям (вместо кнопок ←/→).
             this._scrollEl.addEventListener('scroll', () => this._onScroll());
+
+            // Настройки сохранены (форма настроек) — ориентация могла смениться.
+            // Берётся из ответа сервера заново, как при первом открытии; без этого
+            // календарь поворачивался только после F5 (прогон 17.10.2026, D8).
+            this._onSettingsChanged = () => {
+                this._orientationInitialized = false;
+                this._forceToday = true;
+                this._load({});
+            };
+            try { window.addEventListener('app-settings-changed', this._onSettingsChanged); } catch (e) {}
         }
         if (container && this.element && !this.element.parentElement) {
             try { container.appendChild(this.element); } catch (e) {}
         }
-        // Начальное окно: сегодня ± pastDays/futureDays.
-        const today = this._todayYmd();
-        this.fromDate = this._ymd(this._addDays(this._parse(today), -this.pastDays));
-        this.toDate = this._ymd(this._addDays(this._parse(today), this.futureDays));
-        this._initialLoadPromise = this._load({});
+        // Начальное окно: сегодня (по серверу) ± pastDays/futureDays.
+        this._initialLoadPromise = (async () => {
+            await this._fetchServerToday();
+            const today = this._todayYmd();
+            this.fromDate = this._ymd(this._addDays(this._parse(today), -this.pastDays));
+            this.toDate = this._ymd(this._addDays(this._parse(today), this.futureDays));
+            await this._load({});
+        })();
         return this.element;
     }
 
@@ -15783,7 +17189,7 @@ class Calendar extends UIObject {
             } else {
                 c.classList.add('ui-calendar-roomhead');
                 const room = rooms[i];
-                c.textContent = room.number || room.name || room.UID;
+                c.textContent = room.name || room.number || room.UID;
                 c.title = c.textContent;
             }
             header.appendChild(c);
@@ -15942,7 +17348,7 @@ class Calendar extends UIObject {
             if (horizontal) {
                 c.classList.add('ui-calendar-roomlabel');
                 const room = rooms[i];
-                c.textContent = room.number || room.name || room.UID;
+                c.textContent = room.name || room.number || room.UID;
                 c.title = c.textContent;
             } else {
                 c.classList.add('ui-calendar-datelabel');
@@ -16141,7 +17547,8 @@ class Calendar extends UIObject {
         deleteOrMarkRecord(self.tableName, id, () => { self._selectedId = null; self._load({}); });
     }
 
-    _goToday() {
+    async _goToday() {
+        await this._fetchServerToday();
         const today = this._todayYmd();
         this.fromDate = this._ymd(this._addDays(this._parse(today), -this.pastDays));
         this.toDate = this._ymd(this._addDays(this._parse(today), this.futureDays));
@@ -16161,6 +17568,8 @@ class Calendar extends UIObject {
     }
 
     destroy() {
+        try { if (this._onSettingsChanged) window.removeEventListener('app-settings-changed', this._onSettingsChanged); } catch (e) {}
+        this._onSettingsChanged = null;
         try { if (this._resizeObserver && typeof this._resizeObserver.disconnect === 'function') this._resizeObserver.disconnect(); } catch (e) {}
         this._resizeObserver = null;
         try { if (this._relayoutTimer) { clearTimeout(this._relayoutTimer); this._relayoutTimer = null; } } catch (e) {}
@@ -16485,6 +17894,28 @@ class MessageFeed extends UIObject {
         this._buildComposer();
 
         this._scrollEl.addEventListener('scroll', () => this._onScroll());
+
+        // ПРИЛИПАНИЕ К НИЗУ. Одной прокрутки после загрузки мало (владелец
+        // 14.10.2026: «при открытии поле сообщений не перематывается на самый
+        // конец»): высота ленты растёт и ПОСЛЕ неё — догружаются картинки
+        // вложений, окно доходит до своего размера, перерисовываются переводы.
+        // Пока человек сам не ушёл вверх, лента держится за последнее сообщение;
+        // ушёл — его место не трогаем.
+        this._stickBottom = false;
+        const stick = () => {
+            if (this._stickBottom && this._scrollEl) this._scrollEl.scrollTop = this._scrollEl.scrollHeight;
+        };
+        try { this._scrollEl.addEventListener('load', stick, true); } catch (e) {}   // load не всплывает — ловим на погружении
+        try {
+            if (typeof ResizeObserver !== 'undefined') {
+                this._stickResize = new ResizeObserver(stick);
+                this._stickResize.observe(this._scrollEl);
+            }
+            if (typeof MutationObserver !== 'undefined') {
+                this._stickMutation = new MutationObserver(stick);
+                this._stickMutation.observe(this._scrollEl, { childList: true, subtree: true, characterData: true });
+            }
+        } catch (e) {}
 
         host.appendChild(this.element);
         this._renderEmpty(__t('msgfeed_pick_chat'));
@@ -17127,12 +18558,16 @@ class MessageFeed extends UIObject {
     scrollToBottom(markRead) {
         if (!this._scrollEl) return;
         this._scrollEl.scrollTop = this._scrollEl.scrollHeight;
+        this._stickBottom = true;
         this._pendingNew = 0;
         this._updateJump();
         if (markRead) this._reportRead();
     }
 
     _onScroll() {
+        // Прокрутка сама по себе событие и у программной прокрутки вниз, и у
+        // руки человека; «держаться низа» значит ровно «сейчас внизу».
+        this._stickBottom = this.isAtBottom();
         if (this._scrollEl.scrollTop < 40 && this._hasMore && !this._loading) this.loadOlder();
         if (this.isAtBottom() && this._pendingNew) { this._pendingNew = 0; this._updateJump(); this._reportRead(); }
     }
@@ -17487,6 +18922,29 @@ class Tabs extends UIObject {
         try { this._showTab(idx); } catch (e) {}
     }
 
+    /**
+     * Нижняя граница высоты вкладок — по САМОЙ ВЫСОКОЙ вкладке, чтобы окно, подогнанное
+     * по содержимому, не прыгало при переключении. Меряется ЕСТЕСТВЕННАЯ высота — без
+     * роста таблиц (`ui-measuring-natural`, style.css), и ПЕРЕСЧИТЫВАЕТСЯ при каждом
+     * изменении размера окна (Form.reapplyTableHeights): высота зависит от ширины
+     * (переносы), и граница, снятая однажды в узком окне (754px у брони), оставляла
+     * прокрутку в развёрнутом (15.10.2026).
+     */
+    lockHeight() {
+        const content = this._lockContent;
+        if (!content || this.fillHeight) return;
+        const host = content.closest('.ui-form') || content;
+        try {
+            host.classList.add('ui-measuring-natural');
+            content.style.minHeight = '';
+            const maxH = Math.max(...this._panes.map(p => p.pane.offsetHeight || 0));
+            if (maxH > 0) content.style.minHeight = maxH + 'px';
+        } catch (e) {
+        } finally {
+            host.classList.remove('ui-measuring-natural');
+        }
+    }
+
     _showTab(idx) {
         this._panes.forEach((p, i) => {
             p.btn.classList.toggle('active', i === idx);
@@ -17498,6 +18956,15 @@ class Tabs extends UIObject {
             p.pane.classList.toggle('ui-tabs-pane-hidden', i !== idx);
             if (i === idx) {
                 p.pane.style.position = 'relative';
+                // Показанная вкладка пересчитывает высоты своих таблиц: пока она была
+                // скрыта, их «обвязка» мерилась вне потока (Form.reapplyTableHeights).
+                try {
+                    const form = this.appForm;
+                    if (form && typeof form.reapplyTableHeights === 'function') {
+                        const pane = p.pane;
+                        requestAnimationFrame(() => form.reapplyTableHeights(pane));
+                    }
+                } catch (e) {}
                 // '' (наследуем), а НЕ 'visible': literal 'visible' у потомка
                 // переопределяет visibility:hidden родительского окна (гейт показа
                 // в DataForm.Draw) → активная вкладка проступает сквозь ещё скрытое
@@ -17519,6 +18986,8 @@ class Tabs extends UIObject {
             const wrapper = document.createElement('div');
             wrapper.classList.add('ui-tabs');
             if (this.fillHeight) wrapper.classList.add('ui-tabs-fill');
+            // Обратная ссылка для Form.reapplyTableHeights (пересчёт границы высоты).
+            wrapper._mosTabs = this;
 
             const header = document.createElement('div');
             header.classList.add('ui-tabs-header');
@@ -17587,11 +19056,13 @@ class Tabs extends UIObject {
                     // всю высоту, а зафиксированный minHeight по высокому контенту (календарь)
                     // распёр бы форму выше окна.
                     if (!this.fillHeight) {
+                        this._lockContent = content;
+                        // Через форму: она сперва применит высоты таблиц, потом снимет
+                        // границу (Form.reapplyTableHeights).
                         requestAnimationFrame(() => {
-                            try {
-                                const maxH = Math.max(...this._panes.map(p => p.pane.offsetHeight || 0));
-                                if (maxH > 0) content.style.minHeight = maxH + 'px';
-                            } catch (e) {}
+                            const form = this.appForm;
+                            if (form && typeof form.reapplyTableHeights === 'function') form.reapplyTableHeights();
+                            else this.lockHeight();
                         });
                     }
                 };
@@ -17796,6 +19267,24 @@ class InfoLine extends UIObject {
         if (this._textEl) this._textEl.textContent = this.caption;
     }
 
+    /**
+     * Текст пометки приходит ДАННЫМИ, если элемент объявил `data`.
+     *
+     * Статичной подписи хватает, пока пометка говорит одно и то же («Rechnung
+     * ungültig»). Но пометка с ЧИСЛОМ («выставлено больше, чем заказано: 44,10 €»)
+     * статичной быть не может, а собирать её в клиентском скрипте формы значило
+     * бы завести второй текст рядом с серверным — и однажды они разойдутся.
+     * Поэтому значение реквизита становится подписью: контрол, которому дали
+     * значение, обязан его показать.
+     */
+    setValue(v) {
+        this.setCaption((v === null || v === undefined) ? '' : String(v));
+    }
+
+    getValue() {
+        return this.caption;
+    }
+
     Draw(container) {
         const el = document.createElement('div');
         el.className = 'ui-related-links ui-info-line';
@@ -17872,13 +19361,31 @@ class PostingStatusBlock extends UIObject {
         const unpost = this.action === 'unpost';
         const running = this.phase === 'posting';
 
-        if (this.phase) {
+        // РЕЖИМ `onSave`: о проведении пользователь не знает, и строка «документ в
+        // очереди» вернула бы ему слово, которое из интерфейса убрали, — причём на
+        // каждое сохранение. А вот НЕУДАЧУ прятать нельзя: пользователь, которому
+        // спрятали кнопку, иначе никак не узнает, что документ не в порядке (ТЗ
+        // проведения §5.2). Поэтому в этом режиме блок молчит про очередь и
+        // говорит только про ошибку.
+        if (this.props.errorsOnly && !this.reason) {
+            this._queueRow.style.display = 'none';
+            this._errorRow.style.display = 'none';
+            this.element.style.display = 'none';
+            return;
+        }
+
+        if (this.phase && !this.props.errorsOnly) {
             this._queueRow.style.display = '';
+            // Попытка уже не удалась (красная строка ниже), а строка очереди осталась
+            // ради повтора: «Der Beleg steht in der Warteschlange zur Verbuchung»
+            // рядом с «konnte nicht verbucht werden» читалось как противоречие
+            // (прогон 17.10.2026, F2). Тогда строка очереди говорит, что будет дальше.
             this._queueText.textContent = running
                 ? (unpost ? __t('The posting is being undone right now')
                           : __t('The document is being posted right now'))
+                : (this.reason ? __t('The queue will retry automatically')
                 : (unpost ? __t('The document is queued for unposting')
-                          : __t('The document is queued for posting'));
+                          : __t('The document is queued for posting')));
             // Взятую в работу задачу снять нельзя: транзакция проведения либо
             // ляжет целиком, либо откатится сама, и выдернуть её на полпути
             // было бы обманом — кнопку гасим, а не прячем, чтобы не прыгала.
@@ -17905,7 +19412,8 @@ class PostingStatusBlock extends UIObject {
 
         // Пустой блок не занимает места и не рисует рамку: у документа, с которым
         // всё в порядке, в шапке не должно быть ничего.
-        this.element.style.display = (this.phase || this.reason) ? '' : 'none';
+        const showQueue = this.phase && !this.props.errorsOnly;
+        this.element.style.display = (showQueue || this.reason) ? '' : 'none';
     }
 
     Draw(container) {
@@ -17971,6 +19479,301 @@ class PostingStatusBlock extends UIObject {
     }
 }
 
+/**
+ * ПАНЕЛЬ ОПОВЕЩЕНИЙ ДОКУМЕНТА (ТЗ «Оповещения по документам», §10).
+ *
+ * Часть РАМКИ формы, а не элемент лейаута: ядро создаёт её само, сразу под
+ * командной панелью, и лейаут о ней не знает и не меняется. Обёртка над лейаутом
+ * сломала бы вёрстку форм с таблицами во всю ширину, вкладками и шахматкой, а
+ * объявление в каждом лейауте означало бы двадцать раз списать один и тот же
+ * элемент — и однажды найти документ, где его забыли.
+ *
+ *   ┌────────────────────────────────────────────────────────────┐
+ *   │ ❗ Hinweise (2)                                          ▲ │ ← кнопка
+ *   │  ✖ Mehr berechnet als bestellt: 67,00 €      Rechnung →    │
+ *   │  ⚠ Kein Preis: Frühstück                     Öffnen   →    │
+ *   └────────────────────────────────────────────────────────────┘
+ *
+ * РИСУЕТСЯ ВСЕГДА. Нет оповещений — панель свёрнута и значок на кнопке
+ * нейтральный; есть — развёрнута, а значок несёт цвет самого важного из них.
+ * Поэтому свёрнутая панель всё равно отвечает на вопрос «есть ли что смотреть»,
+ * и человеку не нужно помнить, разворачивал он её или нет.
+ *
+ * Свёрнутость, изменённая РУКАМИ, запоминается (`MySpace.state`): это состояние
+ * интерфейса, а не настройка — у него нет ни подписи, ни значения по умолчанию,
+ * которое кто-то выбирал.
+ */
+class DocumentAlertsPanel extends UIObject {
+    /** Важность → имя тона палитры ядра. Те же цвета, что у строк журнала. */
+    static get TONES() { return { error: 'red', warning: 'yellow', info: 'blue' }; }
+
+    constructor(form) {
+        super();
+        this.form = form || null;
+        this.alerts = [];
+        // null — пользователь ещё не решал; тогда разворачиваем по наличию строк.
+        this.collapsedByUser = null;
+    }
+
+    setForm(form) { this.form = form; return this; }
+
+    /** Ключ памяти свёрнутости: та же адресация, что у геометрии окна. */
+    _stateKey() {
+        const base = (this.form && this.form.stateKey) || null;
+        return base ? ('alerts.' + base) : null;
+    }
+
+    _readRemembered() {
+        const key = this._stateKey();
+        if (!key) return null;
+        try {
+            const v = window.MySpace.state.get('ui', key);
+            return (v === true || v === false) ? v : null;
+        } catch (e) { return null; }
+    }
+
+    _remember(collapsed) {
+        const key = this._stateKey();
+        if (!key) return;
+        try { window.MySpace.state.set('ui', key, !!collapsed); } catch (e) {}
+    }
+
+    /** Новый набор оповещений (первая загрузка и живое обновление). */
+    setAlerts(list) {
+        this.alerts = Array.isArray(list) ? list : [];
+        if (this.collapsedByUser === null) this.collapsedByUser = this._readRemembered();
+        this._render();
+        return this;
+    }
+
+    /** Свёрнута ли панель сейчас. */
+    isCollapsed() {
+        if (this.collapsedByUser !== null) return this.collapsedByUser;
+        return this.alerts.length === 0;
+    }
+
+    toggle() {
+        this.collapsedByUser = !this.isCollapsed();
+        this._remember(this.collapsedByUser);
+        this._render();
+    }
+
+    /** Важность самого важного оповещения — она же цвет значка на кнопке. */
+    _topSeverity() {
+        const rank = { info: 1, warning: 2, error: 3 };
+        let top = null;
+        for (const a of this.alerts) {
+            if (!a || !a.severity) continue;
+            if (!top || (rank[a.severity] || 0) > (rank[top] || 0)) top = a.severity;
+        }
+        return top;
+    }
+
+    _iconFor(severity) {
+        const base = '/apps/general_icons/resources/public/16x16/';
+        if (severity === 'error') return base + 'alert_error.png';
+        if (severity === 'warning') return base + 'alert_warning.png';
+        if (severity === 'info') return base + 'alert_info.png';
+        return base + 'alert_none.png';
+    }
+
+    _render() {
+        if (!this.element) return;
+        const collapsed = this.isCollapsed();
+        const top = this._topSeverity();
+        const empty = !this.alerts.length;
+
+        // Нет оповещений — нет и панели (владелец, 14.10.2026): заголовок без
+        // содержимого — раскрывашка, которой нечего раскрыть, и место под
+        // командной панелью у каждого благополучного документа.
+        this.element.classList.toggle('ui-alerts-empty', empty);
+        if (empty) { this._rowsEl.innerHTML = ''; return; }
+
+        // Шапка: ▸/▾ + значок самого важного уровня + «Оповещения (N)», а в
+        // свёрнутом виде — начало первого оповещения.
+        if (this._toggleEl) this._toggleEl.textContent = collapsed ? '\u25B6' : '\u25BC';
+        if (this._iconEl) { try { MySpace.icon.apply(this._iconEl, this._iconFor(top), 16); } catch (e) {} }
+        if (this._captionEl) this._captionEl.textContent = __t('Notices') + ' (' + this.alerts.length + ')';
+        if (this._summaryEl) {
+            const first = this.alerts[0];
+            this._summaryEl.textContent = (collapsed && first) ? (first.text || '') : '';
+        }
+        if (this._headEl) {
+            this._headEl.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+            this._headEl.title = collapsed ? __t('alerts_expand') : __t('alerts_collapse');
+        }
+
+        // Строки
+        this._rowsEl.innerHTML = '';
+        this._rowsEl.style.display = collapsed ? 'none' : '';
+        if (!collapsed) {
+            for (const a of this.alerts) this._rowsEl.appendChild(this._rowElement(a));
+        }
+        // Цвет шапки — ИМЯ ПАЛИТРЫ ядра (как `rowTones`), а не код цвета.
+        mosApplyTone(this._headEl, DocumentAlertsPanel.TONES[top] || null);
+    }
+
+    /**
+     * Ведёт ли действие оповещения в ЭТУ ЖЕ запись.
+     *
+     * Правило не знает, где его прочтут: «Открыть счёт» нужно в журнале, в
+     * «Проверке документов» и в пуше, а на форме самого счёта ссылка открывала
+     * уже открытое окно — нажатие ничего не делало (живой прогон 14.10.2026).
+     * Решает потребитель, а не правило: правило одно на три места.
+     */
+    _isSelf(action) {
+        if (!action || action.kind !== 'openRecord' || !this.form) return false;
+        const p = action.params || {};
+        const table = p.table || action.documentTable;
+        const uid = p.uid || action.documentUID;
+        const f = this.form;
+        const myTable = f.dbTable || f.tableName || null;
+        const myUid = (f._dataMap && f._dataMap['UID'] && f._dataMap['UID'].value) || null;
+        return !!(table && uid && myTable && myUid && table === myTable && String(uid) === String(myUid));
+    }
+
+    _rowElement(alert) {
+        const row = document.createElement('div');
+        row.className = 'ui-related-links ui-alert-row';
+        mosApplyTone(row, alert.tone || null);
+        try { row.appendChild(MySpace.icon.img(alert.icon || this._iconFor(alert.severity), 16)); } catch (e) {}
+
+        const text = document.createElement('span');
+        text.className = 'ui-related-links-caption ui-alert-text';
+        text.textContent = alert.text || '';
+        row.appendChild(text);
+
+        // Гиперссылка действия — тем же классом, что ссылки на связанные
+        // документы: одно и то же («нажми, и программа тебя туда приведёт»)
+        // обязано выглядеть одинаково.
+        if (alert.action && alert.action.kind && !this._isSelf(alert.action)) {
+            const link = document.createElement('span');
+            link.className = 'ui-related-link ui-alert-action';
+            link.textContent = alert.action.caption || __t('Open');
+            link.onclick = () => {
+                try { window.MySpace.alerts.run(alert.action); }
+                catch (e) { console.error('[alerts] действие не выполнено:', e); }
+            };
+            row.appendChild(link);
+        }
+        return row;
+    }
+
+    Draw(container) {
+        const box = document.createElement('div');
+        box.className = 'ui-alerts-panel ui-alerts-empty';
+        box._uiObject = this;
+
+        // Шапка — раскрывашка, а не `Button`: это заголовок группы, а не команда
+        // (владелец 14.10.2026 — кнопка «Оповещения» со стрелкой у дальнего края не
+        // читалась как «здесь список»). Вся полоса — место нажатия; с клавиатуры
+        // — Tab, затем Enter или пробел.
+        const head = document.createElement('div');
+        head.className = 'ui-related-links ui-alerts-head';
+        head.setAttribute('role', 'button');
+        head.tabIndex = 0;
+        head.onclick = () => this.toggle();
+        head.onkeydown = (e) => {
+            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); this.toggle(); }
+        };
+
+        const tgl = document.createElement('span');
+        tgl.className = 'ui-alerts-toggle';
+        head.appendChild(tgl);
+        this._toggleEl = tgl;
+
+        try {
+            this._iconEl = MySpace.icon.img(this._iconFor(null), 16);
+            head.appendChild(this._iconEl);
+        } catch (e) { this._iconEl = null; }
+
+        const cap = document.createElement('span');
+        cap.className = 'ui-alerts-caption';
+        head.appendChild(cap);
+        this._captionEl = cap;
+
+        const sum = document.createElement('span');
+        sum.className = 'ui-alerts-summary';
+        head.appendChild(sum);
+        this._summaryEl = sum;
+
+        box.appendChild(head);
+        this._headEl = head;
+
+        const rows = document.createElement('div');
+        rows.className = 'ui-alerts-rows';
+        rows.style.display = 'none';
+        box.appendChild(rows);
+        this._rowsEl = rows;
+
+        this.element = box;
+        const host = container || this.parentElement;
+        if (host && host.appendChild) host.appendChild(box);
+        this._render();
+        return box;
+    }
+}
+
+/**
+ * Есть ли рядом ГЛАВНАЯ таблица — без объявленной высоты (`visibleRows`)? Ей
+ * причитается всё свободное место, и объявленные тогда не растут. «Рядом» — на той
+ * же вкладке (или в содержимом окна, если вкладок нет): таблица на соседней вкладке
+ * места с этой не делит — у брони это список счетов на «Rechnungen», и он не давал
+ * расти таблицам «Allgemein». Ищем по обратной ссылке `_mosTable`.
+ */
+Table._formHasMainTable = function (wrapper) {
+    try {
+        const root = (wrapper && wrapper.closest
+            && (wrapper.closest('.ui-tabs-pane') || wrapper.closest('.ui-form-content'))) || null;
+        if (!root) return false;
+        for (const el of root.querySelectorAll('.ui-dynamictable')) {
+            const t = el._mosTable;
+            if (t && !(t.declaredRows > 0)) return true;
+        }
+    } catch (e) {}
+    return false;
+};
+
+/**
+ * ЦЕПОЧКА РОСТА (15.10.2026). Таблица может расти, только если растут все её
+ * предки до содержимого окна: иначе свободное место развёрнутого окна остаётся
+ * пустотой под формой, а таблица — своей высоты (бронь, «Проверка документов»).
+ * Раньше это умели только вкладки с `fillHeight`, и каждая форма должна была
+ * знать о флаге.
+ *
+ * Правило по направлению родителя: в КОЛОНКЕ ребёнок забирает свободное место по
+ * главной оси (`flex-grow`), в РЯДУ — растягивается по поперечной
+ * (`align-self: stretch`): ширину соседей в ряду рост таблицы трогать не должен.
+ * Нижнюю границу (`min-height`) не трогаем: группа не сжимается ниже своих полей,
+ * и в тесном окне прокручивается форма, а не налезают поля.
+ */
+Table._growChain = function (wrapper) {
+    try {
+        let child = wrapper;
+        let parent = wrapper ? wrapper.parentElement : null;
+        while (child && parent) {
+            const cs = window.getComputedStyle(parent);
+            if (String(cs.display).indexOf('flex') === -1) break;
+            if (String(cs.flexDirection).indexOf('column') === 0) {
+                if (child !== wrapper && !(parseFloat(child.style.flexGrow) > 0)) {
+                    child.style.flexGrow = '1';
+                    // Базис НОЛЬ, а не `auto`: группа — это <fieldset>, и его внутренний
+                    // анонимный блок растягивается за выросшим fieldset, только когда
+                    // высота того ОПРЕДЕЛЕНА. С `auto` группа росла, а таблица в ней
+                    // оставалась своей высоты (вкладка «Zusatz» брони). Ниже содержимого
+                    // группа всё равно не сожмётся — `min-height: auto` не тронут.
+                    child.style.flexBasis = '0px';
+                }
+            } else {
+                child.style.alignSelf = 'stretch';
+            }
+            if (parent.classList.contains('ui-form-content')) break;
+            child = parent;
+            parent = parent.parentElement;
+        }
+    } catch (e) {}
+};
+
 class DynamicTable extends Table {
     constructor(options = {}) {
         super(null, { columns: options.fields || options.columns || [], rowHeight: options.rowHeight, appForm: options.appForm, dataKey: options.dataKey || options.data || options.tableName, readOnly: options.readOnly !== false, locked: !!options.locked, showToolbar: options.showToolbar, hiddenButtons: options.hiddenButtons, initialFilter: options.initialFilter });
@@ -18021,6 +19824,15 @@ class DynamicTable extends Table {
         // Дополнительные наблюдаемые таблицы: SSE dataChanged по ним тоже рефрешит
         // эту таблицу (напр. relatedList следит и за таблицей-связкой).
         this.extraWatchTables = Array.isArray(options.extraWatchTables) ? options.extraWatchTables : null;
+        // ПОДЧИНЁННЫЙ СПИСОК на форме записи (`properties.owner`): платежи ЭТОЙ брони.
+        //   where — постоянный отбор (`{ bookingId: "{UID}" }`), его не снимают;
+        //   fill  — ИМЯ метода формы-владельца, который знает, чем заполнить новый
+        //           документ (касса не знает про бронь — бронь говорит сама).
+        // `documents` — какие виды журнала можно ДОБАВИТЬ отсюда.
+        this.owner = (options.owner && typeof options.owner === 'object') ? options.owner : null;
+        this.addableDocuments = Array.isArray(options.documents) ? options.documents : null;
+        // Виды журнала документов приходят с данными (`journal.documents`).
+        this.journal = null;
 
         // Minimal state needed for server interactions
         this.totalRows = 0;
@@ -18487,6 +20299,155 @@ class DynamicTable extends Table {
         } catch (e) {}
     }
 
+    /**
+     * Постоянный отбор подчинённого списка с подставленными значениями формы.
+     * `{поле}` — значение поля формы-владельца. ПУСТОЕ значение отбор НЕ снимает (в
+     * отличие от `selection.where`): список платежей брони без брони — пустой
+     * список, а не платежи всех броней.
+     */
+    _ownerWhere() {
+        const w = this.owner && this.owner.where;
+        if (!w || typeof w !== 'object') return null;
+        const out = {};
+        for (const [k, v] of Object.entries(w)) {
+            const m = (typeof v === 'string') ? /^\{(\w+)\}$/.exec(v) : null;
+            if (!m) { out[k] = v; continue; }
+            let val = null;
+            try { val = this.appForm && typeof this.appForm.getControlValue === 'function' ? this.appForm.getControlValue(m[1]) : null; } catch (e) {}
+            out[k] = (val === null || val === undefined) ? '' : val;
+        }
+        return out;
+    }
+
+    /** Текущая строка списка (из кэша данных) или null. */
+    _currentDataRow() {
+        const i = this._activeRowIndex;
+        if (typeof i !== 'number' || i < 0) return null;
+        const row = this.dataCache && this.dataCache[i];
+        return (row && row.loaded) ? row : null;
+    }
+
+    /**
+     * Кнопки панели у ЖУРНАЛА ДОКУМЕНТОВ и у ПОДЧИНЁННОГО списка. Обычный список
+     * отдаёт их форме (она знает свою таблицу); здесь таблица формы — другая
+     * (бронь), а у журнала её нет вовсе, и решать должна сама таблица:
+     *   «Добавить» — выбрать вид (если их несколько) и открыть новую форму,
+     *                заполненную методом формы-владельца;
+     *   «Открыть»  — форма документа СВОЕГО вида (строка журнала несёт `__table`);
+     *   «Удалить»  — пометка/удаление тем же механизмом ядра, в документе своего вида.
+     */
+    doToolbarAction(action) {
+        if (action === 'recordPost') { this._postSelected(); return true; }
+        if (this.owner || this.journal) {
+            if (action === 'recordAdd') { this._addDocument(); return true; }
+            if (action === 'recordDelete') {
+                const row = this._currentDataRow();
+                if (!row || !row.UID) {
+                    if (typeof showAlert === 'function') showAlert(__t('Please select a record to delete'));
+                    return true;
+                }
+                deleteOrMarkRecord(row.__table || this.tableName, row.UID);
+                return true;
+            }
+            if (action === 'recordOpen' && !this.journal) {
+                if (!this._currentDataRow()) {
+                    if (typeof showAlert === 'function') showAlert(__t('Please select a record'));
+                    return true;
+                }
+                this.openRecord(this._activeRowIndex);
+                return true;
+            }
+        }
+        return super.doToolbarAction(action);
+    }
+
+    /** Показать «Провести» у журнала документов и у подчинённого списка. */
+    _syncDocumentButtons() {
+        const btn = this._toolbarButtons && this._toolbarButtons.recordPost;
+        if (!btn || !btn.element) return;
+        const isSelect = !!(this.appForm && this.appForm.selectMode);
+        btn.element.style.display = (!isSelect && (this.journal || this.owner)) ? '' : 'none';
+    }
+
+    /**
+     * «Провести» выделенные строки (или текущую): та же ядровая команда, что у
+     * формы списка (`postMany`). Для журнала сервер сам раскладывает строки по
+     * видам документа — у каждого своя очередь и своё проведение.
+     */
+    async _postSelected() {
+        let uids = (typeof this.selectedIds === 'function') ? this.selectedIds('UID') : [];
+        if (!uids.length) {
+            const row = this._currentDataRow();
+            if (row && row.UID) uids = [row.UID];
+        }
+        if (!uids.length) {
+            if (typeof showAlert === 'function') showAlert(__t('Please select a record'));
+            return;
+        }
+        let res = null;
+        try {
+            res = await window.callServer('document.actions', 'postMany', { table: this.tableName, uids });
+        } catch (e) {
+            if (typeof showAlert === 'function') showAlert(__t('Error: ') + (e && e.message || e));
+            return;
+        }
+        if (res && res.error && typeof showAlert === 'function') showAlert(__t('Error: ') + res.error);
+        try { if (typeof this.clearSelection === 'function') this.clearSelection(); } catch (e) {}
+    }
+
+    /** «Добавить» журнала / подчинённого списка — см. doToolbarAction. */
+    async _addDocument() {
+        const form = this.appForm;
+        // Подчинённому документу нужна ЗАПИСАННАЯ запись-владелец: платёж ссылается на
+        // бронь, которой в базе ещё нет. Вкладку такого списка ядро и так прячет у
+        // новой записи (`visibleWhen: { saved: true }`); это — на случай, если
+        // список стоит без вкладки.
+        if (this.owner && form && form._isNew) {
+            if (typeof showAlert === 'function') showAlert(__t('Save the record first'));
+            return;
+        }
+        let kinds = (this.journal && Array.isArray(this.journal.documents))
+            ? this.journal.documents.slice()
+            : [{ table: this.tableName, caption: '' }];
+        if (Array.isArray(this.addableDocuments)) {
+            kinds = kinds.filter(k => this.addableDocuments.indexOf(k.table) !== -1);
+        }
+        if (!kinds.length) return;
+        let docTable = kinds[0].table;
+        if (kinds.length > 1) {
+            docTable = await new Promise(resolve => {
+                showChoice(__t('Which document should be created?'),
+                    kinds.map(k => ({ key: k.table, caption: k.caption || k.table, icon: k.icon || undefined }))
+                        .concat([{ key: '', caption: __t('Cancel') }]),
+                    (key) => resolve(key || ''));
+            });
+        }
+        if (!docTable) return;
+
+        // Чем заполнить новый документ — решает ФОРМА-ВЛАДЕЛЕЦ своим методом (по
+        // имени). Ответ становится `prefill` несохранённой формы: передумал и
+        // закрыл — в базе ничего не появилось.
+        let prefill = null;
+        if (this.owner && this.owner.fill && form && form._formApp && form._formName) {
+            const ownerUID = form._dataMap && form._dataMap['UID'] && form._dataMap['UID'].value;
+            let res = null;
+            try {
+                res = await callFormMethod(form._formApp, form._formName, this.owner.fill,
+                    { docTable, recordID: ownerUID });
+            } catch (e) {
+                if (typeof showAlert === 'function') showAlert(__t('Error: ') + (e && e.message || e));
+                return;
+            }
+            if (res && res.error) { if (typeof showAlert === 'function') showAlert(res.error); return; }
+            prefill = (res && res.prefill) || res || null;
+        }
+        if (window.MySpace && typeof window.MySpace.open === 'function') {
+            const params = { mode: 'record', tableName: docTable };
+            if (prefill && typeof prefill === 'object') params.prefill = prefill;
+            await window.MySpace.open('uniForm', params);
+        }
+    }
+
     // Open the row's record form. Used by double-click in normal mode AND by F2
     // in ANY mode (incl. select mode) — F2 always opens, never selects. Honours a
     // hidden recordOpen button (table where opening is disabled).
@@ -18603,6 +20564,32 @@ class DynamicTable extends Table {
             // зависимое состояние (кнопки и т.п.) из уже загруженных данных,
             // без второго RPC. Срабатывает и на первичной загрузке, и на SSE-refresh.
             try { if (typeof this.onDataRefreshed === 'function') this.onDataRefreshed(this); } catch (e) {}
+            // ПОДЧИНЁННЫЙ СПИСОК изменился (платёж брони сохранён, проведён, удалён) —
+            // форма-владелец перечитывает СВОИ данные: её вычисляемые реквизиты
+            // («Anzahlung» = сколько внесено) зависят ровно от этих строк. Только если
+            // человек форму сейчас не правит — его ввод важнее; и не на первой
+            // загрузке, когда форма и так свежая.
+            if (this.owner && this._ownerSeenData) {
+                const f = this.appForm;
+                if (f && !f._modified && !f._isNew && typeof f._reloadFormData === 'function') {
+                    try {
+                        await f._reloadFormData(null);
+                        f._modified = false;
+                        if (typeof f.refreshEnabledWhen === 'function') f.refreshEnabledWhen();
+                    } catch (e) { console.error('[DynamicTable] форма-владелец не перечитана:', e); }
+                }
+            }
+            this._ownerSeenData = true;
+            // До первой загрузки шапка списка ещё не построена, и её «обвязка»
+            // мерилась в полторы тысячи пикселей — граница высоты таблицы и вкладок
+            // выходила больше окна. После загрузки — пересчёт по настоящей шапке.
+            try {
+                const form = this.appForm;
+                requestAnimationFrame(() => {
+                    if (form && typeof form.reapplyTableHeights === 'function') form.reapplyTableHeights();
+                    else if (typeof this._applyDeclaredHeight === 'function') this._applyDeclaredHeight();
+                });
+            } catch (e) {}
             // Состав строк изменился — пересчитать зависящие от него элементы формы
             // (напр. кнопка, выключенная при пустом списке).
             try { if (this.appForm && typeof this.appForm._onTableStateChanged === 'function') this.appForm._onTableStateChanged(this); } catch (e) {}
@@ -18727,8 +20714,14 @@ class DynamicTable extends Table {
                 filters: serverFilters,
                 // Явный выбор видимых колонок (relatedList и др. встраиваемые списки);
                 // без него сервер отдаёт все колонки модели.
-                fields: (Array.isArray(this.serverFields) && this.serverFields.length) ? this.serverFields : undefined
+                fields: (Array.isArray(this.serverFields) && this.serverFields.length) ? this.serverFields : undefined,
+                // Постоянный отбор подчинённого списка (`properties.owner.where`):
+                // проверяет и накладывает сервер, человек его не снимает.
+                ownerWhere: this._ownerWhere() || undefined
             });
+            // Журнал документов: виды, которые он показывает (для «Добавить»).
+            this.journal = (data && data.journal) || null;
+            try { this._syncDocumentButtons(); } catch (e) {}
             // Expect new format only: { columns, rows, totalRows }
             const columnsRaw = data && data.columns ? data.columns : [];
             const rows = data && data.rows ? data.rows : [];

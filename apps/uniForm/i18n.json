@@ -29,6 +29,12 @@
         "de": "Löschen nicht möglich: Der Datensatz wird von anderen Datensätzen verwendet.",
         "pl": "Nie można usunąć: rekord jest używany przez inne rekordy."
     },
+    "delete_removed_nothing": {
+        "en": "Nothing was deleted: the record no longer exists or is not available to you.",
+        "ru": "Ничего не удалено: записи больше нет или она вам недоступна.",
+        "de": "Es wurde nichts gelöscht: Der Datensatz existiert nicht mehr oder ist für Sie nicht verfügbar.",
+        "pl": "Nic nie usunięto: rekord już nie istnieje albo jest dla Ciebie niedostępny."
+    },
     "no_table_context": {
         "en": "No table context found in dataset",
         "ru": "Контекст таблицы не найден в наборе данных",
@@ -36,22 +42,22 @@
         "pl": "Nie znaleziono kontekstu tabeli w zbiorze danych"
     },
     "row_field_required": {
-        "en": "Row {{row}} of section «{{section}}»: field «{{field}}» is not filled — row skipped",
-        "ru": "Строка {{row}} секции «{{section}}»: поле «{{field}}» не заполнено — строка пропущена",
-        "de": "Zeile {{row}} der Sektion «{{section}}»: Feld «{{field}}» ist nicht ausgefüllt — Zeile übersprungen",
-        "pl": "Wiersz {{row}} sekcji «{{section}}»: pole «{{field}}» nie jest wypełnione — wiersz pominięty"
+        "en": "Table «{{section}}», row {{row}}: «{{field}}» is not filled — the row was not saved",
+        "ru": "Таблица «{{section}}», строка {{row}}: не заполнено «{{field}}» — строка не записана",
+        "de": "Tabelle «{{section}}», Zeile {{row}}: «{{field}}» ist nicht ausgefüllt — die Zeile wurde nicht gespeichert",
+        "pl": "Tabela «{{section}}», wiersz {{row}}: pole «{{field}}» nie jest wypełnione — wiersz nie został zapisany"
     },
     "row_field_fk_mismatch": {
-        "en": "Row {{row}} of section «{{section}}»: field «{{field}}» references a record not belonging to the current object — row rejected",
-        "ru": "Строка {{row}} секции «{{section}}»: поле «{{field}}» ссылается на запись, не принадлежащую текущему объекту — строка отклонена",
-        "de": "Zeile {{row}} der Sektion «{{section}}»: Feld «{{field}}» referenziert einen Datensatz, der nicht zum aktuellen Objekt gehört — Zeile abgelehnt",
-        "pl": "Wiersz {{row}} sekcji «{{section}}»: pole «{{field}}» odwołuje się do rekordu nienależącego do bieżącego obiektu — wiersz odrzucony"
+        "en": "Table «{{section}}», row {{row}}: «{{field}}» refers to a record that does not belong to this document — the row was not saved",
+        "ru": "Таблица «{{section}}», строка {{row}}: «{{field}}» ссылается на запись, не принадлежащую этому документу — строка не записана",
+        "de": "Tabelle «{{section}}», Zeile {{row}}: «{{field}}» verweist auf einen Datensatz, der nicht zu diesem Beleg gehört — die Zeile wurde nicht gespeichert",
+        "pl": "Tabela «{{section}}», wiersz {{row}}: «{{field}}» odwołuje się do rekordu spoza tego dokumentu — wiersz nie został zapisany"
     },
     "row_save_error": {
-        "en": "Row {{row}} of section «{{section}}»: save error — {{error}}",
-        "ru": "Строка {{row}} секции «{{section}}»: ошибка сохранения — {{error}}",
-        "de": "Zeile {{row}} der Sektion «{{section}}»: Speicherfehler — {{error}}",
-        "pl": "Wiersz {{row}} sekcji «{{section}}»: błąd zapisu — {{error}}"
+        "en": "Table «{{section}}», row {{row}}: save error — {{error}}",
+        "ru": "Таблица «{{section}}», строка {{row}}: ошибка записи — {{error}}",
+        "de": "Tabelle «{{section}}», Zeile {{row}}: Speicherfehler — {{error}}",
+        "pl": "Tabela «{{section}}», wiersz {{row}}: błąd zapisu — {{error}}"
     },
     "form_context_expired": {
         "en": "The form has been open too long and its session on the server has expired. Please copy anything you have not saved, close the window and open the record again.",
@@ -59,10 +65,46 @@
         "de": "Das Formular war zu lange geöffnet, seine Sitzung auf dem Server ist abgelaufen. Bitte notieren Sie nicht gespeicherte Eingaben, schließen Sie das Fenster und öffnen Sie den Datensatz erneut.",
         "pl": "Formularz był otwarty zbyt długo i jego sesja na serwerze wygasła. Zapisz sobie niezapisane dane, zamknij okno i otwórz rekord ponownie."
     },
+    "invalid_field_values": {
+        "en": "Invalid value in the field: {{fields}}",
+        "ru": "Неверное значение в поле: {{fields}}",
+        "de": "Ungültiger Wert im Feld: {{fields}}",
+        "pl": "Nieprawidłowa wartość w polu: {{fields}}"
+    },
     "required_fields_missing": {
         "en": "Please fill in the required fields: {{fields}}",
         "ru": "Заполните обязательные поля: {{fields}}",
         "de": "Bitte füllen Sie die Pflichtfelder aus: {{fields}}",
         "pl": "Uzupełnij pola obowiązkowe: {{fields}}"
+    },
+    "form_not_registered": {
+        "en": "Form \"{{form}}\" of application \"{{app}}\" is not registered. Nothing can be built from it: a named form has no model to generate one from.",
+        "ru": "Форма «{{form}}» приложения «{{app}}» не зарегистрирована. Строить нечего: у именованной формы нет модели, из которой ядро могло бы собрать автоформу.",
+        "de": "Das Formular „{{form}}“ der Anwendung „{{app}}“ ist nicht registriert. Es lässt sich nichts erzeugen: Ein benanntes Formular hat kein Modell, aus dem ein Formular gebaut werden könnte.",
+        "pl": "Formularz „{{form}}” aplikacji „{{app}}” nie jest zarejestrowany. Nie ma z czego go zbudować: formularz nazwany nie ma modelu."
+    },
+    "form_not_available": {
+        "en": "Form \"{{form}}\" of application \"{{app}}\" is not available for your role.",
+        "ru": "Форма «{{form}}» приложения «{{app}}» недоступна вашей роли.",
+        "de": "Das Formular „{{form}}“ der Anwendung „{{app}}“ ist für Ihre Rolle nicht verfügbar.",
+        "pl": "Formularz „{{form}}” aplikacji „{{app}}” nie jest dostępny dla Twojej roli."
+    },
+    "form_named_no_app": {
+        "en": "Form \"{{form}}\" was opened without naming the application that owns it.",
+        "ru": "Форма «{{form}}» открыта без указания приложения-владельца.",
+        "de": "Das Formular „{{form}}“ wurde ohne Angabe der besitzenden Anwendung geöffnet.",
+        "pl": "Formularz „{{form}}” otwarto bez wskazania aplikacji będącej jego właścicielem."
+    },
+    "form_method_not_found": {
+        "en": "Method \"{{method}}\" is not registered for form \"{{form}}\" of application \"{{app}}\".",
+        "ru": "Метод «{{method}}» не зарегистрирован у формы «{{form}}» приложения «{{app}}».",
+        "de": "Die Methode „{{method}}“ ist für das Formular „{{form}}“ der Anwendung „{{app}}“ nicht registriert.",
+        "pl": "Metoda „{{method}}” nie jest zarejestrowana dla formularza „{{form}}” aplikacji „{{app}}”."
+    },
+    "form_required_attributes": {
+        "en": "Please fill in: {{fields}}",
+        "ru": "Заполните: {{fields}}",
+        "de": "Bitte ausfüllen: {{fields}}",
+        "pl": "Wypełnij: {{fields}}"
     }
 }

@@ -598,5 +598,11 @@
         "ru": "Сдвиг даты запрета",
         "de": "Festschreibungsdatum fortschreiben",
         "pl": "Przesunięcie daty blokady"
+    },
+    "sched_handler_document_alerts": {
+        "en": "Document notices: daily check",
+        "ru": "Оповещения по документам: суточная проверка",
+        "de": "Beleghinweise: tägliche Prüfung",
+        "pl": "Powiadomienia o dokumentach: dzienne sprawdzenie"
     }
 }

@@ -250,16 +250,45 @@ function intent(Model, row, on) {
 }
 
 /**
- * Распроведение разрешено из текущего делового состояния?
- * Та же проверка, что в `posting.runOne`: сравнивать `unpost` можно только с
- * ДЕЛОВЫМ состоянием, а у документа, у которого его нет (денежный), ограничивать
- * нечем — там распроведение разрешено.
+ * МОЖНО ЛИ УДАЛИТЬ СРАЗУ, минуя пометку.
+ *
+ * Объявление (`deletion.direct` + стартовое правило ссылок) отвечает про ОБЪЕКТ,
+ * но этого мало: «удалить сразу» у ПРОВЕДЁННОГО документа — порча учёта.
+ * Движения принадлежат документу и снимаются по регистратору
+ * (`recorderTable`/`recorderUID`); немедленное удаление документа снимает его
+ * табличные части и оповещения, а движения оставляет СИРОТАМИ — строками, у
+ * которых больше нет документа, то есть удалить их нечем, а в остатке регистра
+ * они остаются навсегда.
+ *
+ * Поэтому проведённый документ удаляется в два шага, и ядро само это предлагает
+ * («распровести и пометить», `intent` → `unpostThenMark`). Правило стоит здесь,
+ * рядом с правом на пометку, а не у каждого, кто рисует кнопку: до 17.10.2026
+ * журнал предлагал «Endgültig löschen» наравне с пометкой у проведённого прихода
+ * (найдено живым прогоном 16.10.2026, H2.1).
+ *
+ * @param {Object} Model — модель Sequelize (несёт `entityConfig`)
+ * @param {Object} row — САМА строка: проведённость — факт строки, не объявления
+ */
+function canDeleteDirectly(Model, row) {
+    if (!readPolicy(Model).direct) return false;
+    const posting = require('./posting');
+    const pcfg = posting.readConfig(Model);
+    if (!pcfg || !row) return true;
+    const imm = (Model && Model.entityConfig && Model.entityConfig.immutable) || null;
+    const posted = (pcfg.statusIsPostingState && imm && imm.field)
+        ? row[imm.field] === posting.STATE.POSTED
+        : row[posting.STATE_FIELD] === posting.STATE.POSTED;
+    return !posted;
+}
+
+/**
+ * Распроведение разрешено из текущего делового состояния? Правило живёт в ядре
+ * проведения (`posting.canUnpostFrom`) в одном экземпляре: своя копия здесь
+ * означала бы, что «помечать можно ровно то, что можно удалить» держится на
+ * двух независимо правимых текстах одного правила.
  */
 function canUnpostFrom(pcfg, row) {
-    if (!pcfg || !pcfg.unpost || !pcfg.unpost.length) return false;
-    if (pcfg.statusIsPostingState) return true;
-    if (!row || !Object.prototype.hasOwnProperty.call(row, pcfg.statusField)) return true;
-    return pcfg.unpost.indexOf(row[pcfg.statusField]) !== -1;
+    return require('./posting').canUnpostFrom(pcfg, row);
 }
 
 module.exports = {
@@ -270,5 +299,6 @@ module.exports = {
     injectDeletionMark,
     injectDeletionMarks,
     intent,
+    canDeleteDirectly,
     canUnpostFrom
 };

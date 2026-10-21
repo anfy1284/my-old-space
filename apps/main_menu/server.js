@@ -133,6 +133,13 @@ function resolveMenuIcons(items) {
                 if (!icon) icon = getEntityIcon(tableName);
                 item.icon = icon;
             }
+            // ИМЕНОВАННАЯ форма: значок берётся из её регистрации. Таблицы у неё нет,
+            // и выводить значок «по виду сущности» не из чего — но и не нужно:
+            // регистрация формы называет его прямо.
+            if (!item.icon && item.appName === 'uniForm' && item.params && item.params.form && layoutMemory) {
+                const meta = layoutMemory.getFormMeta(item.params.app, item.params.form);
+                if (meta && meta.formIcon) item.icon = meta.formIcon;
+            }
             if (Array.isArray(item.items)) recurse(item.items);
         }
     };

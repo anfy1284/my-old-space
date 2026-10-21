@@ -106,7 +106,7 @@ async function deleteSelected(ev, ctx) {
 async function restoreOrganization(ev, ctx) {
     var rec = selectedFile(ctx && ctx.form);
     if (!rec || !rec.fileName) { showAlert(__t('backup_err_no_selection')); return; }
-    await MySpace.open('uniForm', { mode: 'record', dbTable: 'backup_restore_full', fileName: rec.fileName });
+    await MySpace.open('uniForm', { app: 'backup', form: 'restoreFull', params: { fileName: rec.fileName } });
 }
 
 /**

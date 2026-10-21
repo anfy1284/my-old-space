@@ -311,6 +311,25 @@ async function _resolveUserLanguageCode(userUID) {
 }
 
 /**
+ * Язык ДО входа (16.10.2026): умолчание настройки `core.language` (строка умолчаний,
+ * её задаёт администратор), иначе английский. Раньше форма входа была английской
+ * всегда — немецкий гостевой дом видел «Sign in», в том числе сразу после «Abmelden».
+ */
+async function _resolveDefaultLanguageCode() {
+    try {
+        const settings = require('../drive_root/settings');
+        const langUID = await settings.getDefault('core', 'language');
+        if (!langUID) return null;
+        const mdb = global.modelsDB;
+        if (!mdb || !mdb.Languages) return null;
+        const langRecord = await mdb.Languages.findByPk(String(langUID));
+        return (langRecord && langRecord.code) ? langRecord.code : null;
+    } catch (e) {
+        return null;
+    }
+}
+
+/**
  * Returns unified session context for the current user.
  * Cached per sessionID; invalidate via invalidateSessionContext() on settings change.
  *
@@ -335,12 +354,12 @@ async function getSessionContext(sessionID) {
 
     // L3: build from DB
     const user = await global.getUserBySessionID(sessionID);
-    if (!user) return { userId: null, name: null, role: null, language: 'en' };
+    if (!user) return { userId: null, name: null, role: null, language: (await _resolveDefaultLanguageCode()) || 'en' };
 
     const role = await getUserAccessRole(user);
 
     // Язык интерфейса — настройка `core.language`; не задана → английский.
-    const language = (await _resolveUserLanguageCode(user.UID)) || 'en';
+    const language = (await _resolveUserLanguageCode(user.UID)) || (await _resolveDefaultLanguageCode()) || 'en';
 
     const ctx = { userId: user.UID, name: user.name, role, language };
     await _memStoreForRoles.set(_SESSION_CTX_NS, sessionID, ctx);

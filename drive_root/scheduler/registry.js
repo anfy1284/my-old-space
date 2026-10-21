@@ -30,44 +30,12 @@
  * с `ctx.sessionID`. Передавать `__SYS_INTERNAL__` внутри обработчика запрещено.
  */
 
-const fs = require('fs');
-const path = require('path');
-const log = require('../log');
+const appFactories = require('../appFactories');
 
 const HANDLERS_FILE = 'scheduler.handlers.js';
 const SCOPES = new Set(['system', 'organization', 'any']);
 
 let _handlers = null;   // Map<code, definition>
-
-/** Каталоги приложений: сначала проект (перекрывает), затем фреймворк. */
-function collectAppDirs() {
-    const projectRoot = process.env.PROJECT_ROOT
-        || (function () { try { return require('../globalServerContext').getProjectRoot(); } catch (e) { return null; } })();
-    const frameworkRoot = path.join(__dirname, '..', '..');
-
-    let appsBasePath = 'apps';
-    const appNames = [];
-    const readAppsJson = (p) => {
-        if (!fs.existsSync(p)) return;
-        try {
-            const cfg = JSON.parse(fs.readFileSync(p, 'utf8'));
-            if (typeof cfg.path === 'string' && cfg.path) appsBasePath = cfg.path.replace(/^[/\\]+/, '');
-            for (const app of (cfg.apps || [])) {
-                if (app && app.name && !appNames.includes(app.name)) appNames.push(app.name);
-            }
-        } catch (e) {
-            log.error(`[scheduler/registry] Битый apps.json: ${p}: ${e.message}`);
-        }
-    };
-    readAppsJson(path.join(frameworkRoot, 'drive_forms', 'apps.json'));
-    readAppsJson(path.join(frameworkRoot, 'apps.json'));
-    if (projectRoot) readAppsJson(path.join(projectRoot, 'apps.json'));
-
-    const baseDirs = [];
-    if (projectRoot) baseDirs.push(path.join(projectRoot, appsBasePath));
-    baseDirs.push(path.join(frameworkRoot, appsBasePath));
-    return { appNames, baseDirs };
-}
 
 /** Проверка объявления обработчика. Кривое объявление лучше отбросить с криком. */
 function validateDefinition(code, def) {
@@ -79,41 +47,30 @@ function validateDefinition(code, def) {
 
 /**
  * Загрузить (или перечитать) реестр обработчиков.
+ *
+ * Поиск каталогов приложений и вызов фабрик — ядро `drive_root/appFactories.js`;
+ * здесь остаётся только то, что у этого реестра своё: проверка объявления и
+ * дополнение его кодом и именем приложения.
+ *
  * @param {Object} modelsDB
  * @param {Object} Utilities
  * @returns {Map<string, Object>}
  */
 function load(modelsDB, Utilities) {
-    const handlers = new Map();
-    const { appNames, baseDirs } = collectAppDirs();
-
-    for (const appName of appNames) {
-        for (const baseDir of baseDirs) {
-            const file = path.join(baseDir, appName, HANDLERS_FILE);
-            if (!fs.existsSync(file)) continue;
-            try {
-                delete require.cache[require.resolve(file)];
-                const factory = require(file);
-                if (typeof factory !== 'function') {
-                    log.error(`[scheduler/registry] ${file}: модуль должен экспортировать функцию-фабрику`);
-                    break;
-                }
-                const declared = factory(modelsDB, Utilities) || {};
-                for (const [code, def] of Object.entries(declared)) {
-                    const err = validateDefinition(code, def);
-                    if (err) { log.error(`[scheduler/registry] ${file}: ${err}`); continue; }
-                    handlers.set(code, Object.assign({ code, appName, scope: 'any', paramsSchema: {} }, def));
-                }
-                log.info(`[scheduler/registry] ${appName}: обработчиков ${Object.keys(declared).length}`);
-            } catch (e) {
-                log.error(`[scheduler/registry] Ошибка загрузки ${file}: ${e && e.message || e}`);
-            }
-            break; // проектный файл перекрывает фреймворковый
+    _handlers = appFactories.load({
+        fileName: HANDLERS_FILE,
+        tag: '[scheduler/registry]',
+        modelsDB, Utilities,
+        // Типы задач перечитываются по требованию (форма показывает список), и
+        // кэш `require` здесь мешает: правка файла должна быть видна.
+        fresh: true,
+        accept: (code, def, appName) => {
+            const err = validateDefinition(code, def);
+            if (err) return { error: err };
+            return { value: Object.assign({ code, appName, scope: 'any', paramsSchema: {} }, def) };
         }
-    }
-
-    _handlers = handlers;
-    return handlers;
+    });
+    return _handlers;
 }
 
 function ensureLoaded(modelsDB, Utilities) {

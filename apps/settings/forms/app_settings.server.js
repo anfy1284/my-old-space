@@ -289,7 +289,10 @@ function buildLayout(isAdmin) {
                     caption: { i18n: 'Table' }, data: 'tableName', width: 250, inputType: 'recordSelector',
                     properties: {
                         showSelectionButton: true,
-                        selection: { table: 'user_settings_table_list', idField: 'UID', displayField: 'tableLabel' }
+                        // Справочника таблиц в базе нет и быть не может: список
+                        // собирается из определений моделей. Поэтому выбор идёт из
+                        // ИМЕНОВАННОЙ формы приложения, а не из таблицы-призрака.
+                        selection: { app: 'settings', form: require('./table_list.server').FORM, idField: 'UID', displayField: 'tableLabel' }
                     }
                 },
                 {
@@ -503,16 +506,31 @@ async function saveAutofill(userId, rows, modelsDB) {
 
 module.exports = function factory(modelsDB, Utilities) {
 
+    // КАКОЙ УРОВЕНЬ И ЗАПИСЬ ФОРМА ПОКАЗЫВАЕТ — по сессии (16.10.2026). Стандартные
+    // кнопки ядра («Speichern», «Speichern und schließen») шлют только ИЗМЕНЁННЫЕ
+    // поля, а уровня и записи среди них нет: сохранение отвечало «Benutzer nicht
+    // autorisiert» на всех уровнях, а неудачная попытка сбрасывала отметки
+    // изменений, и следующее «Anwenden» уходило уже без правки (язык не менялся,
+    // хотя «gespeichert»). Прогон сценариев, S10 и A4.
+    const lastTarget = new Map();
+    const rememberTarget = (ctx, scope, recordId) => {
+        if (ctx && ctx.sessionID && scope) lastTarget.set(ctx.sessionID, { scope, recordId: recordId || null });
+    };
+
     /** Стартовое состояние формы: уровень, запись, значения, автозаполнение. */
-    async function onLoadData({ params }, ctx) {
+    async function onLoadData({ params, current }, ctx) {
         registry.ensureLoaded();
         const isAdmin = isAdminCtx(ctx);
         const scopes = visibleScopes(isAdmin);
         if (!scopes.length) return { data: [], caption: await tForSession('settings_app_caption', ctx.sessionID) };
 
-        const wanted = params && params.scope;
+        // Перечитывание после стандартного «Speichern» (`current` — что было на форме):
+        // остаёмся на тех уровне и записи, которые человек выбрал, а не на параметрах
+        // открытия. Права на запись проверяет denyReason ниже, как и при открытии.
+        const wanted = (current && current[SCOPE_FIELD]) || (params && params.scope);
         const scope = scopes.find(s => s.name === wanted) || scopes[0];
-        const recordId = (params && params.recordId) || await defaultRecordId(scope, ctx);
+        const recordId = (current && current[SCOPE_FIELD] === scope.name && current[recordField(scope.name)])
+            || (params && params.recordId) || await defaultRecordId(scope, ctx);
 
         const data = [{ name: SCOPE_FIELD, value: scope.name }];
 
@@ -526,6 +544,7 @@ module.exports = function factory(modelsDB, Utilities) {
         }
 
         const reason = await denyReason(scope, recordId, ctx);
+        if (!reason) rememberTarget(ctx, scope.name, recordId);
         if (!reason) {
             for (const v of await collectValues(scope.name, recordId, isAdmin)) {
                 const item = { name: v.name, value: v.value };
@@ -566,6 +585,7 @@ module.exports = function factory(modelsDB, Utilities) {
             return { scope: scopeName, recordId: null, values: [], stateRows: await state.listAll() };
         }
 
+        rememberTarget(ctx, scopeName, recordId);
         const result = {
             scope: scopeName,
             recordId: recordId || null,
@@ -583,10 +603,15 @@ module.exports = function factory(modelsDB, Utilities) {
         const tabular = plain.__tabularSections || {};
         delete plain.__tabularSections;
 
-        const scopeName = plain[SCOPE_FIELD];
+        // Уровень и запись: присланные формой (`Anwenden` шлёт их явно), иначе —
+        // те, что форма загрузила последними (стандартные кнопки шлют только правки).
+        const remembered = (ctx && lastTarget.get(ctx.sessionID)) || {};
+        const scopeName = plain[SCOPE_FIELD] || remembered.scope;
         if (scopeName === 'state') return { ok: true };   // таблица только для чтения
         const scope = registry.getScope(scopeName);
-        const recordId = scope && !scope.ownerless ? plain[recordField(scopeName)] : null;
+        const recordId = scope && !scope.ownerless
+            ? (plain[recordField(scopeName)] || (remembered.scope === scopeName ? remembered.recordId : null))
+            : null;
 
         const reason = await denyReason(scope, recordId, ctx);
         if (reason) {
@@ -642,7 +667,8 @@ module.exports = function factory(modelsDB, Utilities) {
         }
 
         if (languageChanged) invalidateSessionContext(ctx.sessionID);
-        return { ok: true, languageChanged };
+        // `reloadPage` читает ядро после стандартного сохранения; `languageChanged` — кнопка «Anwenden».
+        return { ok: true, languageChanged, reloadPage: languageChanged };
     }
 
     /** Стереть всё состояние интерфейса (кнопка администратора). */

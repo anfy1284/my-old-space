@@ -1,4 +1,10 @@
 {
+    "record_save_duplicate": {
+        "en": "This record already exists (it may have been saved twice). Close the window and open the record again.",
+        "ru": "Такая запись уже есть (возможно, её сохранили дважды). Закройте окно и откройте запись снова.",
+        "de": "Dieser Datensatz existiert bereits (vielleicht wurde er doppelt gespeichert). Schließen Sie das Fenster und öffnen Sie den Datensatz erneut.",
+        "pl": "Taki rekord już istnieje (może został zapisany dwukrotnie). Zamknij okno i otwórz rekord ponownie."
+    },
     "User not authorized": {
         "en": "User not authorized",
         "ru": "Пользователь не авторизован",
@@ -71,6 +77,24 @@
         "de": "Bitte einen Datensatz auswählen",
         "pl": "Wybierz rekord"
     },
+    "Save the record first": {
+        "en": "Save the record first",
+        "ru": "Сначала запишите запись",
+        "de": "Bitte zuerst speichern",
+        "pl": "Najpierw zapisz rekord"
+    },
+    "Which document should be created?": {
+        "en": "Which document should be created?",
+        "ru": "Какой документ создать?",
+        "de": "Welcher Beleg soll angelegt werden?",
+        "pl": "Jaki dokument utworzyć?"
+    },
+    "Post selected": {
+        "en": "Post",
+        "ru": "Провести",
+        "de": "Buchen",
+        "pl": "Zaksięguj"
+    },
     "Please select a record to delete": {
         "en": "Please select a record to delete",
         "ru": "Выберите запись для удаления",
@@ -137,11 +161,11 @@
         "de": "Unbekannter Fehler",
         "pl": "Nieznany błąd"
     },
-    "Saved, but some rows were not written:\n": {
-        "en": "Saved, but some rows were not written:\n",
-        "ru": "Сохранено, но часть строк не записана:\n",
-        "de": "Gespeichert, aber einige Zeilen wurden nicht geschrieben:\n",
-        "pl": "Zapisano, ale niektóre wiersze nie zostały zapisane:\n"
+    "Saved, but some rows were not written:": {
+        "en": "Saved, but some rows were not written:",
+        "ru": "Сохранено, но часть строк не записана:",
+        "de": "Gespeichert, aber einige Zeilen wurden nicht gespeichert:",
+        "pl": "Zapisano, ale niektóre wiersze nie zostały zapisane:"
     },
     "Save error: ": {
         "en": "Save error: ",
@@ -167,11 +191,17 @@
         "de": "Abbrechen",
         "pl": "Anuluj"
     },
-    "Discard unsaved changes?": {
-        "en": "Discard unsaved changes?",
-        "ru": "Отменить несохранённые изменения?",
-        "de": "Ungespeicherte Änderungen verwerfen?",
-        "pl": "Odrzucić niezapisane zmiany?"
+    "Save changes before closing?": {
+        "en": "Save changes before closing?",
+        "ru": "Сохранить изменения перед закрытием?",
+        "de": "Änderungen vor dem Schließen speichern?",
+        "pl": "Zapisać zmiany przed zamknięciem?"
+    },
+    "Do not save": {
+        "en": "Do not save",
+        "ru": "Не сохранять",
+        "de": "Nicht speichern",
+        "pl": "Nie zapisuj"
     },
     "Save": {
         "en": "Save",
@@ -1122,10 +1152,10 @@
         "pl": "runScript: nie znaleziono funkcji w skrypcie: "
     },
     "settings_app_core": {
-        "en": "Interface",
-        "ru": "Интерфейс",
-        "de": "Oberfläche",
-        "pl": "Interfejs"
+        "en": "Basic settings",
+        "ru": "Основные",
+        "de": "Grundeinstellungen",
+        "pl": "Podstawowe"
     },
     "settings_core_language": {
         "en": "Interface language",
@@ -1372,5 +1402,119 @@
         "ru": "Представление",
         "de": "Ansicht",
         "pl": "Widok"
+    },
+    "Please fill in: ": {
+        "en": "Please fill in: ",
+        "ru": "Заполните: ",
+        "de": "Bitte ausfüllen: ",
+        "pl": "Wypełnij: "
+    },
+    "Execute": {
+        "en": "Execute",
+        "ru": "Выполнить",
+        "de": "Ausführen",
+        "pl": "Wykonaj"
+    },
+    "Notices": {
+        "en": "Notices",
+        "ru": "Оповещения",
+        "de": "Hinweise",
+        "pl": "Powiadomienia"
+    },
+    "Run the action?": {
+        "en": "Run the action?",
+        "ru": "Выполнить действие?",
+        "de": "Aktion ausführen?",
+        "pl": "Wykonać działanie?"
+    },
+    "This notice has no action": {
+        "en": "This notice has no action",
+        "ru": "У этого оповещения нет действия",
+        "de": "Dieser Hinweis hat keine Aktion",
+        "pl": "To powiadomienie nie ma działania"
+    },
+    "alert_severity_info": {
+        "en": "Information",
+        "ru": "Информация",
+        "de": "Information",
+        "pl": "Informacja"
+    },
+    "alert_severity_warning": {
+        "en": "Warning",
+        "ru": "Предупреждение",
+        "de": "Warnung",
+        "pl": "Ostrzeżenie"
+    },
+    "alert_severity_error": {
+        "en": "Error",
+        "ru": "Ошибка",
+        "de": "Fehler",
+        "pl": "Błąd"
+    },
+    "alert_push_title": {
+        "en": "Document notice",
+        "ru": "Оповещение по документу",
+        "de": "Beleghinweis",
+        "pl": "Powiadomienie o dokumencie"
+    },
+    "alert_push_title_error": {
+        "en": "The document needs attention",
+        "ru": "Документ требует внимания",
+        "de": "Der Beleg braucht Aufmerksamkeit",
+        "pl": "Dokument wymaga uwagi"
+    },
+    "alert_summary_title": {
+        "en": "Document check",
+        "ru": "Проверка документов",
+        "de": "Belegprüfung",
+        "pl": "Sprawdzenie dokumentów"
+    },
+    "alert_summary_text": {
+        "en": "Documents needing attention: {{count}}. Open the document check",
+        "ru": "Документов, требующих внимания: {{count}}. Открыть проверку документов",
+        "de": "Belege, die Aufmerksamkeit brauchen: {{count}}. Belegprüfung öffnen",
+        "pl": "Dokumenty wymagające uwagi: {{count}}. Otwórz sprawdzenie dokumentów"
+    },
+    "settings_core_group_alerts": {
+        "en": "Document notices",
+        "ru": "Оповещения по документам",
+        "de": "Beleghinweise",
+        "pl": "Powiadomienia o dokumentach"
+    },
+    "settings_core_alert_summary_idle": {
+        "en": "Remind again after, hours",
+        "ru": "Напоминать снова через, часов",
+        "de": "Erneut erinnern nach, Stunden",
+        "pl": "Przypomnij ponownie po, godzin"
+    },
+    "settings_core_alert_summary_idle_hint": {
+        "en": "The daily summary is not sent while the document check was opened less than this many hours ago.",
+        "ru": "Суточная сводка не отправляется, пока проверку документов открывали меньше чем столько часов назад.",
+        "de": "Die Tageszusammenfassung entfällt, solange die Belegprüfung vor weniger als so vielen Stunden geöffnet wurde.",
+        "pl": "Dzienne podsumowanie nie jest wysyłane, dopóki sprawdzenie dokumentów otwierano mniej niż tyle godzin temu."
+    },
+    "alerts_expand": {
+        "en": "Show the notices",
+        "ru": "Показать оповещения",
+        "de": "Hinweise anzeigen",
+        "pl": "Pokaż powiadomienia"
+    },
+    "alerts_collapse": {
+        "en": "Hide the notices",
+        "ru": "Скрыть оповещения",
+        "de": "Hinweise ausblenden",
+        "pl": "Ukryj powiadomienia"
+    },
+    "menu_administration": {
+        "en": "Administration",
+        "ru": "Администрирование",
+        "de": "Administration",
+        "pl": "Administracja"
+    },
+    "menu_apps": {
+        "en": "Demo programs",
+        "ru": "Демо-программы",
+        "de": "Demoprogramme",
+        "pl": "Programy demonstracyjne"
     }
 }

@@ -1,4 +1,10 @@
 {
+    "logout_menu": {
+        "en": "Log out",
+        "ru": "Выйти",
+        "de": "Abmelden",
+        "pl": "Wyloguj"
+    },
     "Create": {
         "en": "Create",
         "ru": "Создать",
@@ -383,6 +389,12 @@
         "de": "Automatisch ausblenden, Sekunden",
         "pl": "Auto-ukrycie, sekundy"
     },
+    "notif_tag_field": {
+        "en": "Replacement tag",
+        "ru": "Тег замены",
+        "de": "Ersetzungskennung",
+        "pl": "Znacznik zastąpienia"
+    },
     "register_period_field": {
         "en": "Period",
         "ru": "Период",
@@ -533,6 +545,30 @@
         "de": "Für diese Belegart ist keine Verbuchungsroutine registriert",
         "pl": "Dla tego rodzaju dokumentu nie zarejestrowano procedury księgowania"
     },
+    "posting_err_creates_undeclared": {
+        "en": "The document tried to create a record of «{{table}}», which its posting does not declare",
+        "ru": "Документ пытался создать запись «{{table}}», не объявленную в его проведении",
+        "de": "Der Beleg wollte einen Datensatz «{{table}}» anlegen, der in seiner Verbuchung nicht deklariert ist",
+        "pl": "Dokument próbował utworzyć rekord «{{table}}», którego jego księgowanie nie deklaruje"
+    },
+    "posting_err_creates_no_stamp": {
+        "en": "The document has no field «{{field}}» to remember the created document in",
+        "ru": "У документа нет поля «{{field}}», в котором запоминается созданный документ",
+        "de": "Der Beleg hat kein Feld «{{field}}», in dem der erzeugte Beleg vermerkt wird",
+        "pl": "Dokument nie ma pola «{{field}}», w którym zapamiętuje się utworzony dokument"
+    },
+    "journal_write_denied": {
+        "en": "A document journal is read-only: change the document itself",
+        "ru": "Журнал документов только для чтения: изменяйте сам документ",
+        "de": "Ein Belegjournal ist schreibgeschützt — bitte den Beleg selbst ändern",
+        "pl": "Dziennik dokumentów jest tylko do odczytu — zmień sam dokument"
+    },
+    "journal_doc_table_field": {
+        "en": "Document type",
+        "ru": "Вид документа",
+        "de": "Belegart",
+        "pl": "Rodzaj dokumentu"
+    },
     "posting_err_unpost_from_state": {
         "en": "The posting cannot be undone in this state",
         "ru": "В этом состоянии распроведение невозможно",
@@ -550,6 +586,12 @@
         "ru": "Подробности причины",
         "de": "Ursachendetails",
         "pl": "Szczegóły przyczyny"
+    },
+    "The queue will retry automatically": {
+        "en": "The queue will try again automatically — fix the cause, or remove the document from the queue",
+        "ru": "Очередь повторит попытку сама — устраните причину или снимите документ с очереди",
+        "de": "Die Warteschlange versucht es automatisch erneut — beheben Sie die Ursache oder nehmen Sie den Beleg aus der Warteschlange",
+        "pl": "Kolejka spróbuje ponownie automatycznie — usuń przyczynę lub zdejmij dokument z kolejki"
     },
     "The document is queued for posting": {
         "en": "The document is queued for posting",
@@ -635,6 +677,12 @@
         "de": "Der Beleg ist verbucht und die Verbuchung kann nicht aufgehoben werden",
         "pl": "Dokument jest zaksięgowany i księgowania nie można wycofać"
     },
+    "deletion_refuse_closed_referrer": {
+        "en": "Cannot be marked for deletion: it is referenced by a closed document ({{docs}}), which can never be deleted",
+        "ru": "Пометить на удаление нельзя: на объект ссылается закрытый документ ({{docs}}), а его удалить нельзя никогда",
+        "de": "Kann nicht zur Löschung markiert werden: Ein abgeschlossener Beleg verweist darauf ({{docs}}), und dieser kann nie gelöscht werden",
+        "pl": "Nie można oznaczyć do usunięcia: odwołuje się do tego zamknięty dokument ({{docs}}), którego nigdy nie można usunąć"
+    },
     "deletion_needs_unpost": {
         "en": "The posting has to be undone first",
         "ru": "Сначала нужно отменить проведение документа",
@@ -701,6 +749,18 @@
         "de": "Endgültig löschen",
         "pl": "Usuń trwale"
     },
+    "Together with this row its dependent rows will be deleted": {
+        "en": "Together with this row its dependent rows will be deleted",
+        "ru": "Вместе с этой строкой будут удалены связанные с ней строки",
+        "de": "Mit dieser Zeile werden auch die zugehörigen Zeilen gelöscht",
+        "pl": "Wraz z tym wierszem zostaną usunięte powiązane z nim wiersze"
+    },
+    "Continue?": {
+        "en": "Continue?",
+        "ru": "Продолжить?",
+        "de": "Fortfahren?",
+        "pl": "Kontynuować?"
+    },
     "Delete this record permanently? This cannot be undone.": {
         "en": "Delete this record permanently? This cannot be undone.",
         "ru": "Удалить запись безвозвратно? Отменить это будет нельзя.",
@@ -730,6 +790,12 @@
         "ru": "Этот объект нельзя удалить сразу: на него могут ссылаться другие записи",
         "de": "Dieses Objekt kann nicht direkt gelöscht werden: andere Datensätze können darauf verweisen",
         "pl": "Tego obiektu nie można usunąć bezpośrednio: inne rekordy mogą się do niego odwoływać"
+    },
+    "deletion_refuse_posted_direct": {
+        "en": "A posted document cannot be deleted at once: its register entries belong to it and have to be removed first. Undo the posting and mark it for deletion.",
+        "ru": "Проведённый документ нельзя удалить сразу: его движения принадлежат ему и должны быть сняты раньше. Распроведите документ и пометьте его на удаление.",
+        "de": "Ein verbuchter Beleg kann nicht sofort gelöscht werden: seine Registerbewegungen gehören zu ihm und müssen zuerst entfernt werden. Heben Sie die Verbuchung auf und markieren Sie ihn zur Löschung.",
+        "pl": "Zaksięgowanego dokumentu nie można usunąć od razu: jego zapisy w rejestrze należą do niego i muszą zostać najpierw zdjęte. Wycofaj księgowanie i oznacz dokument do usunięcia."
     },
     "deletion_refuse_mark_off": {
         "en": "This object is not marked for deletion — it is deleted directly",
@@ -820,5 +886,89 @@
         "ru": "Выбор",
         "de": "Auswahl",
         "pl": "Wybór"
+    },
+    "alert_document_table_field": {
+        "en": "Document type",
+        "ru": "Вид документа",
+        "de": "Belegart",
+        "pl": "Typ dokumentu"
+    },
+    "alert_document_field": {
+        "en": "Document",
+        "ru": "Документ",
+        "de": "Beleg",
+        "pl": "Dokument"
+    },
+    "alert_organization_field": {
+        "en": "Organization",
+        "ru": "Организация",
+        "de": "Organisation",
+        "pl": "Organizacja"
+    },
+    "alert_rule_field": {
+        "en": "Rule",
+        "ru": "Правило",
+        "de": "Regel",
+        "pl": "Reguła"
+    },
+    "alert_severity_field": {
+        "en": "Severity",
+        "ru": "Важность",
+        "de": "Wichtigkeit",
+        "pl": "Ważność"
+    },
+    "alert_sort_order_field": {
+        "en": "Order",
+        "ru": "Порядок",
+        "de": "Reihenfolge",
+        "pl": "Kolejność"
+    },
+    "alert_text_field": {
+        "en": "Text key",
+        "ru": "Ключ текста",
+        "de": "Textschlüssel",
+        "pl": "Klucz tekstu"
+    },
+    "alert_text_vars_field": {
+        "en": "Text values",
+        "ru": "Подстановки текста",
+        "de": "Textwerte",
+        "pl": "Wartości tekstu"
+    },
+    "alert_action_app_field": {
+        "en": "Action application",
+        "ru": "Приложение действия",
+        "de": "Anwendung der Aktion",
+        "pl": "Aplikacja działania"
+    },
+    "alert_action_kind_field": {
+        "en": "Action kind",
+        "ru": "Вид действия",
+        "de": "Aktionsart",
+        "pl": "Rodzaj działania"
+    },
+    "alert_action_params_field": {
+        "en": "Action parameters",
+        "ru": "Параметры действия",
+        "de": "Aktionsparameter",
+        "pl": "Parametry działania"
+    },
+    "alert_action_caption_field": {
+        "en": "Action caption",
+        "ru": "Подпись действия",
+        "de": "Aktionsbezeichnung",
+        "pl": "Podpis działania"
+    },
+    "alert_push_wanted_field": {
+        "en": "Notification needed",
+        "ru": "Нужно уведомление",
+        "de": "Benachrichtigung nötig",
+        "pl": "Potrzebne powiadomienie"
+    },
+    "alert_push_sent_field": {
+        "en": "Notification sent at",
+        "ru": "Уведомление отправлено",
+        "de": "Benachrichtigung gesendet",
+        "pl": "Powiadomienie wysłano"
     }
 }

@@ -23,14 +23,17 @@ module.exports = function (modelsDB, Utilities) {
             return { success: false, error: await tForSession('Username and password required', sessionID) };
         }
 
+        // «Нет такого пользователя» и «неверный пароль» — ОДИН ответ: по разным ответам
+        // перебором выясняют, какие логины существуют (прогон 17.10.2026, A1). Тот же
+        // довод, что у проверки отключённой учётки ниже.
         const user = await modelsDB.Users.scope('withPassword').findOne({ where: { name: username } });
         if (!user) {
-            return { success: false, error: await tForSession('User not found', sessionID) };
+            return { success: false, error: await tForSession('login_failed', sessionID) };
         }
 
         const isValid = await Utilities.validatePassword(password, user.password_hash);
         if (!isValid) {
-            return { success: false, error: await tForSession('Invalid password', sessionID) };
+            return { success: false, error: await tForSession('login_failed', sessionID) };
         }
 
         // Отключённая учётная запись. Проверка стоит ПОСЛЕ пароля намеренно: иначе по

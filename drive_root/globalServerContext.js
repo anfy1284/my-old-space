@@ -131,6 +131,9 @@ function generateModelsFromDefs(modelDefs) {
     for (const def of mergedDefs.values()) {
         try {
             const fields = Object.fromEntries(
+                // Ключи-комментарии («//имя») сняты в `collectAllModelDefs` — в
+                // ОДНОЙ точке на оба цикла разбора определений, рантаймовый и
+                // миграционный. Второй копии правила здесь нет намеренно.
                 Object.entries(def.fields).map(([k, v]) => {
                     const fieldDef = require('./db/fieldTypes').resolveFieldDef(v);
                     if (fieldDef.defaultValue === 'GENERATE_UID') {
@@ -166,10 +169,20 @@ function collectAllModelDefs() {
     // таблица регистра обязана ехать по тому же пути, что остальные, — миграция,
     // сверка схемы, RLS, резервная копия. Второго способа создавать таблицы нет.
     const registersModule = require('./db/registers');
+    // ЖУРНАЛЫ ДОКУМЕНТОВ (`journals` в `db.json`) — НЕ таблицы, а представления СУБД
+    // (drive_root/db/journals.js). Их определения собираются ОТДЕЛЬНЫМ списком и в
+    // `models` не попадают: всё, что ходит по `models`, работает с физическими
+    // таблицами — миграция создала бы таблицу, резервная копия выгрузила бы строки,
+    // восстановление вернуло бы их, правило ссылок посчитало бы журнал ссылающимся
+    // на брони. Модель журнала нужна только рантайму (чтение, колонки списка).
+    const journalDecls = [];
     function pushLayer(exported, origin) {
         const models = exported.models || exported;
         defs.push(...(Array.isArray(models) ? models : []));
         associations.push(...(exported.associations || []));
+        if (Array.isArray(exported.journals)) {
+            for (const j of exported.journals) journalDecls.push({ j, origin });
+        }
         if (Array.isArray(exported.registers)) {
             for (const reg of exported.registers) {
                 try {
@@ -324,7 +337,39 @@ function collectAllModelDefs() {
         console.error('[globalModels] entity number/date/moment/name injection failed:', e && e.message || e);
     }
 
-    return { models: defs, associations };
+    // КЛЮЧ, НАЧИНАЮЩИЙСЯ С «//», — КОММЕНТАРИЙ, а не поле: в `db.json`
+    // комментировать нечем, кроме такого ключа, и так уже пишут рядом с
+    // `entityConfig`. Снимаем их ЗДЕСЬ, в единственной точке сбора определений, —
+    // потому что определения разбирают ДВА независимых цикла: рантаймовый
+    // (`generateModelsFromDefs`) и МИГРАЦИОННЫЙ (`createDB.defineModels`).
+    // Пропуск, поставленный только в одном, оставляет второй: комментарий
+    // становится колонкой без типа и роняет миграцию — то есть сервер не
+    // стартует вовсе из-за пояснения в описании схемы (поймано живым запуском).
+    for (const def of defs) {
+        if (!def || !def.fields) continue;
+        for (const key of Object.keys(def.fields)) {
+            if (key.slice(0, 2) === '//') delete def.fields[key];
+        }
+    }
+
+    // Журналы — ПОСЛЕ всех впрысков: сверка типов и реквизитов доступа идёт против
+    // окончательных определений документов (номер, дата, момент, состояние проведения
+    // к этому моменту уже на месте). Ошибка объявления — ошибка запуска, с текстом:
+    // неверно объявленный журнал показал бы не те данные и молча.
+    const journals = [];
+    if (journalDecls.length) {
+        const journalsModule = require('./db/journals');
+        for (const { j, origin } of journalDecls) {
+            try {
+                journals.push(journalsModule.declare(j));
+            } catch (e) {
+                throw new Error(`[globalModels] Журнал в ${origin} не объявлен: ${e.message}`);
+            }
+        }
+        journalsModule.validate(defs);
+    }
+
+    return { models: defs, associations, journals };
 }
 
 // Global variable with models
@@ -333,9 +378,10 @@ let _tableNameLookup = null; // 5.3: кэш tableName/modelName(lower) → model
 
 function initModelsDB() {
     console.log('[globalModels] initModelsDB called, projectRoot:', projectRoot);
-    const { models: allDefs, associations: allAssoc } = collectAllModelDefs();
+    const { models: allDefs, associations: allAssoc, journals: journalDefs } = collectAllModelDefs();
     console.log(`[globalModels] Collected ${allDefs.length} model definitions`);
-    modelsDB = generateModelsFromDefs(allDefs);
+    // Журналы документов — модели ТОЛЬКО рантайма (представления СУБД, см. выше).
+    modelsDB = generateModelsFromDefs(allDefs.concat(journalDefs || []));
     _tableNameLookup = null; // 5.3: инвалидация кэша tableName→modelName при переинициализации
     console.log(`[globalModels] Generated models:`, Object.keys(modelsDB));
     
@@ -540,13 +586,19 @@ async function getUserBySessionID(sessionID) {
         console.log(`[getUserBySessionID] Session found but no userId. SessionID: ${sessionID}`);
         return null;
     }
-    const user = await User.findOne({ where: { UID: session.userId } });
-    if (!user) {
+    // ВСЯ СТРОКА пользователя, а не поля модели фреймворка (16.10.2026). `User` здесь
+    // определён по db.json ЯДРА, и полей, которые добавляет проект (`organizationId`),
+    // в нём нет — снимок молча терял их у всех пользователей. Хуки сохранения,
+    // бравшие организацию из снимка, не находили её, и сотрудник получал «заполните
+    // Organisation» на форме без такого поля (прогон сценариев: СТОП на сезоне).
+    const rows = await sequelize.query('SELECT * FROM "users" WHERE "UID" = :uid LIMIT 1',
+        { replacements: { uid: session.userId }, type: sequelize.QueryTypes.SELECT });
+    const plain = rows && rows[0];
+    if (!plain) {
         console.log(`[getUserBySessionID] User not found for userId: ${session.userId}`);
         return null;
     }
-    console.log(`[getUserBySessionID] Found user: ${user.name} (${user.UID})`);
-    const plain = user.get({ plain: true });
+    console.log(`[getUserBySessionID] Found user: ${plain.name} (${plain.UID})`);
     await _memoryStore.set(_SESSION_USER_NS, sessionID, plain);
     return _unlessDisabled(plain, sessionID);
 }
@@ -926,8 +978,9 @@ async function getTableMetadata(modelName) {
 
     // Use cached model definitions
     if (!global._cachedModelDefs) {
-        const { models: allDefs } = collectAllModelDefs();
-        global._cachedModelDefs = allDefs;
+        // Журналы документов — тоже: подписи и ссылки их полей нужны колонкам списка.
+        const { models: allDefs, journals: journalDefs } = collectAllModelDefs();
+        global._cachedModelDefs = allDefs.concat(journalDefs || []);
     }
     const modelDef = global._cachedModelDefs.find(def => def.name === modelName);
 
@@ -985,20 +1038,33 @@ async function getTableMetadata(modelName) {
         if (autoShowTime) width = 150; // «02.08.2026 15:30» в 120 не влезает
 
         // Check for foreign key
+        //
+        // `refersTo` — ССЫЛКА БЕЗ ОГРАНИЧЕНИЯ В СУБД (14.10.2026). Измерение регистра,
+        // указывающее на строку табличной части, не может нести внешний ключ: строки
+        // ТЧ удаляются при каждой правке документа, а движения на этот миг ещё
+        // старые. Но человеку на экране «Движения» нужна подпись, а не UID, — до
+        // этого там стоял голый идентификатор. Для показа ссылка — та же самая:
+        // подпись берётся одним запросом по UID, ассоциация для этого не нужна.
         let foreignKey = null;
-        if (attr.references) {
+        const fieldDecl = (modelDef && modelDef.fields && modelDef.fields[fieldName]) || null;
+        const refersTo = fieldDecl && fieldDecl.refersTo
+            ? (typeof fieldDecl.refersTo === 'string' ? { model: fieldDecl.refersTo } : fieldDecl.refersTo)
+            : null;
+        const ref = attr.references || refersTo;
+        if (ref && ref.model) {
             // Find the target model
-            const targetModel = Object.values(modelsDB).find(m => m.tableName === attr.references.model);
+            const targetModel = Object.values(modelsDB).find(m => m.tableName === ref.model);
             if (targetModel) {
                 // Поле представления целевой таблицы — одно правило на всю систему
                 // (объявленное моделью, иначе `name`); см. presentationFieldOf.
                 const displayField = presentationFieldOf(targetModel);
 
                 foreignKey = {
-                    table: attr.references.model,
-                    field: attr.references.key || 'UID',
+                    table: ref.model,
+                    field: ref.key || 'UID',
                     displayField: displayField
                 };
+                if (!attr.references) foreignKey.noConstraint = true;
             }
         }
 
@@ -1016,6 +1082,32 @@ async function getTableMetadata(modelName) {
             ? JSON.parse(JSON.stringify(modelDef.fields[fieldName].options))
             : null;
 
+        // УМОЛЧАНИЕ, ОБЪЯВЛЕННОЕ АВТОРОМ ПОЛЯ (`defaultValue` в db.json), едет в
+        // метаданные — его ждёт новая запись в автоформе. Прежде автоформа ставила
+        // «пусто по типу» и объявленное умолчание молча теряла: новая услуга
+        // открывалась с пустым «Berechnung», хотя в схеме стоит `perBooking`,
+        // и пустая строка так и уезжала в базу (прогон 16.10.2026, S5).
+        //
+        // Пустое значение ТИПА умолчанием не считаем, хотя в определении оно к
+        // этому моменту тоже лежит в `defaultValue`: его туда ставит ядро
+        // (`emptyValues.injectEmptyDefaults`) для СХЕМЫ, и выдавать его за
+        // пожелание автора нельзя — у даты это `0001-01-01`, и новая форма стала
+        // бы показывать «01.01.0001» там, где сейчас пустое поле.
+        let declaredDefault = null;
+        try {
+            const dv = fieldDecl ? fieldDecl.defaultValue : undefined;
+            const typeEmpty = fieldDecl ? require('./db/emptyValues').emptyValueFor(fieldDecl) : undefined;
+            const sameAsEmpty = (dv instanceof Date && typeEmpty instanceof Date)
+                ? dv.getTime() === typeEmpty.getTime()
+                : dv === typeEmpty;
+            // Только ПРОСТОЕ значение: умолчание-функция (`NOW`), литерал SQL или
+            // объект (`JSON`-колонка с `{}`) формой не показывается — текстовое
+            // поле напечатало бы «[object Object]». Такие умолчания ставит база.
+            const simple = (typeof dv === 'string' || typeof dv === 'number'
+                || typeof dv === 'boolean' || dv instanceof Date);
+            if (simple && !sameAsEmpty) declaredDefault = dv;
+        } catch (e) { /* умолчания нет — автоформа возьмёт пустое по типу */ }
+
         fields.push({
             name: fieldName,
             caption: caption,
@@ -1032,6 +1124,13 @@ async function getTableMetadata(modelName) {
             isAddress: !!(modelDef && modelDef.fields && modelDef.fields[fieldName] && modelDef.fields[fieldName].isAddress),
             inputType: explicitInputType,
             options: explicitOptions,
+            // Умолчание ДЛЯ НОВОЙ ЗАПИСИ (не для колонки списка): см. выше.
+            declaredDefault: declaredDefault,
+            // Умолчание из НАСТРОЙКИ ПОЛЬЗОВАТЕЛЯ (`"defaultFromSetting": { app, key }`):
+            // «как я обычно принимаю оплату» — личное, а не свойство схемы. Читается
+            // при открытии новой записи (uniForm.generateFormSpec), сильнее `defaultValue`.
+            defaultFromSetting: (fieldDecl && fieldDecl.defaultFromSetting
+                && typeof fieldDecl.defaultFromSetting === 'object') ? fieldDecl.defaultFromSetting : undefined,
             showTime: autoShowTime,
             // properties едут в ячейку списка как есть (renderCellElement мержит
             // col.properties) — через них флаг доходит до контрола даты.
@@ -1152,12 +1251,33 @@ async function getDynamicTableData(options) {
         }
     }
 
+    // ПОСТОЯННЫЙ ОТБОР ПОДЧИНЁННОГО СПИСКА (`properties.owner.where` на форме записи:
+    // платежи ЭТОЙ брони). Синтаксис и проверка — те же, что у `selection.where`
+    // (`sanitizeLookupWhere`: только равенства по полям модели); RLS сверху, как
+    // всегда. Кладётся ПОСЛЕ фильтров человека и перебивает их: этот отбор не
+    // снимается — иначе на вкладке брони открылись бы платежи всех броней.
+    const ownerWhere = sanitizeLookupWhere(options && options.ownerWhere, Model);
+    if (ownerWhere) Object.assign(where, ownerWhere);
+
     // Build ORDER BY clause from sort
+    //
+    // СОРТИРОВКА ТОЛЬКО ПО СУЩЕСТВУЮЩИМ ПОЛЯМ. Имя поля приходит от клиента —
+    // щелчком по заголовку колонки, — а колонка в журнале бывает СИНТЕТИЧЕСКОЙ:
+    // состояние объекта, вычисляемый реквизит журнала. Поля с таким именем в
+    // таблице нет, и `ORDER BY` по нему не «игнорируется», а роняет запрос: журнал
+    // открывается пустым, причём виноватым выглядит сам список. Флаг `sortable:
+    // false` у колонки для этого не годится — его объявляют, но клиент его не
+    // читает, и полагаться на добросовестность клиента в имени столбца нельзя.
     const order = [];
     if (sort && Array.isArray(sort)) {
+        const known = Model.rawAttributes || {};
         for (const sortItem of sort) {
             const { field, order: sortOrder } = sortItem;
-            order.push([field, sortOrder.toUpperCase()]);
+            if (!field || !Object.prototype.hasOwnProperty.call(known, field)) {
+                if (field) console.warn(`[getDynamicTableData] ${Model.tableName}: сортировка по «${field}» пропущена — такого поля в модели нет`);
+                continue;
+            }
+            order.push([field, String(sortOrder || 'ASC').toUpperCase()]);
         }
     }
 
@@ -1165,7 +1285,8 @@ async function getDynamicTableData(options) {
     // чтобы не гонять COUNT через всю RLS-цепочку на каждый шаг скролла)
     const t2 = Date.now();
     const dbGW = require('./dbGateway');
-    const _countKey = _countCacheKey(Model.tableName, (dbContext.sessionID || dbContext.userId), filters);
+    const _countKey = _countCacheKey(Model.tableName, (dbContext.sessionID || dbContext.userId),
+        ownerWhere ? (filters || []).concat([{ __owner: ownerWhere }]) : filters);
     let totalRows = _countCacheGet(_countKey);
     if (totalRows === undefined) {
         totalRows = await dbGW.execute({ operation: 'count', table: Model.tableName, where, context: dbContext });
@@ -1385,7 +1506,18 @@ async function resolveTableForeignKeys(modelName, dataArray, fields, language) {
             // а не UID. Читаем их тем же запросом — иначе подставлять будет нечего.
             const targetModel = Object.values(modelsDB).find(m => m.tableName === fkTableName);
             const fallbackFields = displayFallbackFields(targetModel && targetModel.rawAttributes, displayField);
-            tableBatches.set(fkTableName, { displayField, fallbackFields, translatable, lookup: null, uids: new Set() });
+            // ПРЕДСТАВЛЕНИЕ — САМО ССЫЛКА. У строки табличной части своего имени
+            // нет: строка «номер в брони» есть сам номер. Модель объявляет это
+            // `entityConfig.presentationField: 'roomId'`, и подписью становится
+            // представление того, на что поле ссылается, а не его UID. Один
+            // переход, без рекурсии: цепочка длиннее — признак, что представление
+            // объявлено не там.
+            const dAttr = targetModel && targetModel.rawAttributes && targetModel.rawAttributes[displayField];
+            const hopTable = dAttr && dAttr.references && dAttr.references.model;
+            const hopModel = hopTable ? Object.values(modelsDB).find(m => m.tableName === hopTable) : null;
+            const hop = hopModel ? { table: hopTable, displayField: presentationFieldOf(hopModel),
+                fallbackFields: displayFallbackFields(hopModel.rawAttributes, presentationFieldOf(hopModel)) } : null;
+            tableBatches.set(fkTableName, { displayField, fallbackFields, translatable, lookup: null, uids: new Set(), hop });
         }
     }
     // Предзагрузка lookup'ов переводов для translatable display-полей (1 запрос на таблицу/язык,
@@ -1435,7 +1567,30 @@ async function resolveTableForeignKeys(modelName, dataArray, fields, language) {
                 where: { UID: { [Op.in]: uidsArray } },
                 options: { raw: true, attributes: ['UID', batch.displayField, ...batch.fallbackFields] },
                 context: { sessionID: SYSTEM_SESSION_ID }
-            }).then(rows => {
+            }).then(async rows => {
+                // Переход по ссылке-представлению (см. `hop` выше): подменяем
+                // значение поля представлением записи, на которую оно указывает.
+                if (batch.hop && Array.isArray(rows) && rows.length) {
+                    const ids = [...new Set(rows.map(r => r[batch.displayField]).filter(v => v != null && String(v).trim() !== ''))];
+                    if (ids.length) {
+                        try {
+                            const hopRows = await fkDbGW.execute({
+                                operation: 'read',
+                                table: batch.hop.table,
+                                where: { UID: { [Op.in]: ids } },
+                                options: { raw: true, attributes: ['UID', batch.hop.displayField, ...batch.hop.fallbackFields] },
+                                context: { sessionID: SYSTEM_SESSION_ID }
+                            });
+                            const byId = new Map((hopRows || []).map(h => [h.UID, pickDisplayValue(h, batch.hop.displayField, 'UID')]));
+                            for (const r of rows) {
+                                const v = r[batch.displayField];
+                                if (byId.has(v)) r[batch.displayField] = byId.get(v);
+                            }
+                        } catch (e) {
+                            console.error(`[resolveTableForeignKeys] presentation hop ${fkTableName} → ${batch.hop.table}:`, e.message);
+                        }
+                    }
+                }
                 // Populate cache from results
                 const found = new Set();
                 if (Array.isArray(rows)) {
@@ -1628,6 +1783,15 @@ module.exports.invalidateFkCache = function(tableName) {
     _countCacheInvalidate(tableName);
     // Кэш lookup-списков (открытие форм) сбрасывается той же мутацией.
     _lookupCacheInvalidate(tableName);
+    // ЖУРНАЛ ДОКУМЕНТОВ своих записей не имеет — его строки меняются вместе с
+    // документами, и счётчик журнала, закэшированный до записи, показывал бы на
+    // одну строку меньше (drive_root/db/journals.js).
+    try {
+        for (const jt of require('./db/journals').journalsOfDocument(tableName)) {
+            _countCacheInvalidate(jt);
+            _lookupCacheInvalidate(jt);
+        }
+    } catch (e) { /* журналов нет */ }
 };
 
 // ── Представление записи для списков выбора и FK-колонок ─────────────────────
@@ -1702,6 +1866,23 @@ function pickDisplayValue(row, displayField, keyField) {
  * @param {Object} options - { tableName, modelName, firstRow, visibleRows, userId }
  * @returns {Promise<Object>} - { totalRows, fields, data, range }
  */
+/**
+ * Условие отбора списка выбора (`selection.where` лейаута, 16.10.2026): ТОЛЬКО
+ * равенства по реквизитам модели, значения — строки, числа, булевы. Всё прочее
+ * отбрасывается: условие приходит с клиента, и превращать его в произвольный запрос
+ * нельзя. RLS накладывается поверх, как всегда, — условие только сужает.
+ */
+function sanitizeLookupWhere(where, Model) {
+    if (!where || typeof where !== 'object' || Array.isArray(where)) return null;
+    const attrs = (Model && Model.rawAttributes) || {};
+    const out = {};
+    for (const [k, v] of Object.entries(where)) {
+        if (!Object.prototype.hasOwnProperty.call(attrs, k)) continue;
+        if (v === null || ['string', 'number', 'boolean'].includes(typeof v)) out[k] = v;
+    }
+    return Object.keys(out).length ? out : null;
+}
+
 async function getLookupList(options) {
     let { tableName, modelName, firstRow, visibleRows, userId, sessionID } = options || {};
     const dbContext = sessionID ? { sessionID } : { userId };
@@ -1740,12 +1921,15 @@ async function getLookupList(options) {
             _lkLang = (_sctx && _sctx.language) || '';
         } catch (e) { /* язык не критичен для ключа — продолжаем без него */ }
     }
-    const _lkKey = `${_lkTable}::${_lkIdentity}::${_lkLang}::${firstRow}::${visibleRows}`;
+    const lookupWhere = sanitizeLookupWhere(options && options.where, Model);
+    const _lkKey = `${_lkTable}::${_lkIdentity}::${_lkLang}::${firstRow}::${visibleRows}::${lookupWhere ? JSON.stringify(lookupWhere) : ''}`;
     const _lkCached = _lookupCacheGet(_lkKey);
     if (_lkCached !== undefined) return _lkCached;
 
     const lookupDbGW = require('./dbGateway');
-    const totalRows = await lookupDbGW.execute({ operation: 'count', table: tableName || Model.tableName, context: dbContext });
+    const totalRows = await lookupDbGW.execute(Object.assign(
+        { operation: 'count', table: tableName || Model.tableName, context: dbContext },
+        lookupWhere ? { where: Object.assign({}, lookupWhere) } : {}));
 
     const keyField = 'UID';
 
@@ -1760,6 +1944,7 @@ async function getLookupList(options) {
     const rows = await lookupDbGW.execute({
         operation: 'read',
         table: tableName || Model.tableName,
+        where: lookupWhere ? Object.assign({}, lookupWhere) : undefined,
         options: {
             attributes: [keyField, displayField, ...fallbackFields],
             offset: firstRow,

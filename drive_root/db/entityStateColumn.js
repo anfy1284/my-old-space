@@ -46,13 +46,18 @@ function prepend(tableName, fields) {
     const globalCtx = require('../globalServerContext');
     const modelName = globalCtx.getModelNameForTable(tableName) || tableName;
     const Model = modelName ? (globalCtx.modelsDB || {})[modelName] : null;
-    if (!Model || !deletionMark.isEntityDef(Model)) return fields;
+    // ЖУРНАЛ ДОКУМЕНТОВ — список документов, и первая колонка у него та же, что у
+    // журнала одного вида: строки в нём — документы, у которых есть и пометка, и
+    // состояние проведения (оба поля добавляет ядро, drive_root/db/journals.js).
+    let isJournal = false;
+    try { isJournal = require('./journals').isJournalTable(tableName); } catch (e) { /* нет журналов */ }
+    if (!Model || !(isJournal || deletionMark.isEntityDef(Model))) return fields;
 
     // Уже стоит (повторный вызов) — ничего не делаем.
     if (fields.some(f => f && f.name === COLUMN)) return fields;
 
     const posting = require('./posting');
-    const postable = !!posting.readConfig(Model);
+    const postable = isJournal || !!posting.readConfig(Model);
 
     // У справочника состояния проведения нет — значок будет только у помеченных.
     const valueIcons = { '__marked': ICONS.marked };

@@ -33,87 +33,48 @@
  * в воркере его не будет.
  */
 
-const fs = require('fs');
-const path = require('path');
+const appFactories = require('../appFactories');
 
 const HANDLERS_FILE = 'posting.handlers.js';
 
 let _handlers = null;   // Map<name, fn>
 
-/** Каталоги приложений: сначала проект (перекрывает), затем фреймворк. */
-function collectAppDirs() {
-    const projectRoot = process.env.PROJECT_ROOT
-        || (function () { try { return require('../globalServerContext').getProjectRoot(); } catch (e) { return null; } })();
-    const frameworkRoot = path.join(__dirname, '..', '..');
-
-    let appsBasePath = 'apps';
-    const appNames = [];
-    const readAppsJson = (p) => {
-        if (!fs.existsSync(p)) return;
-        try {
-            const cfg = JSON.parse(fs.readFileSync(p, 'utf8'));
-            if (typeof cfg.path === 'string' && cfg.path) appsBasePath = cfg.path.replace(/^[/\\]+/, '');
-            for (const app of (cfg.apps || [])) {
-                if (app && app.name && !appNames.includes(app.name)) appNames.push(app.name);
-            }
-        } catch (e) {
-            console.error(`[postingHandlers] Битый apps.json: ${p}: ${e.message}`);
-        }
-    };
-    readAppsJson(path.join(frameworkRoot, 'drive_forms', 'apps.json'));
-    readAppsJson(path.join(frameworkRoot, 'apps.json'));
-    if (projectRoot) readAppsJson(path.join(projectRoot, 'apps.json'));
-
-    const baseDirs = [];
-    if (projectRoot) baseDirs.push(path.join(projectRoot, appsBasePath));
-    baseDirs.push(path.join(frameworkRoot, appsBasePath));
-    return { appNames, baseDirs };
-}
-
 /**
  * Загрузить (или перечитать) реестр.
+ *
+ * Поиск каталогов приложений и вызов фабрик — ядро `drive_root/appFactories.js`:
+ * тот же код жил здесь и в реестре регламентных задач дословно, а третьим
+ * потребителем стали правила оповещений.
+ *
  * @param {object} [modelsDB]
  * @param {object} [Utilities]
  * @returns {Map<string, Function>}
  */
 function load(modelsDB, Utilities) {
-    const handlers = new Map();
-    const { appNames, baseDirs } = collectAppDirs();
-
-    for (const appName of appNames) {
-        for (const baseDir of baseDirs) {
-            const file = path.join(baseDir, appName, HANDLERS_FILE);
-            if (!fs.existsSync(file)) continue;
-            try {
-                const factory = require(file);
-                if (typeof factory !== 'function') {
-                    console.error(`[postingHandlers] ${file}: модуль должен экспортировать функцию-фабрику`);
-                    break;
-                }
-                const declared = factory(modelsDB, Utilities) || {};
-                for (const [name, fn] of Object.entries(declared)) {
-                    if (typeof fn !== 'function') {
-                        console.error(`[postingHandlers] ${file}: "${name}" не функция`);
-                        continue;
-                    }
-                    handlers.set(name, fn);
-                }
-                console.log(`[postingHandlers] ${appName}: обработчиков ${Object.keys(declared).length}`);
-            } catch (e) {
-                console.error(`[postingHandlers] Ошибка загрузки ${file}: ${e && e.message || e}`);
-            }
-            break; // проектный файл перекрывает фреймворковый
-        }
-    }
-
-    _handlers = handlers;
-    return handlers;
+    _handlers = appFactories.load({
+        fileName: HANDLERS_FILE,
+        tag: '[postingHandlers]',
+        modelsDB, Utilities,
+        accept: (name, fn) => (typeof fn === 'function')
+            ? { value: fn }
+            : { error: `"${name}" не функция` }
+    });
+    return _handlers;
 }
 
 function ensureLoaded(modelsDB, Utilities) {
     if (!_handlers) {
-        const globalCtx = (function () { try { return require('../globalServerContext'); } catch (e) { return null; } })();
-        load(modelsDB || (globalCtx && globalCtx.modelsDB), Utilities);
+        // `Utilities` ОБЯЗАН доехать до фабрики, даже когда зовущий его не передал.
+        // Объявленная сигнатура фабрики — `(modelsDB, Utilities)`, и приложение
+        // вправе на неё полагаться; а `resolve()` — единственный реальный
+        // вызывающий — зовёт `ensureLoaded()` БЕЗ аргументов. Дефект был
+        // невидим, пока ни один обработчик не пользовался утилитами: счёт строит
+        // движения из своих строк и `generateUID` не зовёт. Первый, кому
+        // понадобилось, упал на `Cannot read properties of undefined` — и упал не
+        // при загрузке, а при проведении, то есть в очереди, у 58 документов
+        // подряд. Поэтому утилиты берутся из пакета, а не из доверия вызывающему.
+        load(modelsDB || appFactories.defaultModels(),
+             Utilities || appFactories.defaultUtilities());
     }
     return _handlers;
 }

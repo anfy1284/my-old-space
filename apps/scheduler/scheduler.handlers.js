@@ -93,6 +93,35 @@ module.exports = function (modelsDB, Utilities) {
             }
         },
 
+        // ── Оповещения по документам: правила по времени + сводка ─────────────
+        // ТЗ «Оповещения по документам», §6 (повод 2) и §14. Время событием в
+        // базе не является: вчера оповещения не было, сегодня есть, хотя за ночь
+        // ничего не менялось. Заметить это больше нечем, поэтому проход
+        // объявлен задачей — с интервалом в сутки.
+        'core.documentAlerts': {
+            caption: { i18n: 'sched_handler_document_alerts' },
+            icon: '/apps/general_icons/resources/public/16x16/alert_warning.png',
+            // Правила читают данные под служебной сессией владельца задания —
+            // область задачи его. Сводка же идёт НЕ ему, а пользователям без
+            // роли admin, каждому о его документах (alertsRunner.summary).
+            scope: 'any',
+            paramsSchema: {},
+            run: async (ctx) => {
+                const runner = require('../../drive_root/db/alertsRunner');
+                const res = await runner.pass(ctx);
+                const s = res.stats;
+                const parts = [`Правил по времени: ${s.rules}, документов: ${s.documents}`];
+                // «Несказанных» — это НЕ отправленные уведомления: фоновый проход
+                // молчит и говорит одной сводкой. Число полезно в журнале прогонов:
+                // по нему видно, сколько оповещений ждут человека.
+                if (s.pending) parts.push(`новых оповещений: ${s.pending}`);
+                parts.push(res.summary.sent
+                    ? `сводок отправлено: ${res.summary.sent}`
+                    : `сводка не нужна${res.summary.reason ? ' — ' + res.summary.reason : ''}`);
+                return { resultText: parts.join(', ') };
+            }
+        },
+
         // ── Автосдвиг даты запрета редактирования (ТЗ §13.3) ──────────────────
         'core.advanceClosingDate': {
             caption: { i18n: 'sched_handler_advance_closing_date' },

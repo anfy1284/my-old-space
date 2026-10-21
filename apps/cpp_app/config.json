@@ -16,7 +16,8 @@
             "id": "main",
             "items": [
                 {
-                    "caption": "apps",
+                    "caption": { "i18n": "menu_apps" },
+                    "icon": "/apps/general_icons/resources/public/16x16/folder.png",
                     "roles": ["admin"],
                     "items": [
                         {

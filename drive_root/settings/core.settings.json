@@ -136,6 +136,23 @@
             },
             "order": 320
         },
+        "alertSummaryIdleHours": {
+            "//": "Через сколько часов «не смотрели обработку Проверка документов» считается «давно» (ТЗ оповещений §14). Условие важнее, чем кажется: если человек зашёл и всё посмотрел, напоминать не о чем, даже если он ничего не исправил — он уже знает.",
+            "scope": "system",
+            "type": "number",
+            "default": 24,
+            "visibility": "admin",
+            "group": {
+                "i18n": "settings_core_group_alerts"
+            },
+            "caption": {
+                "i18n": "settings_core_alert_summary_idle"
+            },
+            "hint": {
+                "i18n": "settings_core_alert_summary_idle_hint"
+            },
+            "order": 400
+        },
         "postingSuccessNotifyTtl": {
             "//": "Через сколько секунд гаснет уведомление об успешном проведении. Успех — эфемерный и с тайм-аутом, ошибка — с записью и без (ТЗ §12.1).",
             "scope": "system",

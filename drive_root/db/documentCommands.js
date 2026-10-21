@@ -135,8 +135,10 @@ async function enqueueCommand(action, { table, uid }, ctx) {
     if (!cfg) return { error: await say(sessionID, 'posting_refuse_not_postable', 'Документ не проводится') };
 
     // Отказ в распроведении выдаём СРАЗУ, а не уведомлением через полминуты:
-    // пользователь нажал кнопку и ждёт ответа, а «нельзя» — это ответ.
-    if (action === posting.ACTION.UNPOST && !cfg.unpost.length) {
+    // пользователь нажал кнопку и ждёт ответа, а «нельзя» — это ответ. Документ
+    // здесь не прочитан, поэтому спрашиваем только про ОБЪЯВЛЕНИЕ (`row = null`):
+    // запрет из конкретного состояния проверит `runOne`, когда прочтёт строку.
+    if (action === posting.ACTION.UNPOST && !posting.canUnpostFrom(cfg, null)) {
         return { error: await say(sessionID, 'posting_refuse_unpost_denied', 'Распроведение запрещено') };
     }
 
@@ -250,16 +252,29 @@ async function postMany({ table, uids }, ctx) {
         return { error: await say(sessionID, 'posting_refuse_no_selection', 'Не выбрано ни одного документа') };
     }
     const postingQueue = require('./postingQueue');
-    const rows = await postingQueue.enqueueMany({
-        table, uids,
-        action: require('./posting').ACTION.POST,
-        requestedBy: await actorOf(sessionID),
-        byHuman: true,
-        sessionID
-    });
+    // ЖУРНАЛ ДОКУМЕНТОВ: выделение состоит из документов РАЗНЫХ видов, и каждый
+    // уходит в очередь своим видом — очередь, проведение и состояние живут у
+    // документа, а не у журнала (drive_root/db/journals.js). Вид строки читается
+    // из журнала под сессией человека, то есть под его RLS.
+    const journals = require('./journals');
+    const groups = journals.isJournalTable(table)
+        ? await journals.splitByDocument(table, uids, sessionID)
+        : new Map([[table, uids]]);
+    const requestedBy = await actorOf(sessionID);
+    let queued = 0;
+    for (const [docTable, docUids] of groups) {
+        const rows = await postingQueue.enqueueMany({
+            table: docTable, uids: docUids,
+            action: require('./posting').ACTION.POST,
+            requestedBy,
+            byHuman: true,
+            sessionID
+        });
+        queued += rows.length;
+        for (const r of rows) notify(docTable, 'update', r.documentUID);
+    }
     try { await postingQueue.kick(); } catch (e) { /* подберёт страхующий тик */ }
-    for (const r of rows) notify(table, 'update', r.documentUID);
-    return { ok: true, table, queued: rows.length, requested: uids.length };
+    return { ok: true, table, queued, requested: uids.length };
 }
 
 /**
@@ -280,16 +295,18 @@ async function movementsCommand(params, ctx) {
     if (!table || !uid) {
         return { error: await say(sessionID, 'storno_refuse_no_target', 'Документ не найден') };
     }
+    // Форма движений — ИМЕНОВАННАЯ форма ядра, а не «таблица document_movements»:
+    // записи с таким именем нет и не было, имя таблицы служило ей адресом за
+    // неимением другого. Теперь у неё есть собственный адрес.
     const movementsForm = require('./movementsForm');
     return {
         ok: true, table, documentUID: uid,
         open: {
             appName: 'uniForm',
             params: {
-                mode: 'record',
-                tableName: movementsForm.TABLE,
-                sourceTable: table,
-                sourceUID: uid
+                app: movementsForm.APP,
+                form: movementsForm.FORM,
+                params: { sourceTable: table, sourceUID: uid }
             }
         }
     };
@@ -348,15 +365,8 @@ async function postingInfo({ table, uid }, ctx) {
             }
             // Доступность «распровести» решает ОБЪЯВЛЕНИЕ документа, а не форма:
             // счёт распроведению не подлежит, денежный документ — из черновика.
-            if (cfg && cfg.unpost.length) {
-                // Та же проверка, что в `posting.runOne`: сравнивать `unpost` можно
-                // только с ДЕЛОВЫМ состоянием. Его может не быть вовсе, а у
-                // денежного документа оно и есть состояние проведения — тогда
-                // ограничивать нечем, и распроведение разрешено.
-                const hasStatus = !cfg.statusIsPostingState
-                    && Object.prototype.hasOwnProperty.call(doc, cfg.statusField);
-                unpostAllowed = !hasStatus || cfg.unpost.indexOf(doc[cfg.statusField]) !== -1;
-            }
+            // Спрашиваем ядро (`posting.canUnpostFrom`), а не повторяем правило.
+            unpostAllowed = posting.canUnpostFrom(cfg, doc);
         }
     } catch (e) {
         console.error(`[documentCommands] postingInfo ${table}[${uid}]: ${e.message}`);

@@ -58,7 +58,11 @@
 
                     // tableInstance — ссылка на DynamicTable, переданная из кнопки «Настройки»
                     const tableInst = openParams.tableInstance || null;
-                    const columns   = (tableInst && Array.isArray(tableInst.columns)) ? tableInst.columns : [];
+                    // Служебные колонки ядра (`__documentAlert`, `__entityState` — значки
+                    // оповещений и состояния) в отбор не идут: у них нет подписи, и в поле
+                    // «Feld» стояло техническое имя (прогон 17.10.2026, I1).
+                    const columns   = ((tableInst && Array.isArray(tableInst.columns)) ? tableInst.columns : [])
+                        .filter(c => c && c.data && String(c.data).indexOf('__') !== 0);
 
                     // Глубокая копия текущих фильтров — изменения применяем только по «Применить»
                     const currentFilters = tableInst ? JSON.parse(JSON.stringify(tableInst.getFilters())) : [];

@@ -1,0 +1,163 @@
+[
+    {
+        "type": "commandBar",
+        "extraButtons": [
+            {
+                "name": "btnRefresh",
+                "caption": {
+                    "i18n": "dc_refresh"
+                },
+                "icon": "/apps/general_icons/resources/public/16x16/refresh.png",
+                "events": {
+                    "onClick": "refresh"
+                }
+            },
+            {
+                "name": "btnAction",
+                "caption": {
+                    "i18n": "dc_do_action"
+                },
+                "icon": "/apps/general_icons/resources/public/16x16/next.png",
+                "events": {
+                    "onClick": "runAction"
+                }
+            },
+            {
+                "name": "btnOpen",
+                "caption": {
+                    "i18n": "dc_open_document"
+                },
+                "icon": "/apps/general_icons/resources/public/16x16/open.png",
+                "events": {
+                    "onClick": "openDocument"
+                }
+            }
+        ]
+    },
+    {
+        "type": "infoLine",
+        "name": "hint",
+        "caption": {
+            "i18n": "dc_hint"
+        },
+        "properties": {
+            "tone": "yellow"
+        }
+    },
+    {
+        "type": "group",
+        "caption": "",
+        "noBorder": true,
+        "orientation": "horizontal",
+        "layout": [
+            {
+                "type": "emunList",
+                "name": "fSeverity",
+                "data": "fSeverity",
+                "caption": {
+                    "i18n": "dc_filter_severity"
+                },
+                "properties": {
+                    "width": 160
+                },
+                "events": {
+                    "onChange": "refresh"
+                }
+            },
+            {
+                "type": "emunList",
+                "name": "fTable",
+                "data": "fTable",
+                "caption": {
+                    "i18n": "dc_filter_kind"
+                },
+                "properties": {
+                    "width": 220
+                },
+                "events": {
+                    "onChange": "refresh"
+                }
+            }
+        ]
+    },
+    {
+        "type": "table",
+        "name": "alertsTable",
+        "data": "rows",
+        "caption": {
+            "i18n": "dc_table_caption"
+        },
+        "columns": [
+            {
+                "caption": "",
+                "data": "severity",
+                "width": 26,
+                "inputType": "textbox",
+                "readOnly": true,
+                "iconOnly": true,
+                "iconTitleField": "severityCaption",
+                "valueIcons": {
+                    "error": "/apps/general_icons/resources/public/16x16/alert_error.png",
+                    "warning": "/apps/general_icons/resources/public/16x16/alert_warning.png",
+                    "info": "/apps/general_icons/resources/public/16x16/alert_info.png"
+                }
+            },
+            {
+                "caption": {
+                    "i18n": "dc_col_kind"
+                },
+                "data": "kindCaption",
+                "width": 150,
+                "inputType": "textbox",
+                "readOnly": true
+            },
+            {
+                "caption": {
+                    "i18n": "dc_col_document"
+                },
+                "data": "documentName",
+                "width": 260,
+                "inputType": "textbox",
+                "readOnly": true
+            },
+            {
+                "caption": {
+                    "i18n": "dc_col_date"
+                },
+                "data": "dateText",
+                "width": 90,
+                "inputType": "textbox",
+                "readOnly": true
+            },
+            {
+                "caption": {
+                    "i18n": "dc_col_text"
+                },
+                "data": "text",
+                "autoWidth": true,
+                "inputType": "textbox",
+                "readOnly": true
+            },
+            {
+                "caption": {
+                    "i18n": "dc_col_action"
+                },
+                "data": "actionCaption",
+                "width": 140,
+                "inputType": "textbox",
+                "readOnly": true
+            }
+        ],
+        "properties": {
+            "visibleRows": 14,
+            "saveOnEdit": false,
+            "readOnly": true,
+            "hiddenButtons": [
+                "recordAdd",
+                "recordDelete",
+                "recordOpen",
+                "listSettings"
+            ]
+        }
+    }
+]

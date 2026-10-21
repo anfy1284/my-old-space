@@ -96,10 +96,9 @@ module.exports = async function (modelsDB) {
         const usersClientUID = await loadScript(usersClientSource, 'admin');
 
         await layoutMemory.saveLayout({
-            appName:   'uniForm',
-            mode:      'record',
-            tableName: 'users',
-            roles:     'admin',
+            app:     'login',
+            subject: { table: 'users', kind: 'record' },
+            roles:   'admin',
             extraButtons: [{
                 name:    'btnResetPassword',
                 caption: { i18n: 'cp_btn_open' },

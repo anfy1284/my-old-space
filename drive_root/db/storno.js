@@ -69,7 +69,10 @@
  * Что НЕ копируется никогда: `UID`, `number`, `date`, `name`, `createdAt`,
  * `updatedAt` — номер и дата у встречного документа свои (их проставят
  * автонумерация и `documentDate` при СОЗДАНИИ), представление пересоберёт
- * `applyPresentation`.
+ * `applyPresentation`, — и ЛЮБОЙ СЛУЖЕБНЫЙ реквизит (`"service": true`):
+ * состояние проведения, момент времени, пометка на удаление. Последнее — по
+ * признаку, а не по списку имён: список отставал бы на один механизм, что с ним
+ * однажды и случилось (см. `copyRow`).
  */
 
 const NEVER_COPY = ['UID', 'number', 'date', 'name', 'createdAt', 'updatedAt'];
@@ -137,10 +140,23 @@ function copyRow(Model, row, cfg, extra) {
     const attrs = Model.rawAttributes || {};
     const negate = (cfg && Array.isArray(cfg.negate)) ? cfg.negate : [];
     const exclude = NEVER_COPY.concat((cfg && Array.isArray(cfg.copyExclude)) ? cfg.copyExclude : []);
+    const serviceFields = require('./serviceFields');
 
     const out = {};
     for (const key of Object.keys(attrs)) {
         if (exclude.indexOf(key) !== -1) continue;
+        // СЛУЖЕБНЫЙ РЕКВИЗИТ НЕ КОПИРУЕТСЯ НИКОГДА — по признаку, а не по списку
+        // имён (найдено живым прогоном 02.10.2026). Это поля, которыми владеет
+        // механизм: состояние проведения, момент времени, пометка на удаление.
+        // Сохранённый сторно наследовал `postingState: posted` исходного и
+        // выглядел проведённым, не имея ни одного движения; помеченный документ
+        // рождал бы помеченный сторно.
+        //
+        // Признаком, а не седьмым именем в `NEVER_COPY`: список имён отстаёт на
+        // один механизм — именно так он и отстал, когда у документов появились
+        // `seq`, `postingState` и `deletionMark`. Служебность объявлена один раз
+        // (`drive_root/db/serviceFields.js`), и спрашивать её надо там же.
+        if (serviceFields.isServiceField(key, attrs[key])) continue;
         if (!Object.prototype.hasOwnProperty.call(row, key)) continue;
         out[key] = negate.indexOf(key) !== -1 ? negateValue(row[key]) : row[key];
     }

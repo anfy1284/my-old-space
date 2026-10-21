@@ -150,6 +150,15 @@
             if (item.items) {
                 newItem.items = transformItems(item.items);
             }
+            // ВЫХОД (16.10.2026): сервер снимает сессию и cookie, страница
+            // перезагружается на форму входа. Своё действие, а не приложение: окна
+            // для этого не нужно.
+            if (item.action === 'logout') {
+                newItem.onClick = async () => {
+                    try { await fetch('/logout', { method: 'POST', credentials: 'same-origin' }); } catch (e) { /* перезагрузка всё равно покажет состояние */ }
+                    window.location.reload();
+                };
+            }
             if (item.action === 'open' && item.appName) {
                 newItem.onClick = () => {
                     // Pass params if available

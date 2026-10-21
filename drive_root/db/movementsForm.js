@@ -28,8 +28,13 @@
 const registers = require('./registers');
 const posting = require('./posting');
 
-/** Имя виртуальной таблицы экрана. Записи с таким именем нет. */
-const TABLE = 'document_movements';
+// АДРЕС формы движений. Раньше здесь стояло имя виртуальной таблицы
+// (`document_movements`), которой в базе нет и никогда не было: имя таблицы
+// служило адресом за неимением другого. Теперь у формы есть собственный адрес —
+// приложение-владелец и имя формы, — а предмета у неё нет вовсе: она ничего не
+// сохраняет и ничего не запирает, она показывает.
+const APP  = 'uniForm';
+const FORM = 'documentMovements';
 
 /**
  * Построить спецификацию формы движений.
@@ -146,4 +151,36 @@ async function buildSpec(p) {
     };
 }
 
-module.exports = { TABLE, buildSpec };
+/**
+ * Метод формы `onLoadData`. Лейаут зависит от КОНКРЕТНОГО документа (сколько у
+ * него регистров — столько вкладок), поэтому объявить его заранее нечем: форма
+ * возвращает его вместе с данными.
+ */
+async function onLoadData({ params }, ctx) {
+    const spec = await buildSpec({
+        table: params && params.sourceTable,
+        uid: params && params.sourceUID,
+        sessionID: ctx && ctx.sessionID
+    });
+    if (!spec) return { layout: [], data: [] };
+    return spec;
+}
+
+/** Регистрация формы движений. Зовётся из `apps/uniForm/init.js`. */
+async function registerForm() {
+    const layoutMemory = require('../layoutMemory');
+    const formMethods  = require('../formMethods');
+    formMethods.register({ app: APP, form: FORM, methods: { onLoadData }, roles: ['user', 'admin'] });
+    await layoutMemory.saveLayout({
+        app: APP,
+        form: FORM,
+        roles: '*',
+        // Лейаут приезжает из `onLoadData`: он разный у разных документов.
+        layout: [],
+        formIcon: '/apps/general_icons/resources/public/16x16/register.png',
+        recordCaption: { i18n: 'mv_caption' },
+        windowState: 'maximized'
+    });
+}
+
+module.exports = { APP, FORM, buildSpec, onLoadData, registerForm };

@@ -17,6 +17,22 @@ const serverScriptStore = require('./drive_root/serverScriptStore');
  * @param {Object} options.config - Server config
  */
 function start(options = {}) {
+  // ЧАСОВОЙ ПОЯС РЕШЕНИЯ — один на всё (решение владельца 15.10.2026). Дата
+  // документа — момент, а день, который печатается в счёте и с которым сверяются
+  // правила, сервер берёт по СВОИМ часам. Контейнер живёт в UTC, и документ от
+  // 00:30 по Берлину печатался бы вчерашним числом. Поэтому зона задаётся явно
+  // (`timeZone` в server.config.json) и ставится до первого обращения к датам;
+  // форкнутые воркеры наследуют её через окружение. Явный TZ окружения главнее.
+  if (options.rootPath && !process.env.TZ) {
+    try {
+      const cfg = JSON.parse(require('fs').readFileSync(path.join(options.rootPath, 'server.config.json'), 'utf8'));
+      if (cfg && cfg.timeZone) {
+        process.env.TZ = String(cfg.timeZone);
+        console.log(`[Framework] Time zone: ${process.env.TZ}`);
+      }
+    } catch (e) { /* нет конфига — зона системы */ }
+  }
+
   // Сохраняем rootPath проекта для доступа из других модулей
   if (options.rootPath) {
     console.log(`[Framework] Setting PROJECT_ROOT to: ${options.rootPath}`);

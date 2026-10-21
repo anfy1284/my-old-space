@@ -24,7 +24,7 @@
 'use strict';
 
 const { Op } = require('sequelize');
-const { resolveScopeValue, extractSelfUID: _extractSelfUID } = require('./numberScope');
+const { resolveScopeValue, scopeCondition, extractSelfUID: _extractSelfUID } = require('./numberScope');
 
 module.exports = async function uniqueNumber(request, params, context) {
     const { field = 'number' } = params || {};
@@ -52,7 +52,7 @@ module.exports = async function uniqueNumber(request, params, context) {
     // Та же область, что у автонумерации: одинаковый номер у РАЗНЫХ организаций —
     // норма, а не дубликат.
     const scope = await resolveScopeValue(request, Model, params || {});
-    if (scope.scoped) where[scope.field] = scope.value;
+    Object.assign(where, scopeCondition(scope));
 
     let dup = null;
     try {

@@ -133,10 +133,40 @@ function registerPresentation(tableName, fn) {
 }
 
 /**
+ * БИЛДЕРЫ ИЗ ФАЙЛОВ-ФАБРИК `apps/<app>/presentations.js` — `(modelsDB, Utilities) =>
+ * ({ <таблица>: async (data, ctx) => string })`.
+ *
+ * `registerPresentation` зовут из `init.js`, а его выполняет только ГЛАВНЫЙ процесс.
+ * Документ, созданный ПРОВЕДЕНИЕМ (форкнутый воркер планировщика), оставался без
+ * представления: поступление, порождённое авансом брони (`ctx.createOnce`), получало
+ * пустой `name` (21.10.2026). Та же ловушка, что была с обработчиками проведения, и
+ * то же решение — чистая фабрика, которую грузят оба процесса (`appFactories`).
+ * Явная регистрация из `init.js` сильнее: она могла появиться, чтобы переопределить.
+ */
+let _factoryPresentations = null;
+function factoryPresentations() {
+    if (_factoryPresentations) return _factoryPresentations;
+    _factoryPresentations = new Map();
+    try {
+        const appFactories = require('../appFactories');
+        _factoryPresentations = appFactories.load({
+            fileName: 'presentations.js',
+            tag: '[presentations]',
+            modelsDB: appFactories.defaultModels(),
+            Utilities: appFactories.defaultUtilities(),
+            accept: (name, fn) => (typeof fn === 'function') ? { value: fn } : { error: `"${name}" не функция` }
+        });
+    } catch (e) {
+        console.error('[entityHooks] presentations.js не загружены:', e && e.message || e);
+    }
+    return _factoryPresentations;
+}
+
+/**
  * Получить билдер представления для таблицы (или null).
  */
 function getPresentation(tableName) {
-    return presentationRegistry.get(tableName) || null;
+    return presentationRegistry.get(tableName) || factoryPresentations().get(tableName) || null;
 }
 
 /**
@@ -175,7 +205,7 @@ async function applyPresentation(operation, Model, request, context) {
     const tableName = (Model && Model.tableName) || (request && request.table);
     // Зарегистрированный билдер важнее объявления: он мог появиться именно для того,
     // чтобы переопределить умолчание.
-    let builder = tableName ? presentationRegistry.get(tableName) : null;
+    let builder = tableName ? getPresentation(tableName) : null;
     if (typeof builder !== 'function') builder = declarativePresentation(Model);
     if (typeof builder !== 'function') return;
 
@@ -183,7 +213,9 @@ async function applyPresentation(operation, Model, request, context) {
     // дочитываем текущую запись из БД и мерджим, чтобы билдер видел все реквизиты.
     let effective = Object.assign({}, (request && request.data) || {});
     if (operation === 'update') {
-        const uid = request && request.where && (request.where.UID || request.where.uid);
+        // Не `request.where.UID`: под RLS условие обёрнуто в Op.and (whereUid.js),
+        // и представление строилось бы из одних изменённых полей.
+        const uid = request ? require('../db/whereUid').uidOf(request.where) : null;
         if (uid && Model && typeof Model.findByPk === 'function') {
             try {
                 const cur = await Model.findByPk(uid, { raw: true });

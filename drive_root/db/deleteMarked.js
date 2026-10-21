@@ -247,4 +247,64 @@ async function referrersOf(table, uid, sessionID, limit) {
     return out;
 }
 
-module.exports = { entityTables, referencesTo, list, blockersOf, referrersOf };
+/**
+ * ЗАКРЫТЫЕ ДОКУМЕНТЫ, которые ссылаются на объект (16.10.2026).
+ *
+ * Правило пометки — «помечать можно только то, что можно удалить». Объект, на
+ * который ссылается закрытый документ (выставленный счёт), не удалить НИКОГДА:
+ * сам документ удалению не подлежит, а значит и ссылка из него не исчезнет.
+ * Пометить такой объект — дать обещание, которое «Удаление помеченных» не
+ * выполнит, а заодно снять с него движения: бронь с выставленным счётом теряла
+ * «заказано», и счёт оставался без своей половины (прогон 16.10.2026, Q17).
+ *
+ * «Закрыт» — по объявлению документа, а не по списку в коде, и тем же правилом,
+ * что решает пометку самого документа (`deletionMark.intent` → отказ). Проведённый,
+ * но распроводимый документ закрытым не считается: его можно снять и удалить.
+ * Строка табличной части — это её документ (`referrersOf` уже так отвечает).
+ *
+ * @returns {Promise<Array>} `[{ table, uid, name, state }]`
+ */
+async function closedReferrers(table, uid, sessionID) {
+    const dbGateway = require('../dbGateway');
+    const globalCtx = require('../globalServerContext');
+    const defs = (globalCtx.collectAllModelDefs().models) || [];
+    const out = [];
+    const owners = await referrersOf(table, uid, sessionID);
+    const byTable = new Map();
+    for (const o of owners) {
+        if (!byTable.has(o.table)) byTable.set(o.table, []);
+        byTable.get(o.table).push(o);
+    }
+    const modelsDB = globalCtx.modelsDB || {};
+    const modelOf = (t) => Object.values(modelsDB).find(m => m && (m.tableName === t
+        || (typeof m.getTableName === 'function' && m.getTableName() === t)));
+    for (const [t, items] of byTable.entries()) {
+        const def = defs.find(d => d.tableName === t);
+        const imm = def && def.entityConfig && def.entityConfig.immutable;
+        if (!imm || !imm.field || !Array.isArray(imm.when)) continue;
+        const Model = modelOf(t);
+        if (!Model) continue;
+        let rows = [];
+        try {
+            rows = await dbGateway.execute({
+                operation: 'read', table: t,
+                where: { UID: items.map(i => i.uid) },
+                options: { raw: true },
+                context: { sessionID }
+            });
+        } catch (e) { continue; }
+        for (const r of (rows || [])) {
+            // «Нельзя никогда» — тот же ответ, что дала бы пометка самого
+            // документа: отказ. Проведённый, но распроводимый документ
+            // (`unpostThenMark`) — не навсегда: его можно снять и удалить.
+            const verdict = deletionMark.intent(Model, r, true);
+            if (verdict.action !== 'refuse' || verdict.reasonKey === 'deletion_refuse_mark_off') continue;
+            const state = r[imm.field];
+            const it = items.find(i => i.uid === r.UID);
+            out.push({ table: t, uid: r.UID, name: (it && it.name) || r.name || r.number || r.UID, state });
+        }
+    }
+    return out;
+}
+
+module.exports = { entityTables, referencesTo, list, blockersOf, referrersOf, closedReferrers };

@@ -12,6 +12,16 @@ module.exports = async function(modelsDB) {
         console.error('[uniForm/init] document commands registration failed:', e && e.message || e);
     }
 
+    // Экран ДВИЖЕНИЙ ДОКУМЕНТА — именованная форма ядра. Предмета у неё нет:
+    // она ничего не сохраняет и ничего не запирает. Раньше адресом ей служило имя
+    // виртуальной таблицы `document_movements`, записи с которым не существует.
+    try {
+        await require('../../drive_root/db/movementsForm').registerForm();
+        console.log('[uniForm/init] форма движений документа зарегистрирована');
+    } catch (e) {
+        console.error('[uniForm/init] форма движений не зарегистрирована:', e && e.message || e);
+    }
+
     // Обработчик клика по уведомлению. Уведомление о неудачном проведении
     // приходит от имени `uniForm` — значит, и функция, открывающая документ,
     // живёт здесь. В базе лежит ИМЯ функции: UID скрипта меняется на каждом
@@ -47,7 +57,7 @@ module.exports = async function(modelsDB) {
                 {
                     id: 'main',
                     items: [
-                        { caption: 'Администрирование', roles: ['admin'], items: adminItems }
+                        { caption: { i18n: 'menu_administration' }, icon: '/apps/general_icons/resources/public/16x16/database.png', roles: ['admin'], items: adminItems }
                     ]
                 }
             ], 'start');

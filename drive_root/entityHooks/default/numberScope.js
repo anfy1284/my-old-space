@@ -20,6 +20,7 @@
  */
 
 const DEFAULT_SCOPE_FIELD = 'organizationId';
+const FALLBACK_SCOPE_FIELD = 'hotelId';
 
 /**
  * Есть ли у модели реквизит области.
@@ -40,9 +41,14 @@ function hasScopeField(Model, scopeField) {
  */
 async function resolveScopeValue(request, Model, params = {}) {
     // `scopeField: null` в параметрах хука — осознанный отказ от сужения.
-    const scopeField = Object.prototype.hasOwnProperty.call(params, 'scopeField')
-        ? params.scopeField
-        : DEFAULT_SCOPE_FIELD;
+    const explicit = Object.prototype.hasOwnProperty.call(params, 'scopeField');
+    let scopeField = explicit ? params.scopeField : DEFAULT_SCOPE_FIELD;
+    // Нет организации, но есть гостиница (номера) — область = гостиница. То же правило,
+    // что у области резервной копии (backup/scope.js). Без него номера комнат шли
+    // сквозь все организации: новая получала 6, 7, 8, 9 (прогон 17.10.2026, S4).
+    if (!explicit && !hasScopeField(Model, scopeField) && hasScopeField(Model, FALLBACK_SCOPE_FIELD)) {
+        scopeField = FALLBACK_SCOPE_FIELD;
+    }
     if (!scopeField) return { scoped: false };
     if (!hasScopeField(Model, scopeField)) return { scoped: false };
 
@@ -73,20 +79,24 @@ async function resolveScopeValue(request, Model, params = {}) {
  * быть — ищем рекурсивно.
  */
 function extractSelfUID(where) {
-    const { Op } = require('sequelize');
-    if (!where || typeof where !== 'object') return null;
-    const direct = where.UID || where.uid;
-    if (typeof direct === 'string') return direct;
-    for (const opKey of [Op.and, Op.or]) {
-        const arr = where[opKey];
-        if (Array.isArray(arr)) {
-            for (const sub of arr) {
-                const found = extractSelfUID(sub);
-                if (found) return found;
-            }
-        }
-    }
-    return null;
+    // Одно правило на всё ядро — drive_root/db/whereUid.js. Раньше здесь искали и
+    // внутри Op.or, где RLS держит свои фильтры: так фильтр можно принять за запись.
+    return require('../../db/whereUid').uidOf(where);
 }
 
-module.exports = { resolveScopeValue, extractSelfUID, hasScopeField, DEFAULT_SCOPE_FIELD };
+/**
+ * Условие отбора по области нумерации — одно на автонумерацию и проверку
+ * уникальности (16.10.2026). Пустая область (организации нет) хранится по-разному:
+ * NULL или пустая строка, а в запрос приходила как `undefined` — Sequelize на это
+ * бросает, исключение глоталось, номеров «не было», и все 4095 запусков задач
+ * получили номер «00001» (проверка уникальности ломалась тем же способом).
+ */
+function scopeCondition(scope) {
+    if (!scope || !scope.scoped) return {};
+    const { Op } = require('sequelize');
+    const v = scope.value;
+    if (v === undefined || v === null || v === '') return { [scope.field]: { [Op.or]: [null, ''] } };
+    return { [scope.field]: v };
+}
+
+module.exports = { resolveScopeValue, extractSelfUID, hasScopeField, scopeCondition, DEFAULT_SCOPE_FIELD };

@@ -174,6 +174,17 @@ try {
                 async onOpen(params) {
                     const openParams = Object.assign({}, params || {});
 
+                    // ИМЕНОВАННАЯ ФОРМА приложения: { app, form, params }. Предмета у
+                    // неё может не быть вовсе, поэтому ни `tableName`, ни режим здесь
+                    // не выдумываем — их отсутствие и есть ответ.
+                    if (openParams.form) {
+                        appForm.dbTable = null;
+                        // Именованная форма тоже бывает списком выбора: список таблиц
+                        // системы выбирают из неё же (см. recordSelector `selection.form`).
+                        appForm.selectMode = openParams.selectMode || false;
+                        appForm._windowMode = 'form:' + openParams.app + ':' + openParams.form;
+                        appForm._openParams = openParams.params || {};
+                    } else {
                     // Нормализуем tableName: для режима списка берём из dbTable
                     if (!openParams.tableName && (openParams.dbTable || openParams.table)) {
                         openParams.tableName = openParams.dbTable || openParams.table;
@@ -184,6 +195,8 @@ try {
                     // Режим — часть личности окна: список и карточка одной таблицы это
                     // разные окна, и запомненные размеры у них тоже свои (см. stateKey).
                     appForm._windowMode = openParams.mode || (openParams.recordID || openParams.recordId || openParams.id ? 'record' : 'list');
+                    appForm._openParams = openParams;
+                    }
 
                     try {
                         appForm.appName = APP_NAME;
@@ -255,7 +268,7 @@ try {
                 destroy() {
                     // Программный teardown инстанса (MySpace.close, авто-закрытие после
                     // onAfterSave/выбора записи) НЕ должен показывать интерактивное
-                    // подтверждение "Discard unsaved changes?". Выставляем _closing ДО
+                    // подтверждение «сохранить изменения перед закрытием?». Выставляем _closing ДО
                     // appForm.close(), чтобы DataForm.close() сразу ушёл в super.close()
                     // без вопроса. Пользовательское закрытие крестиком идёт другим путём
                     // (Form.close через титлбар) и подтверждение там сохраняется.
@@ -271,7 +284,7 @@ try {
             // await: createInstance должен резолвиться только когда форма реально
             // отрисована — тогда MySpace.open держит бегущий прогрессбар до конца
             // открытия, а не гасит его на пустом объекте instance.
-            if (params && (params.dbTable || params.tableName || params.table)) await instance.onOpen(params);
+            if (params && (params.dbTable || params.tableName || params.table || params.form)) await instance.onOpen(params);
             return instance;
         };
 

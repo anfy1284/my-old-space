@@ -33,11 +33,28 @@ const emptyValues = require('./db/emptyValues');
  * Ссылки: "" → null. Postgres не принимает пустую строку в FK-колонке, а
  * «ссылки нет» — это и есть NULL, единственный законный случай.
  */
+/**
+ * Строка числа в немецкой записи → число (16.10.2026). Числовое поле (DECIMAL,
+ * FLOAT, INTEGER…) получило строку с запятой — «100,5», «1.234,56»: запятая —
+ * десятичный знак, точки при ней — тысячи. Иначе такая строка либо отвергалась
+ * базой, либо теряла запятую, и сумма вырастала в сто раз (прогон сценариев).
+ */
+function normalizeLocaleNumber(attr, v) {
+    if (typeof v !== 'string' || v.indexOf(',') === -1) return v;
+    const key = String((attr && attr.type && (attr.type.key || attr.type.constructor && attr.type.constructor.key)) || '').toUpperCase();
+    if (!/DECIMAL|FLOAT|DOUBLE|REAL|NUMERIC|INTEGER|BIGINT|SMALLINT/.test(key)) return v;
+    let t = v.replace(/[\s\u00a0']/g, '');
+    if (t.indexOf('.') !== -1) t = t.replace(/\./g, '');
+    t = t.replace(/,/g, '.');
+    return (t !== '' && isFinite(Number(t))) ? t : v;
+}
+
 function sanitizeData(Model, data) {
     if (!Model || !Model.rawAttributes || !data) return;
     Object.keys(data).forEach(k => {
         const attr = Model.rawAttributes[k];
         if (!attr) return;
+        if (typeof data[k] === 'string') data[k] = normalizeLocaleNumber(attr, data[k]);
         const v = data[k];
         if (!emptyValues.isEmptyValue(v)) return;
 
@@ -330,6 +347,25 @@ use('root', async function registerWriteGuard(request, next) {
     throw e;
 });
 
+// ── Журнал документов только для чтения ──────────────────────────────────────
+// Журнал — представление СУБД над таблицами документов, своих строк у него нет
+// (drive_root/db/journals.js). Запись в него — всегда ошибка вызывающего: строку
+// меняют в документе СВОЕГО вида. Отказ словами, а не ошибкой СУБД «cannot insert
+// into view», которая ничего не объяснила бы.
+use('root', async function journalWriteGuard(request, next) {
+    const { operation, table } = request;
+    if (operation !== 'create' && operation !== 'update' && operation !== 'delete') {
+        return await next(request);
+    }
+    let isJournal = false;
+    try { isJournal = require('./db/journals').isJournalTable(table); } catch (e) { /* нет журналов */ }
+    if (!isJournal) return await next(request);
+    const e = new Error(`[dbGateway] Журнал документов "${table}" только для чтения:`
+        + ' запись идёт в документ своего вида.');
+    e.errorKey = 'journal_write_denied';
+    throw e;
+});
+
 // ── Неизменность проведённого документа (GoBD) ───────────────────────────────
 // Регистрируется ПЕРВЫМ на уровне 'root': отказ должен случиться до того, как
 // хуки сущности начнут править данные (номер, представление) и до executor'а.
@@ -448,7 +484,7 @@ use('root', async function entityHooksMiddleware(request, next) {
 // Два разных следствия одного действия человека, и оба обязаны случиться ПОСЛЕ
 // успешной записи (запись не прошла — проводить нечего):
 //
-//   1. режим `auto` — документ уходит в очередь при КАЖДОМ сохранении. Команд и
+//   1. режим `onSave` — документ уходит в очередь при КАЖДОМ сохранении. Команд и
 //      слова «провести» в интерфейсе нет, но всё остальное работает одинаково:
 //      документ может остаться непроведённым, и об этом скажет та же галочка в
 //      журнале и то же уведомление;
@@ -458,45 +494,67 @@ use('root', async function entityHooksMiddleware(request, next) {
 //
 // Служебная запись самого механизма (состояние проведения) сюда не попадает:
 // иначе проведение ставило бы документ в очередь бесконечно.
+/**
+ * Поставить сохранённый документ в очередь проведения (режим `onSave`) либо
+ * сбросить разрежение повторов у уже стоящего — правила одни для записи через шлюз
+ * и для сохранения формы (`applyChanges` зовёт после табличных частей).
+ */
+async function enqueueAfterSave(table, uid, sessionID) {
+    if (!uid || typeof uid !== 'string') return;
+    const globalCtx = require('./globalServerContext');
+    const posting = require('./db/posting');
+    const modelName = globalCtx.getModelNameForTable(table);
+    const Model = modelName ? globalCtx.modelsDB[modelName] : null;
+    const cfg = Model && posting.readConfig(Model);
+    if (!cfg) return;
+
+    const postingQueue = require('./db/postingQueue');
+    const already = await postingQueue.rowOf(table, uid);
+    if (cfg.mode !== 'onSave' && !already) return;   // ручной режим: ждём команды
+
+    let user = null;
+    try {
+        const u = await globalCtx.getUserBySessionID(sessionID);
+        user = (u && u.UID) || null;
+    } catch (e) { user = null; }
+
+    await postingQueue.enqueue({
+        table, uid,
+        action: already ? already.action : posting.ACTION.POST,
+        requestedBy: user,
+        byHuman: true,
+        sessionID
+    });
+    postingQueue.kick().catch(() => { /* подберёт страхующий тик */ });
+}
+
 use('root', async function postingEnqueueMiddleware(request, next) {
     const { operation, table } = request;
     if (operation !== 'create' && operation !== 'update') return await next(request);
+
+    // UID ЗАПИСИ (найдено живым прогоном 15.10.2026). RLS переписывает `where`
+    // в `{ [Op.and]: [исходное, фильтр] }` — одни ключи-символы, и
+    // `request.where.UID` у любого пользователя, кроме администратора, пусто:
+    // сохранение документа молча НЕ ставило его в очередь проведения. Ищем UID
+    // и внутри `Op.and` (`db/whereUid.js`), до и после цепочки.
+    const uidBefore = (request.data && request.data.UID) || require('./db/whereUid').uidOf(request.where);
 
     const result = await next(request);
 
     try {
         if (require('./db/coreWrite').isGranted(request)) return result;
+        // Сохранение ФОРМЫ откладывает постановку до конца (16.10.2026): шапка
+        // пишется раньше табличных частей, и воркер, разбуженный здесь, проводил
+        // документ в момент, когда строки уже удалены, а новые ещё не вставлены, —
+        // «проведено, 0 движений» (прогон сценариев, бронь: 2 из 5). Форма ставит
+        // документ в очередь сама, вызовом `enqueueAfterSave` после табличных частей.
+        if (request.context && request.context.deferPosting) return result;
 
-        const globalCtx = require('./globalServerContext');
-        const posting = require('./db/posting');
-        const modelName = globalCtx.getModelNameForTable(table);
-        const Model = modelName ? globalCtx.modelsDB[modelName] : null;
-        const cfg = Model && posting.readConfig(Model);
-        if (!cfg) return result;
-
-        const uid = (request.data && request.data.UID)
-            || (request.where && (request.where.UID || request.where.uid));
-        if (!uid || typeof uid !== 'string') return result;
-
-        const postingQueue = require('./db/postingQueue');
-        const already = await postingQueue.rowOf(table, uid);
-        if (cfg.mode !== 'auto' && !already) return result;   // ручной режим: ждём команды
-
-        const user = await (async () => {
-            try {
-                const u = await globalCtx.getUserBySessionID(request.context && request.context.sessionID);
-                return (u && u.UID) || null;
-            } catch (e) { return null; }
-        })();
-
-        await postingQueue.enqueue({
-            table, uid,
-            action: already ? already.action : posting.ACTION.POST,
-            requestedBy: user,
-            byHuman: true,
-            sessionID: request.context && request.context.sessionID
-        });
-        postingQueue.kick().catch(() => { /* подберёт страхующий тик */ });
+        const uid = uidBefore
+            || (request.data && request.data.UID)
+            || require('./db/whereUid').uidOf(request.where)
+            || (result && (result.UID || (typeof result.get === 'function' ? result.get('UID') : null)));
+        await enqueueAfterSave(table, uid, request.context && request.context.sessionID);
     } catch (e) {
         // Сохранение уже состоялось. Не поставить документ в очередь — плохо, но
         // отменять из-за этого запись пользователя нельзя: документ подберёт
@@ -525,6 +583,7 @@ use('root', async function stornoIssueMiddleware(request, next) {
 
 module.exports = {
     use,
+    enqueueAfterSave,
     execute,
     executeIn,
     transaction,

@@ -257,6 +257,10 @@
             if (window.MySpaceEvents) {
                 this._unsubscribe = window.MySpaceEvents.on((d) => {
                     if (d && d.type === 'notification' && d.notification) this.push(d.notification);
+                    // Сервер заменил уведомление по тегу — прежнее уходит с экрана.
+                    if (d && d.type === 'notificationRemoved' && Array.isArray(d.UIDs)) {
+                        d.UIDs.forEach(uid => this.dismiss({ UID: uid }));
+                    }
                 });
             }
         }

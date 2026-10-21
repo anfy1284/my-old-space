@@ -28,7 +28,7 @@ module.exports = async function userDisabled(request) {
     if (!becameDisabled) return;
 
     // UID берётся из условия операции: форма правит запись по первичному ключу.
-    const uid = (request.where && (request.where.UID || request.where.uid))
+    const uid = require('../../db/whereUid').uidOf(request.where)
         || (request.data && request.data.UID);
     if (!uid) return;
 

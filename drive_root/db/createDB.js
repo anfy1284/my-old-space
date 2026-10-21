@@ -46,7 +46,7 @@ const { DEFAULT_VALUES_TABLE } = dbConfig;
 const { hashPassword } = require('./utilites');
 const globalServerContext = require('../globalServerContext');
 const { processDefaultValues } = globalServerContext;
-const { normalizeType, compareSchemas, syncUniqueConstraints,
+const { normalizeType, compareSchemas, syncUniqueConstraints, syncForeignKeys,
         collectInboundForeignKeys, restoreInboundForeignKeys } = require('./migrationUtils');
 
 /**
@@ -649,6 +649,15 @@ async function createAll(options = {}) {
   try {
     console.log('[MIGRATION] Starting database schema check...');
 
+    // Представления журналов документов снимаются ДО любой перестройки: таблица
+    // документа, от которой зависит представление, не перестраивается и не меняет
+    // тип колонки. Возвращаются в конце (шаг 8).
+    try {
+      await require('./journals').dropViews(sequelize, transaction);
+    } catch (e) {
+      console.warn('[MIGRATION] Представления журналов не сняты:', e.message);
+    }
+
     // Разовое лечение баз, где имя индекса было обрезано СУБД (см. renameTruncatedIndexes).
     // ДО фазы синхронизации: иначе sync() снова споткнётся об «уже существует».
     try {
@@ -690,6 +699,7 @@ async function createAll(options = {}) {
         });
       } else {
         await syncUniqueConstraints(sequelize, transaction, tableName, desiredSchema);
+        await syncForeignKeys(sequelize, transaction, tableName, models[def.name]);
       }
     }
 
@@ -1194,6 +1204,29 @@ async function createAll(options = {}) {
       }
     }
 
+    // 8. ЖУРНАЛЫ ДОКУМЕНТОВ — представления над таблицами документов
+    //    (drive_root/db/journals.js). Пересоздаются на КАЖДОМ старте, после того как
+    //    все таблицы приведены к схеме: сверять представление дороже, чем создать
+    //    заново, а после полного восстановления (которое тоже кончается этой
+    //    функцией) оно вернётся само. Неудача не откатывает миграцию — данные целы,
+    //    не открывается только журнал, — но молчать о ней нельзя.
+    try {
+      const journals = require('./journals');
+      if (journals.all().length) {
+        if (transaction) await sequelize.query('SAVEPOINT journals_views', { transaction });
+        try {
+          const n = await journals.ensureViews(sequelize, transaction, mergedModelsDef);
+          if (transaction) await sequelize.query('RELEASE SAVEPOINT journals_views', { transaction });
+          console.log(`[MIGRATION] Журналы документов: представлений пересоздано ${n}`);
+        } catch (e) {
+          if (transaction) await sequelize.query('ROLLBACK TO SAVEPOINT journals_views', { transaction });
+          console.error('[MIGRATION] Журналы документов НЕ созданы:', e && e.message || e);
+        }
+      }
+    } catch (e) {
+      console.error('[MIGRATION] Журналы документов:', e && e.message || e);
+    }
+
     // Commit transaction (if created)
     if (transaction) {
       await transaction.commit();
@@ -1229,8 +1262,10 @@ async function createAll(options = {}) {
       // (Фактическая структура при этом совпадает — это проверено `actualHash`.)
       const runtimeModels = globalServerContext.collectMergedModelDefs().models;
       await require('./dbVersions').record(sequelize, runtimeModels, {
-        appVersion: process.env.npm_package_version || '',
-        frameworkVersion: (function () { try { return require('../../package.json').version; } catch (e) { return ''; } })(),
+        // Версия кода — коммиты приложения и фреймворка (drive_root/buildInfo.js):
+        // по копии базы прода видно, какой код её последним запускал.
+        appVersion: require('../buildInfo').get().appVersion,
+        frameworkVersion: require('../buildInfo').get().frameworkVersion,
         origin: process.env.MOS_DB_INIT_ORIGIN || 'migration'
       });
     } catch (e) {

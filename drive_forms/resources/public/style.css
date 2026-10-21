@@ -58,6 +58,18 @@
   justify-content: space-between;
   align-items: center;
 }
+/* Заголовок — ВСЕГДА одна строка. Не помещается — многоточие.
+   Иначе длинное представление документа переносилось на вторую строку, титлбар
+   становился вдвое выше — и подгонщик размеров, меряющий его высоту ДО установки
+   итоговой ширины, оставлял под содержимым пустую полосу ровно в эту лишнюю
+   строку. Полный текст остаётся в подсказке (см. Form.setTitle). */
+.ui-form .ui-titlebar .ui-title {
+  flex: 1 1 auto;
+  min-width: 0;          /* без этого flex-элемент не сжимается ниже содержимого */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .ui-form .ui-titlebar .ui-titlebar-buttons {
   display:flex;
   gap:2px;
@@ -268,6 +280,22 @@ td.ui-cell-readonly .ui-input-container > button { display: none !important; }
    достаточно широким. В обычном состоянии порога нет — поле сжимается вместе с окном. */
 .ui-measuring textarea { min-width: var(--mos-pref-width, 0); }
 
+/* Замер ширины окна (`measureMinContentWidth`, `setSizeToContent`): скрытые вкладки
+   на это время встают в поток. Обычно они лежат `position: absolute` (Tabs._showTab) и
+   в ширину содержимого не входят — окно подгонялось под первую вкладку и обрезало
+   вторую («Einstellungen», 15.10.2026). Видимость не меняется: замер синхронный. */
+.ui-measuring-min .ui-tabs-pane-hidden { position: static !important; }
+
+/* Командная панель окна-диалога (не развёрнутого) в замере — В ОДНУ СТРОКУ: окно
+   «Einstellungen» было у́же своих кнопок, «Passwort ändern» уходил во вторую строку и
+   отъедал высоту под полосу прокрутки (прогон 17.10.2026, J3). */
+.ui-measuring-nowrap-bar .ui-toolbar:not(.table-toolbar) { flex-wrap: nowrap !important; }
+
+/* Замер ЕСТЕСТВЕННОЙ высоты (Tabs, фиксация min-height по высокой вкладке): рост
+   таблиц и их предков (Table._growChain, flex-grow инлайном) на время замера
+   выключен — иначе в развёрнутом окне в нижнюю границу попадала растянутая высота. */
+.ui-measuring-natural .ui-form-content * { flex-grow: 0 !important; }
+
 /* В ГОРИЗОНТАЛЬНОМ ряду место уступают поля ввода, а не соседи.
    Флекс-элемент по умолчанию не сжимается ниже min-content своего содержимого, и
    поле с длинным значением выталкивало из ряда кнопку рядом с собой (её было видно
@@ -433,6 +461,15 @@ td.ui-cell-readonly .ui-input-container > button { display: none !important; }
 .ui-group,
 .ui-dynamictable {
   min-width: 0;
+}
+
+/* …но ТОЛЬКО там, где внутри есть таблица (14.10.2026). Обнулённый порог у группы
+   с одними полями давал ей сжаться уже своего содержимого, и в узком окне поля
+   левой колонки уходили ПОД правую («DaAnreise», кнопка под «Status» в брони).
+   Группа без таблицы не сжимается ниже своих полей: что не влезает, прокручивает
+   форма — как в классических диалогах, где поле не налезает на поле. */
+.ui-group:not(:has(.ui-dynamictable)) {
+  min-width: auto;
 }
 
 /* `white-space: nowrap` — подпись кнопки не переносится: кнопка панели должна быть
@@ -629,6 +666,16 @@ input[type="checkbox"],
 .ui-dynamictable table tbody tr.ui-table-row.ui-tone-rose,    input.ui-tone-rose,    select.ui-tone-rose,
 .ui-related-links.ui-tone-rose { background-color: #e6c0cc; }
 .ui-related-links.ui-tone-red { background-color: #f6d3d3; }
+/* Остальные тона у строки-ссылки отсутствовали, и это нашлось живым прогоном
+   панели оповещений: жёлтое предупреждение и синее «к сведению» выходили СЕРЫМИ,
+   то есть цвет — то единственное, чем уровень оповещения узнаётся с одного
+   взгляда, — не работал. Набор дополнен целиком, а не одним жёлтым: правила
+   тона общие, и следующий потребитель наступил бы на ту же дыру. */
+.ui-related-links.ui-tone-yellow { background-color: #faf1c8; }
+.ui-related-links.ui-tone-blue   { background-color: #d5e3f5; }
+.ui-related-links.ui-tone-green  { background-color: #d8efd2; }
+.ui-related-links.ui-tone-gray   { background-color: #dcdcdc; }
+.ui-related-links.ui-tone-violet { background-color: #e5d9f2; }
 
 /* Строка ссылок на связанные записи (type: "relatedLinks" в лейауте): «Korrekturen /
    Storno: 1442 (Korrektur, Entwurf)». Ссылка открывает запись. Строки нет, пока
@@ -652,6 +699,36 @@ input[type="checkbox"],
 /* Фраза набрана жирным — её одна, и она главная в строке. Самого текста ошибки
    здесь нет: он открывается кнопкой, в диалоге просмотра (showTextView). */
 .ui-posting-status-label { font-weight: bold; }
+
+/* ПАНЕЛЬ ОПОВЕЩЕНИЙ ДОКУМЕНТА (class DocumentAlertsPanel, ТЗ «Оповещения по
+   документам» §10). Часть рамки формы: ядро вставляет её под командную панель, и
+   лейаут о ней не знает. Пока оповещений нет, панели НЕТ ВОВСЕ (решение владельца
+   14.10.2026): пустая шапка «Оповещения» была кнопкой, которой нечего открыть.
+   Тона те же, что у строк журнала (ui-tone-red / yellow / blue): уровень
+   узнаётся одинаково в списке, в карточке и в уведомлении.
+
+   Отступы. Дыру под командной панелью гасит САМА панель (отрицательный нижний
+   отступ в DataForm, case 'commandBar'), поэтому сверху своей заплатки нет; нижний
+   `-3px` ставит вкладки (у них `margin-top: -8px` против gap 14px) в 3px под
+   оповещениями. */
+.ui-alerts-panel { display: flex; flex-direction: column; margin: 0 0 -3px 0; }
+.ui-alerts-panel.ui-alerts-empty { display: none; }
+/* Шапка — РАСКРЫВАШКА, а не кнопка со стрелкой у дальнего края (владелец
+   14.10.2026: «не очевидно, что это открытие списка»). Как заголовок группы в
+   классических формах: треугольник СЛЕВА, перед словом, и вся полоса — место
+   нажатия. В свёрнутом виде рядом серым идёт начало первого оповещения: видно,
+   что внутри что-то есть и о чём оно, ещё до раскрытия. */
+.ui-alerts-head { border: 1px solid #808080; padding: 1px 6px; min-height: 22px; cursor: pointer; user-select: none; flex-wrap: nowrap; }
+.ui-alerts-head:focus-visible { outline: 1px dotted #000; outline-offset: -3px; }
+.ui-alerts-toggle { width: 10px; font-size: 10px; color: #202020; flex: 0 0 auto; }
+.ui-alerts-caption { font-weight: bold; white-space: nowrap; flex: 0 0 auto; }
+.ui-alerts-summary { color: #505050; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1 1 auto; min-width: 0; }
+.ui-alerts-rows { display: flex; flex-direction: column; gap: 2px; margin-top: 2px; }
+.ui-alert-row { border: 1px solid #808080; padding: 2px 6px; min-height: 22px; }
+/* Текст занимает всё свободное место, ссылка действия — у правого края, в одной
+   колонке у всех строк: иначе ссылки стоят вразнобой по длине текста. */
+.ui-alert-text { white-space: normal; flex: 1 1 auto; }
+.ui-alert-action { margin-left: auto; }
 .ui-related-link { color: #0000cc; text-decoration: underline; cursor: pointer; white-space: nowrap; }
 .ui-related-link:hover { color: #cc0000; }
 
@@ -769,11 +846,15 @@ input[type="checkbox"],
   background-color: var(--color-mid);
 }
 
+/* Вкладки сразу под командной панелью: дыру под панелью уже погасила сама панель
+   (её нижний отступ -10px), и собственный -8px вкладок наложил бы их на неё. */
+.ui-toolbar + .ui-tabs { margin-top: 0; }
+
 /* --- Tabs (retro) --- */
 .ui-tabs {
     display: flex;
     flex-direction: column;
-    margin-top: -8px; /* reduce gap after toolbar: 14px - 8px = 6px */
+    margin-top: -8px; /* вкладки стоят ближе к соседу сверху: 14px gap - 8px = 6px */
     /* Private stacking context: tab/panel z-index layering stays isolated
        from the rest of the form. */
     isolation: isolate;

@@ -88,7 +88,7 @@ async function describe(sequelize, models, opts = {}) {
 /**
  * Записать версию структуры, ЕСЛИ она изменилась.
  *
- * «Изменилась» — это расхождение ЛЮБОГО из двух хэшей с последней записью. Повторный
+ * «Изменилась» — это расхождение ЛЮБОГО из двух хэшей или версии кода с последней записью. Повторный
  * запуск сервера без правки моделей новой записи не создаёт (приёмка §9 п. 13) —
  * именно ради этого нужна каноническая сериализация.
  *
@@ -101,7 +101,13 @@ async function record(sequelize, models, opts = {}) {
     const info = await describe(sequelize, models, { transaction: opts.transaction });
     const prev = await latest(sequelize, { transaction: opts.transaction });
 
-    if (prev && prev.configHash === info.configHash && prev.actualHash === info.actualHash) {
+    // Смена ВЕРСИИ КОДА без смены схемы — тоже запись (16.10.2026): иначе по базе не
+    // узнать, какой код её последним запускал, а от этого зависит, какие разовые
+    // скрипты ещё нужны. Пустая версия («неизвестно») сменой не считается.
+    const sameCode = !prev
+        || ((!opts.appVersion || prev.appVersion === String(opts.appVersion))
+            && (!opts.frameworkVersion || prev.frameworkVersion === String(opts.frameworkVersion)));
+    if (prev && sameCode && prev.configHash === info.configHash && prev.actualHash === info.actualHash) {
         return { created: false, version: prev, configHash: info.configHash, actualHash: info.actualHash };
     }
 

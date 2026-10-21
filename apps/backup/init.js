@@ -11,9 +11,10 @@
 //   server.js                         — роуты /api/apps/backup/…
 //
 // Настройки копирования хранятся в БД (`backup_config`, `backup_api_clients`), но
-// таблица лейаута `backup_settings` остаётся ВИРТУАЛЬНОЙ: форма собирает данные из
-// нескольких источников (настройки, состояние машины, каталог копий), поэтому их
-// отдаёт onLoadData и принимает onSave, а не запись одной таблицы.
+// ПРЕДМЕТА у формы нет: она собирает данные из нескольких источников (настройки,
+// состояние машины, каталог копий), поэтому их отдаёт `onLoadData` и принимает
+// `onSave`, а не запись одной таблицы. Раньше ради адреса выдумывалась таблица
+// `backup_settings`, которой в базе нет; теперь это ИМЕНОВАННЫЕ формы приложения.
 
 const path = require('path');
 const fs = require('fs');
@@ -22,12 +23,14 @@ module.exports = async function (modelsDB) {
     try {
         const { loadScript, loadServerScript, Utilities } = require('../../');
         const layoutMemory = require('../../drive_root/layoutMemory');
+        const formMethods  = require('../../drive_root/formMethods');
+        const APP = 'backup';
 
-        const serverScriptName = loadServerScript(
-            'backup.actions',
-            require('./forms/backup_settings.server')(modelsDB, Utilities),
-            'admin'
-        );
+        const backupFns = require('./forms/backup_settings.server')(modelsDB, Utilities);
+        // Методы ФОРМЫ: сюда же попадают её серверные события (onLoadData, onSave).
+        formMethods.register({ app: APP, form: 'backupSettings', methods: backupFns, roles: 'admin' });
+        // Имя скрипта остаётся: клиентский код формы зовёт её методы через него.
+        const serverScriptName = loadServerScript('backup.actions', backupFns, 'admin');
 
         const clientSource = fs
             .readFileSync(path.join(__dirname, 'forms/backup_settings.client.js'), 'utf8')
@@ -40,9 +43,8 @@ module.exports = async function (modelsDB) {
 
         // Только admin: форма распоряжается копией всей базы и ключами шифрования.
         await layoutMemory.saveLayout({
-            appName: 'uniForm',
-            mode: 'record',
-            tableName: 'backup_settings',
+            app: APP,
+            form: 'backupSettings',
             roles: 'admin',
             layout,
             clientScript: clientUID,
@@ -55,10 +57,8 @@ module.exports = async function (modelsDB) {
             // `onReady` не объявлен намеренно: стартовую настройку клиенту делать нечем —
             // доступность кнопок ведёт ядро по `enabledWhen`, текущую строку списка —
             // сама таблица. Привязка к несуществующей функции была бы мёртвой конфигурацией.
-            events: {
-                onLoadData: { serverScript: serverScriptName, fn: 'onLoadData' },
-                onSave: { serverScript: serverScriptName, fn: 'onSave' }
-            }
+            // Серверные события (`onLoadData`, `onSave`) здесь НЕ объявляются: это
+            // методы формы, зарегистрированные выше.
         });
 
         // Восстановление ОДНОЙ организации больше НЕ отдельная форма (решение владельца
@@ -72,20 +72,17 @@ module.exports = async function (modelsDB) {
         // предыдущих. У неё другой предмет (вся база, а не организация), другие
         // гарантии (живая база не разрушается, но сервер уходит в обслуживание) и
         // обязательный экран перед запуском (§6.2б), которого у остальных нет.
-        const fullScriptName = loadServerScript(
-            'backup.restoreFull',
-            require('./forms/backup_restore_full.server')(modelsDB, Utilities),
-            'admin'
-        );
+        const fullFns = require('./forms/backup_restore_full.server')(modelsDB, Utilities);
+        formMethods.register({ app: APP, form: 'restoreFull', methods: fullFns, roles: 'admin' });
+        const fullScriptName = loadServerScript('backup.restoreFull', fullFns, 'admin');
         const fullClientSource = fs
             .readFileSync(path.join(__dirname, 'forms/backup_restore_full.client.js'), 'utf8')
             .replace(/__SERVER_SCRIPT__/g, fullScriptName);
         const fullClientUID = await loadScript(fullClientSource, 'admin');
 
         await layoutMemory.saveLayout({
-            appName: 'uniForm',
-            mode: 'record',
-            tableName: 'backup_restore_full',
+            app: APP,
+            form: 'restoreFull',
             roles: 'admin',
             layout: JSON.parse(fs.readFileSync(path.join(__dirname, 'forms/backup_restore_full.layout.json'), 'utf8')),
             clientScript: fullClientUID,
@@ -93,13 +90,11 @@ module.exports = async function (modelsDB) {
             recordCaption: { i18n: 'restore_full_app_caption' },
             formIcon: '/apps/general_icons/resources/public/16x16/database.png',
             windowState: 'maximized',
-            events: {
-                onLoadData: { serverScript: fullScriptName, fn: 'onLoadData' },
-                // Стартовая настройка формы (видимость полей по выбранной области) —
-                // на form-level onReady, а не на onChange: до первой правки форма
-                // стояла бы недонастроенной.
-                onReady: 'onReady'
-            }
+            // Стартовая настройка формы (видимость полей по выбранной области) —
+            // на form-level onReady, а не на onChange: до первой правки форма
+            // стояла бы недонастроенной. Это КЛИЕНТСКОЕ событие, поэтому объявлено
+            // рядом с клиентским скриптом; серверное `onLoadData` — метод формы.
+            clientEvents: { onReady: 'onReady' }
         });
 
         // Отдельного списка журнала копий БОЛЬШЕ НЕТ: таблица `backup_files` удалена,
@@ -118,7 +113,7 @@ module.exports = async function (modelsDB) {
                 order: 92,                       // рядом с планировщиком (90, 91)
                 icon: '/apps/general_icons/resources/public/16x16/backup.png',
                 roles: ['admin'],
-                params: { mode: 'record', dbTable: 'backup_settings' }
+                params: { app: APP, form: 'backupSettings' }
             }, {
                 caption: { i18n: 'restore_full_app_caption' },
                 action: 'open',
@@ -127,7 +122,7 @@ module.exports = async function (modelsDB) {
                 order: 93,
                 icon: '/apps/general_icons/resources/public/16x16/restore.png',
                 roles: ['admin'],
-                params: { mode: 'record', dbTable: 'backup_restore_full' }
+                params: { app: APP, form: 'restoreFull' }
             }]
         }]);
 

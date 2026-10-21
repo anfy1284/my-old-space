@@ -183,6 +183,45 @@ async function syncUniqueConstraints(sequelize, transaction, tableName, desiredS
 }
 
 // ─────────────────────────────────────────────────────────────────────
+// Снятые из описания внешние ключи (16.10.2026)
+//
+// Поле перевели с `references` на `refersTo` (или убрали ассоциацию
+// belongsTo) — а ограничение в базе осталось: сравнение схем смотрит только
+// на колонки, тип колонки не менялся, перестройки не было. Так
+// `invoice_lines.bookingRoomId` продолжал обнуляться ON DELETE SET NULL
+// после того, как в db.json внешнего ключа уже не было.
+//
+// Желаемый набор — `rawAttributes[col].references` УЖЕ определённой модели:
+// там и явные `references`, и проставленные ассоциациями. Функция только
+// СНИМАЕТ лишнее; добавлять недостающее на живых данных она не берётся —
+// это перестройка таблицы, и решает её миграция.
+// ─────────────────────────────────────────────────────────────────────
+async function syncForeignKeys(sequelize, transaction, tableName, model) {
+  if (sequelize.getDialect() !== 'postgres' || !model || !model.rawAttributes) return;
+  try {
+    const fks = await sequelize.query(
+      `SELECT c.conname, string_agg(a.attname, ',') AS cols
+         FROM pg_constraint c
+         JOIN unnest(c.conkey) AS k(attnum) ON true
+         JOIN pg_attribute a ON a.attnum = k.attnum AND a.attrelid = c.conrelid
+        WHERE c.conrelid = '"${tableName}"'::regclass AND c.contype = 'f'
+        GROUP BY c.conname`,
+      { transaction, type: require('sequelize').QueryTypes.SELECT }
+    );
+    for (const fk of fks) {
+      const cols = (fk.cols || '').split(',').filter(Boolean);
+      if (cols.length !== 1) continue; // составных модели не объявляют — не наше
+      const attr = model.rawAttributes[cols[0]];
+      if (attr && attr.references) continue;
+      await sequelize.query(`ALTER TABLE "${tableName}" DROP CONSTRAINT "${fk.conname}"`, { transaction });
+      console.log(`[MIGRATION] Снят внешний ключ ${fk.conname} (${tableName}.${cols[0]}): в описании его больше нет`);
+    }
+  } catch (err) {
+    console.error(`[MIGRATION] Не удалось сверить внешние ключи ${tableName}:`, err.message || err);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────
 // Входящие внешние ключи перестраиваемых таблиц
 //
 // Миграция изменённой таблицы идёт через `DROP TABLE ... CASCADE` с
@@ -271,6 +310,7 @@ module.exports = {
   normalizeType,
   compareSchemas,
   syncUniqueConstraints,
+  syncForeignKeys,
   collectInboundForeignKeys,
   restoreInboundForeignKeys
 };

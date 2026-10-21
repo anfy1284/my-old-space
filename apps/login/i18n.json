@@ -167,6 +167,12 @@
         "de": "Benutzer nicht gefunden",
         "pl": "Nie znaleziono użytkownika"
     },
+    "login_failed": {
+        "en": "Login failed: user name or password is incorrect",
+        "ru": "Вход не выполнен: неверное имя пользователя или пароль",
+        "de": "Anmeldung fehlgeschlagen: Benutzername oder Passwort ist falsch",
+        "pl": "Logowanie nie powiodło się: nieprawidłowa nazwa użytkownika lub hasło"
+    },
     "Invalid password": {
         "en": "Invalid password",
         "ru": "Неверный пароль",

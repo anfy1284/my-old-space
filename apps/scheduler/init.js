@@ -39,11 +39,16 @@ module.exports = async function (modelsDB) {
         const handlerOptions = registry.list().map(h => ({ value: h.code, caption: h.caption || h.code }));
 
         // ── Форма записи ──────────────────────────────────────────────────
-        const serverScriptName = loadServerScript(
-            'scheduler.actions',
-            require('./forms/scheduler_tasks.server')(modelsDB, Utilities),
-            'user'
-        );
+        const formMethods = require('../../drive_root/formMethods');
+        const APP = 'scheduler';
+        const taskFns = require('./forms/scheduler_tasks.server')(modelsDB, Utilities);
+        // Методы ФОРМЫ записи задания — здесь же её серверное событие `onBeforeSave`.
+        formMethods.register({
+            app: APP, subject: { table: 'scheduler_tasks', kind: 'record' },
+            methods: taskFns, roles: ['user', 'admin']
+        });
+        // Имя скрипта остаётся: клиентский код формы зовёт её методы через него.
+        const serverScriptName = loadServerScript('scheduler.actions', taskFns, 'user');
 
         const clientSource = fs
             .readFileSync(path.join(__dirname, 'forms/scheduler_tasks.client.js'), 'utf8')
@@ -80,18 +85,16 @@ module.exports = async function (modelsDB) {
         })(userLayout);
 
         const commonLayoutProps = {
-            appName: 'uniForm',
-            mode: 'record',
-            tableName: 'scheduler_tasks',
+            app: APP,
+            subject: { table: 'scheduler_tasks', kind: 'record' },
             clientScript: clientUID,
             appCaption: { i18n: 'scheduler_app_caption' },
             recordCaption: { i18n: 'scheduler_task_record_caption' },
             formIcon: '/apps/general_icons/resources/public/16x16/clock.png',
             listIcon: '/apps/general_icons/resources/public/16x16/catalog.png',
-            events: {
-                onBeforeSave: { serverScript: serverScriptName, fn: 'onBeforeSave' },
-                onReady: { fn: 'onFormReady' }
-            }
+            // Серверное событие `onBeforeSave` — метод формы (зарегистрирован выше).
+            // Здесь только клиентское: стартовая настройка вида.
+            clientEvents: { onReady: 'onFormReady' }
         };
 
         await layoutMemory.saveLayout(Object.assign({}, commonLayoutProps, { roles: 'admin', layout: recordLayout }));
@@ -99,9 +102,8 @@ module.exports = async function (modelsDB) {
 
         // ── Список заданий ────────────────────────────────────────────────
         await layoutMemory.saveLayout({
-            appName: 'uniForm',
-            mode: 'list',
-            tableName: 'scheduler_tasks',
+            app: APP,
+            subject: { table: 'scheduler_tasks', kind: 'list' },
             roles: '*',
             layout: require('./forms/scheduler_tasks_list.layout.json'),
             appCaption: { i18n: 'scheduler_app_caption' },
@@ -111,9 +113,8 @@ module.exports = async function (modelsDB) {
 
         // ── Журнал запусков (только чтение) ───────────────────────────────
         await layoutMemory.saveLayout({
-            appName: 'uniForm',
-            mode: 'list',
-            tableName: 'scheduler_runs',
+            app: APP,
+            subject: { table: 'scheduler_runs', kind: 'list' },
             roles: '*',
             layout: require('./forms/scheduler_runs_list.layout.json'),
             appCaption: { i18n: 'scheduler_runs_app_caption' },
@@ -133,6 +134,10 @@ module.exports = async function (modelsDB) {
                 singleton: true,
                 appName: 'uniForm',
                 order: 90,
+                // Сотруднику пункты пока не показываются (решение владельца 19.10.2026):
+                // задания, которые ему нужны, заводит администратор. Права на формы
+                // остались — открыть по ссылке (уведомление, оповещение) он может.
+                roles: ['admin'],
                 icon: '/apps/general_icons/resources/public/16x16/clock.png',
                 params: { mode: 'list', dbTable: 'scheduler_tasks' }
             }, {
@@ -141,6 +146,7 @@ module.exports = async function (modelsDB) {
                 singleton: true,
                 appName: 'uniForm',
                 order: 91,
+                roles: ['admin'],
                 icon: '/apps/general_icons/resources/public/16x16/journal.png',
                 params: { mode: 'list', dbTable: 'scheduler_runs' }
             }]

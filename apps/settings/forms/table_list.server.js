@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * Форма выбора таблицы (`user_settings_table_list`) — служебная форма автозаполнения.
+ * Форма выбора таблицы — служебная форма автозаполнения (именованная: settings/tableList).
  *
  * Автозаполнение («значение по умолчанию для таблицы») — механизм отдельный от настроек:
  * он хранит не значение параметра, а запись, которой заполняется поле новой формы
@@ -23,7 +23,7 @@ const { tForSession } = require('../../../drive_forms/globalServerContext');
  */
 const SYSTEM_TABLES = new Set([
     'sessions', 'default_values', 'translations',
-    'settings_values', 'user_settings_defaults', 'user_settings_table_list',
+    'settings_values', 'user_settings_defaults',
     'user_organizations'
 ]);
 
@@ -84,3 +84,7 @@ module.exports = function factory(modelsDB, Utilities) {
 };
 
 module.exports.buildTableListLayout = buildTableListLayout;
+// ИМЯ ФОРМЫ — один источник правды на два места: регистрацию (`init.js`) и
+// объявление поля, которое из неё выбирает (`app_settings.server.js#selection.form`).
+// Выписанное дважды, оно однажды разойдётся, и выбор молча перестанет открываться.
+module.exports.FORM = 'tableListPicker';

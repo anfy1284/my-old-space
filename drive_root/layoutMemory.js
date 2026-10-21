@@ -1,57 +1,66 @@
-// layoutMemory.js — centralized server-side storage for custom form layouts.
+// layoutMemory.js — реестр форм приложений (серверная сторона).
 //
-// Allows storing layout configurations for uniListForm / uniRecordForm indexed by
-// (appName, tableName, role[]).  Before generating the standard auto-layout those
-// apps look up a stored layout here.
+// ── АДРЕС И ПРЕДМЕТ ──────────────────────────────────────────────────────────
 //
-// Public API:
-//   saveLayout({ appName, tableName, roles, layout, events, clientScript })
-//     — saves layout, optional event handlers, and optional clientScript UID.
-//       Pass roles: '*'  to match any role.
-//       events: { onBeforeSave: { serverScript, fn } } — server-side event bindings.
-//       clientScript: UID клиентского скрипта (loadScript), используется как дефолт
-//       для всех events в лейауте (чтобы не дублировать clientScript в каждом binding).
+// Раньше форма адресовалась именем таблицы, и `tableName` делал две разные работы:
+// был АДРЕСОМ (по какому ключу искать лейаут) и ПРЕДМЕТОМ (с чем форма работает:
+// модель, запись, замок, сохранение, проведение). Форме без предмета — обычному
+// прикладному диалогу — жить было негде, и приходилось выдумывать таблицу, которой
+// в базе нет (так жило приложение «Удаление помеченных»).
 //
-//   getLayoutForUser(appName, tableName, userRole)
-//     — returns { layout, events, clientScript } or null if not found.
-//       First tries exact role match, then falls back to wildcard '*'.
+// Теперь это две разные вещи:
 //
+//   АДРЕС   `приложение | имя формы | роль | представление`
+//   ПРЕДМЕТ `{ table, kind }` — необязателен, приезжает при открытии формы
+//
+// Имя ТАБЛИЧНОЙ формы выводится из предмета (`drive_root/formAddress.js`):
+// `record:bookings`, `list:bookings`. Руками его выписывать нельзя — один источник
+// правды, иначе имя и таблица однажды разойдутся.
+//
+//   saveLayout({ app: 'booking', subject: { table: 'bookings', kind: 'record' }, … })
+//   saveLayout({ app: 'booking', form: 'prepaymentDialog', … })
+//
+// Лейаут не найден: у табличной формы — автоформа из модели (лучшая функция
+// механизма, она сохранена дословно), у именованной — ОШИБКА: строить не из чего.
+//
+// ── ЧТО СЮДА БОЛЬШЕ НЕ КЛАДУТ ────────────────────────────────────────────────
+//
+// `events` уехали отсюда в методы формы (`drive_root/formMethods.js`). Событие —
+// это метод формы с условленным именем, а не часть её внешнего вида. Пока события
+// объявлялись здесь, они формально принадлежали ПРЕДСТАВЛЕНИЮ, и приходилось
+// держать заплатку «события читаются всегда из основного представления».
+//
+// Клиентские события (`clientEvents`) объявляются здесь же, где и клиентский скрипт,
+// но на уровне ФОРМЫ, а не представления: переключение вида не должно их терять.
+//
+// Публичный API:
+//   saveLayout({ app, subject|form, roles, layout, … })
+//   getLayoutForUser(app, formName, userRole, sessionID, variant) → запись | null
+//   getFormMeta(app, formName)        → метаданные формы (синхронно) | null
+//   ownerOfSubjectForm(formName)      → приложение-владелец табличной формы | null
+//   hasRegistered(app, formName)      → boolean (синхронно, горячий путь)
+//   listViewsForUser(app, formName, userRole, sessionID)
 //   getUserRoleBySession(sessionID)
-//     — utility: resolves role string from session ID (async).
-//
-// Example (call from any server-side code):
-//   const layoutMemory = require('./drive_root/layoutMemory');
-//   await layoutMemory.saveLayout({
-//       appName: 'uniRecordForm',
-//       tableName: 'hotels',
-//       roles: ['admin', 'manager'],
-//       layout: [ /* your layout JSON */ ]
-//   });
+//   getTableIcon / getTableCaption / getTableRecordCaption / getTableListIcon
+//   registerListSort / getListSort
 
 'use strict';
 
 const memoryStore = require('./memory_store');
+const formAddress = require('./formAddress');
 
 const NAMESPACE = 'layouts';
 
-// Local registry of appName+tableName pairs that have ANY layout stored.
-// Checked synchronously before any async DB/HTTP work — zero overhead when
-// no custom layout is registered for the given table.
-const _registeredPrefixes = new Set();
-
-// Какие роли зарегистрировали лейаут для этого префикса (приложение|режим|таблица).
-// Нужен для подбора лейаута администратору: см. getLayoutForUser, шаг 3.
-const _registeredRoles = new Map();
-
 // ── ПРЕДСТАВЛЕНИЯ ────────────────────────────────────────────────────────────
 //
-// Одной таблице можно зарегистрировать НЕСКОЛЬКО лейаутов. Для пользователя это
+// Одной форме можно зарегистрировать НЕСКОЛЬКО лейаутов. Для пользователя это
 // «представления»: если ему доступно больше одного, форма показывает в командной
 // панели справа кнопку с названием текущего и списком остальных.
 //
-// Идентификатор представления — `variant` в `saveLayout`. Умолчание `main`, и его
-// ключ в хранилище остаётся ПРЕЖНИМ (`app|mode|table|role`): иначе перезапуск с
-// уцелевшим memory_store оставил бы старые записи невидимыми.
+// Идентификатор представления — `variant` в `saveLayout`. Умолчание `main`, и оно
+// входит в ключ НАРАВНЕ с остальными: исключение ради уцелевшего `memory_store`
+// отменено — реестр всё равно перезаписывается при каждом старте, а устаревшие
+// записи остаются безвредными сиротами.
 //
 // Доступ отдельным полем НЕ объявляется: для этого уже есть `roles` — то же самое,
 // чем лейаут и так выбирается по роли. Второе поле доступа разошлось бы с первым.
@@ -63,25 +72,40 @@ const _registeredRoles = new Map();
 const MAIN_VARIANT = 'main';
 const AUTO_VARIANT = 'auto';
 
+// Какие адреса вообще зарегистрированы: `приложение|имя формы`.
+// Проверяется синхронно до любой асинхронной работы — нулевая цена на горячем пути.
+const _registeredPrefixes = new Set();
+
+// Какие роли зарегистрировали лейаут по этому адресу. Нужен для подбора лейаута
+// администратору: см. getLayoutForUser, шаг 3.
+const _registeredRoles = new Map();
+
 // prefix → Map(variant → { roles:Set<string>, caption, isDefault, order })
 const _registeredViews = new Map();
 
-// Table-level icon registry: tableName → iconPath.
-// Populated automatically by saveLayout when formIcon is provided.
-// Any app can query getTableIcon(tableName) without needing its own layout.
-const _tableIcons = new Map();
+// ФОРМА целиком (не представление и не роль): предмет, клиентский скрипт и его
+// события, иконки, заголовки, состояние окна, род формы.
+//
+// Клиентский скрипт и клиентские события лежат ЗДЕСЬ, а не в записи представления,
+// ровно по той же причине, по которой серверные события уехали в методы формы:
+// переключение вида не должно отключать обработку.
+//
+// prefix (`приложение|имя формы`) → { app, formName, subject, clientScript,
+//   clientEvents, formIcon, listIcon, appCaption, recordCaption, windowState, formKind }
+const _formMeta = new Map();
 
-// Table-level caption registry: tableName → string | { i18n: 'key' }.
-// Populated automatically by saveLayout when appCaption is provided.
-// _tableCaptions       — заголовок СПИСКА (множественное число, напр. «Бронирования»).
-// _tableRecordCaptions — заголовок ЗАПИСИ  (единственное число, напр. «Бронирование»),
-//                        к нему добавляется представление (name) записи.
-const _tableCaptions = new Map();
-const _tableRecordCaptions = new Map();
+// Имя ТАБЛИЧНОЙ формы → приложение-владелец. Имя выведено из предмета и потому
+// уникально по построению: одна таблица — одна форма записи и один журнал.
+// Нужен там, где адрес спрашивают, зная только таблицу (открытие записи по ссылке,
+// FK-пикер, пункт меню «Администрирование»).
+const _subjectOwners = new Map();
 
-// Table-level icon registry для режима списка: tableName → iconPath.
-// Иконка записи (формы) хранится в _tableIcons (formIcon); иконка списка — здесь (listIcon).
-const _tableListIcons = new Map();
+// Table-level реестры. Это свойства ТАБЛИЦЫ, а не формы: их спрашивают снаружи
+// (главное меню строит пункты по таблицам, «Удаление помеченных» — подписи видов).
+const _tableIcons = new Map();          // formIcon — значок записи
+const _tableListIcons = new Map();      // listIcon — значок журнала
+const _tableCaptions = new Map();       // appCaption — заголовок СПИСКА (мн. ч.)
+const _tableRecordCaptions = new Map(); // recordCaption — заголовок ЗАПИСИ (ед. ч.)
 
 // Table-level сортировка списка по умолчанию: tableName → [{ field, order }].
 // Регистрируется приложением через registerListSort(); читается дефолтным списком
@@ -93,11 +117,11 @@ const _tableListSort = new Map();
 // JSON.parse(JSON.stringify(result)) (глубокий клон) + рекурсивный перевод
 // всех { i18n: key } captions. Результат детерминирован по (matchedKey, language),
 // поэтому кэшируется. Возврат по ссылке безопасен: все потребители uniForm
-// (apps/uniForm/server.js) обращаются с результатом как с read-only — поля events/
+// (apps/uniForm/server.js) обращаются с результатом как с read-only — поля
 // clientScript/иконки/captions только читаются, а .layout перед мутацией повторно
-// клонируется (строки 164, 739) → закэшированный объект не мутируется (анти-паттерн №19
-// не нарушается). Кэш ограничен по смыслу (число лейаутов × число языков),
-// инвалидируется целиком в saveLayout. Выключатель: LAYOUT_TRANSLATE_CACHE_DISABLE=1.
+// клонируется → закэшированный объект не мутируется. Кэш ограничен по смыслу
+// (число лейаутов × число языков), инвалидируется целиком в saveLayout.
+// Выключатель: LAYOUT_TRANSLATE_CACHE_DISABLE=1.
 const _translatedCache = new Map();
 const _TRANSLATE_CACHE_DISABLED = process.env.LAYOUT_TRANSLATE_CACHE_DISABLE === '1';
 
@@ -109,89 +133,150 @@ require('./dbLifecycle').onDatabaseReset('layoutMemory', () => {
 });
 
 
-
 /**
- * Build the storage key.
- * @param {string} appName
- * @param {string} mode     — 'record' | 'list'
- * @param {string} tableName
+ * Ключ хранения — АДРЕС формы целиком, единообразно и без исключений.
+ * @param {string} app
+ * @param {string} formName
  * @param {string} role
- * @returns {string}
+ * @param {string} [variant]
  */
-function makeKey(appName, mode, tableName, role, variant) {
-    const base = `${appName}|${mode || 'record'}|${tableName}|${role}`;
-    // Ключ основного представления — прежний, без хвоста: см. комментарий к
-    // _registeredViews. Дополнительные представления добавляют своё имя.
-    return (!variant || variant === MAIN_VARIANT) ? base : `${base}|${variant}`;
+function makeKey(app, formName, role, variant) {
+    return `${app}|${formName}|${role}|${variant || MAIN_VARIANT}`;
 }
 
-function makePrefix(appName, mode, tableName) {
-    return `${appName}|${mode || 'record'}|${tableName}`;
+/** Адрес формы без роли и представления — им индексируются реестры формы. */
+function makePrefix(app, formName) {
+    return `${app}|${formName}`;
 }
 
 /**
- * Save a custom layout to server memory.
- *
- * @param {object} opts
- * @param {string}          opts.appName   — 'uniForm'
- * @param {string}          [opts.mode]    — 'record' (default) | 'list'
- * @param {string}          opts.tableName — DB table name (e.g. 'hotels')
- * @param {string|string[]} opts.roles     — role name(s) or '*' for any role
- * @param {Array}           [opts.layout]  — layout JSON array. Можно НЕ передавать, если
- *   задан `extraButtons`: тогда форма остаётся автогенерируемой (uniForm строит её из
- *   модели), а регистрация добавляет к ней только прикладные кнопки. Это единственный
- *   способ дополнить автоформу таблицы, состав полей которой дописывают другие слои
- *   (напр. `users`: фреймворк + `organizationId` из проекта) — ручной лейаут их потерял бы.
- * @param {Array}           [opts.extraButtons] — прикладные кнопки для `commandBar`
- *   автогенерируемой формы записи (формат — как `commandBar.extraButtons` в лейауте).
- * @param {object}          [opts.events]  — server-side event handlers, e.g.:
- *   { onBeforeSave: { serverScript: 'myScript', fn: 'onBeforeSave' } }
- * @param {string}          [opts.clientScript] — UID клиентского скрипта (loadScript).
- *   Используется как дефолт для всех events в лейауте, чтобы не дублировать clientScript в каждом binding.
- * @param {string}          [opts.formIcon] — URL иконки формы для заголовка и таскбара.
- * @param {string|object}   [opts.appCaption] — Человекочитаемое имя формы/приложения.
- *   Строка или объект { i18n: 'key' } — резолвится сервером при выдаче.
+ * Имя формы из объявления: либо выведено из предмета, либо выписано приложением.
+ * Ровно одно из двух.
  */
-async function saveLayout({ appName, mode, tableName, roles, layout, extraButtons, events, clientScript, formIcon, appCaption, recordCaption, listIcon, windowState, formKind, variant, viewCaption, isDefault }) {
-    if (!appName || !tableName || (!Array.isArray(layout) && !Array.isArray(extraButtons))) {
-        throw new Error('[layoutMemory.saveLayout] appName, tableName and layout (Array) are required (or extraButtons for an auto-generated form)');
+function resolveFormName({ subject, form }) {
+    const hasSubject = !!(subject && subject.table);
+    if (hasSubject && form) {
+        throw new Error('[layoutMemory.saveLayout] укажите либо subject (табличная форма), либо form (именованная) — но не оба: два адреса у одной формы однажды разойдутся');
     }
-    const effectiveMode = mode || 'record';
+    if (hasSubject) return formAddress.forSubject(subject.kind, subject.table);
+    if (!form) {
+        throw new Error('[layoutMemory.saveLayout] нужен subject { table, kind } (табличная форма) или form (имя именованной формы)');
+    }
+    return formAddress.assertNamed(form);
+}
+
+/**
+ * Зарегистрировать форму приложения.
+ *
+ * @param {object}          o
+ * @param {string}          o.app            — приложение-ВЛАДЕЛЕЦ ('booking', 'deleteMarked')
+ * @param {object}          [o.subject]      — ПРЕДМЕТ формы: { table, kind: 'record'|'list' }
+ * @param {string}          [o.form]         — имя именованной формы (форма без предмета)
+ * @param {string|string[]} o.roles          — роль(и) или '*' для любой
+ * @param {Array}           [o.layout]       — лейаут. Можно НЕ передавать, если задан
+ *   `extraButtons`: тогда форма остаётся автогенерируемой (uniForm строит её из модели),
+ *   а регистрация добавляет к ней только прикладные кнопки. Это единственный способ
+ *   дополнить автоформу таблицы, состав полей которой дописывают другие слои
+ *   (напр. `users`: фреймворк + `organizationId` из проекта) — ручной лейаут их потерял бы.
+ * @param {Array}           [o.extraButtons] — прикладные кнопки для `commandBar` автоформы
+ * @param {string}          [o.clientScript] — UID клиентского скрипта (loadScript)
+ * @param {object}          [o.clientEvents] — события формы, обрабатываемые КЛИЕНТОМ:
+ *   { onReady: 'onFormReady', onChange: 'onFormChange' }. Серверные события — это
+ *   методы формы (`drive_root/formMethods.js`), здесь их нет.
+ * @param {string}          [o.formIcon]     — значок записи
+ * @param {string}          [o.listIcon]     — значок журнала
+ * @param {string|object}   [o.appCaption]   — заголовок списка (строка или { i18n })
+ * @param {string|object}   [o.recordCaption]— заголовок записи
+ * @param {string}          [o.windowState]  — 'maximized' | 'centered'
+ * @param {string}          [o.formKind]     — род формы (внешний вид и заголовки).
+ *   Поведением «сохранять/запирать» НЕ управляет: это следует из наличия предмета.
+ * @param {string}          [o.variant]      — представление (умолчание 'main')
+ * @param {string|object}   [o.viewCaption]  — подпись представления
+ * @param {boolean}         [o.isDefault]    — представление по умолчанию
+ * @returns {Promise<string>} имя формы (адрес без роли и представления)
+ */
+async function saveLayout({ app, subject, form, roles, layout, extraButtons, clientScript, clientEvents,
+                            formIcon, appCaption, recordCaption, listIcon, windowState, formKind,
+                            variant, viewCaption, isDefault }) {
+    if (!app || typeof app !== 'string') {
+        throw new Error('[layoutMemory.saveLayout] app (string) required — это приложение-ВЛАДЕЛЕЦ формы');
+    }
+    if (!Array.isArray(layout) && !Array.isArray(extraButtons)) {
+        throw new Error('[layoutMemory.saveLayout] нужен layout (Array) или extraButtons (Array) для автогенерируемой формы');
+    }
+    const formName = resolveFormName({ subject, form });
+    const subj = (subject && subject.table)
+        ? { table: subject.table, kind: subject.kind === formAddress.KIND_LIST ? formAddress.KIND_LIST : formAddress.KIND_RECORD }
+        : null;
+
     const roleList = Array.isArray(roles) ? roles : (roles ? [String(roles)] : ['*']);
     // layout всегда пишем массивом (потребители различают «нет кастомного лейаута» по
     // пустому массиву, а `undefined` сломал бы разбор записи в getLayoutForUser).
     const storedLayout = Array.isArray(layout) ? layout : [];
     const effectiveVariant = variant || MAIN_VARIANT;
-    for (const role of roleList) {
-        await memoryStore.set(NAMESPACE, makeKey(appName, effectiveMode, tableName, role, effectiveVariant), { layout: storedLayout, extraButtons: Array.isArray(extraButtons) ? extraButtons : null, events: events || null, clientScript: clientScript || null, formIcon: formIcon || null, appCaption: appCaption || null, recordCaption: recordCaption || null, listIcon: listIcon || null, windowState: windowState || null, formKind: formKind || null });
-    }
-    // Register prefix so hot-path can skip tables with no layouts at all
-    _registeredPrefixes.add(makePrefix(appName, effectiveMode, tableName));
-    {
-        const prefix = makePrefix(appName, effectiveMode, tableName);
-        if (!_registeredRoles.has(prefix)) _registeredRoles.set(prefix, new Set());
-        for (const role of roleList) _registeredRoles.get(prefix).add(role);
+    const prefix = makePrefix(app, formName);
 
-        if (!_registeredViews.has(prefix)) _registeredViews.set(prefix, new Map());
-        const views = _registeredViews.get(prefix);
-        const known = views.get(effectiveVariant) || { roles: new Set(), caption: null, isDefault: false, order: views.size };
-        for (const role of roleList) known.roles.add(role);
-        // Подпись представления необязательна: одиночному лейауту она не нужна —
-        // кнопка выбора у него всё равно не появится.
-        if (viewCaption) known.caption = viewCaption;
-        if (isDefault) known.isDefault = true;
-        views.set(effectiveVariant, known);
+    for (const role of roleList) {
+        await memoryStore.set(NAMESPACE, makeKey(app, formName, role, effectiveVariant), {
+            layout: storedLayout,
+            extraButtons: Array.isArray(extraButtons) ? extraButtons : null
+        });
     }
+
+    _registeredPrefixes.add(prefix);
+
+    if (!_registeredRoles.has(prefix)) _registeredRoles.set(prefix, new Set());
+    for (const role of roleList) _registeredRoles.get(prefix).add(role);
+
+    if (!_registeredViews.has(prefix)) _registeredViews.set(prefix, new Map());
+    const views = _registeredViews.get(prefix);
+    const known = views.get(effectiveVariant) || { roles: new Set(), caption: null, isDefault: false, order: views.size };
+    for (const role of roleList) known.roles.add(role);
+    // Подпись представления необязательна: одиночному лейауту она не нужна —
+    // кнопка выбора у него всё равно не появится.
+    if (viewCaption) known.caption = viewCaption;
+    if (isDefault) known.isDefault = true;
+    views.set(effectiveVariant, known);
+
+    // Свойства ФОРМЫ. Пишутся поверх прежних: регистрации разных ролей и представлений
+    // одной формы обычно приносят одни и те же значения (см. `common` в приложениях),
+    // а пустое поле не должно затирать заполненное.
+    const meta = _formMeta.get(prefix) || { app, formName, subject: subj };
+    meta.app = app;
+    meta.formName = formName;
+    if (subj) meta.subject = subj;
+    if (clientScript) meta.clientScript = clientScript;
+    if (clientEvents) meta.clientEvents = clientEvents;
+    if (formIcon) meta.formIcon = formIcon;
+    if (listIcon) meta.listIcon = listIcon;
+    if (appCaption) meta.appCaption = appCaption;
+    if (recordCaption) meta.recordCaption = recordCaption;
+    if (windowState) meta.windowState = windowState;
+    if (formKind) meta.formKind = formKind;
+    _formMeta.set(prefix, meta);
+
+    if (subj) {
+        const prevOwner = _subjectOwners.get(formName);
+        if (prevOwner && prevOwner !== app) {
+            // Две формы записи одной таблицы — это не «последняя побеждает», это ошибка
+            // конфигурации, и молча она стоила бы часов поиска.
+            console.error(`[layoutMemory] форму «${formName}» регистрируют два приложения: «${prevOwner}» и «${app}». Победит последнее — у таблицы одна форма записи и один журнал.`);
+        }
+        _subjectOwners.set(formName, app);
+
+        // Значки и заголовки ТАБЛИЦЫ — их спрашивают снаружи, зная только таблицу.
+        if (formIcon) _tableIcons.set(subj.table, formIcon);
+        if (listIcon) _tableListIcons.set(subj.table, listIcon);
+        if (appCaption) _tableCaptions.set(subj.table, appCaption);
+        if (recordCaption) _tableRecordCaptions.set(subj.table, recordCaption);
+    }
+
     // 5.2 — лейаут пересохранён → переведённые клоны для его ключей устарели.
     // saveLayout вызывается на старте (и редко в рантайме), поэтому чистим целиком.
     _translatedCache.clear();
-    // Auto-register table-level icon записи (formIcon) и списка (listIcon)
-    if (formIcon) _tableIcons.set(tableName, formIcon);
-    if (listIcon) _tableListIcons.set(tableName, listIcon);
-    // Auto-register table-level caption списка (appCaption) и записи (recordCaption)
-    if (appCaption) _tableCaptions.set(tableName, appCaption);
-    if (recordCaption) _tableRecordCaptions.set(tableName, recordCaption);
-    console.log(`[layoutMemory] saved layout for ${appName}/${effectiveMode}/${tableName} roles=[${roleList.join(',')}]`);
+
+    console.log(`[layoutMemory] форма ${app}/${formName} зарегистрирована roles=[${roleList.join(',')}]${effectiveVariant !== MAIN_VARIANT ? ' variant=' + effectiveVariant : ''}`);
+    return formName;
 }
 
 /**
@@ -240,93 +325,104 @@ function translateLayoutCaptions(nodes, tFn) {
 }
 
 /**
- * Retrieve a custom layout for the given user role.
- * Returns the layout array, or null if no custom layout was stored.
+ * Запись формы для роли: лейаут, прикладные кнопки и свойства формы.
+ * Возвращает `null`, если по адресу ничего не зарегистрировано.
  *
- * Fast-path: if no layout has ever been saved for this appName+tableName,
- * returns null synchronously — no DB queries, no HTTP calls.
+ * Быстрый путь: если по адресу не сохраняли ничего — синхронный возврат,
+ * ни запросов в базу, ни HTTP.
  *
- * @param {string} appName
- * @param {string} tableName
+ * @param {string} app
+ * @param {string} formName
  * @param {string|null} userRole
- * @param {string} [sessionID] - when provided, captions with { i18n: 'key' } are translated
- * @param {string} [mode]      - 'record' (default) | 'list'
- * @returns {Promise<Array|null>}
+ * @param {string} [sessionID] — когда задан, подписи { i18n } переводятся
+ * @param {string} [variant]
+ * @returns {Promise<object|null>}
  */
-async function getLayoutForUser(appName, tableName, userRole, sessionID, mode, variant) {
-    if (!appName || !tableName) return null;
-    const effectiveMode = mode || 'record';
+async function getLayoutForUser(app, formName, userRole, sessionID, variant) {
+    if (!app || !formName) return null;
+    const prefix = makePrefix(app, formName);
 
-    // Fast-path: nothing registered for this table — immediate return
-    if (!_registeredPrefixes.has(makePrefix(appName, effectiveMode, tableName))) return null;
+    // Быстрый путь: по этому адресу ничего не зарегистрировано
+    if (!_registeredPrefixes.has(prefix)) return null;
 
     // Представление «как построит ядро»: та же запись, но с ПУСТЫМ лейаутом —
     // пустой лейаут и означает «кастомного нет». Кнопки, иконки и заголовки
     // остаются: автоформа без них потеряла бы команды приложения.
     if (variant === AUTO_VARIANT) {
-        const base = await getLayoutForUser(appName, tableName, userRole, sessionID, effectiveMode, MAIN_VARIANT);
+        const base = await getLayoutForUser(app, formName, userRole, sessionID, MAIN_VARIANT);
         if (!base) return null;
         const copy = JSON.parse(JSON.stringify(base));
         copy.layout = [];
         return copy;
     }
 
-    let result = null;
+    const meta = _formMeta.get(prefix) || {};
+    let stored = null;
     let matchedKey = null;
 
-    // 1. Exact role match (in-memory Map → instant)
+    // 1. Точное совпадение роли (in-memory Map → мгновенно)
     if (userRole) {
-        const k = makeKey(appName, effectiveMode, tableName, userRole, variant);
-        const stored = memoryStore.getSync(NAMESPACE, k);
-        if (stored) {
-            result = stored.layout !== undefined ? stored : { layout: stored, events: null, clientScript: null, formIcon: null, appCaption: null };
-            matchedKey = k;
-        }
+        const k = makeKey(app, formName, userRole, variant);
+        const found = memoryStore.getSync(NAMESPACE, k);
+        if (found) { stored = found; matchedKey = k; }
     }
 
-    // 2. Wildcard match (any role)
-    if (!result) {
-        const k = makeKey(appName, effectiveMode, tableName, '*', variant);
-        const fallback = memoryStore.getSync(NAMESPACE, k);
-        if (fallback) {
-            result = fallback.layout !== undefined ? fallback : { layout: fallback, events: null, clientScript: null, formIcon: null, appCaption: null };
-            matchedKey = k;
-        }
+    // 2. Любая роль ('*')
+    if (!stored) {
+        const k = makeKey(app, formName, '*', variant);
+        const found = memoryStore.getSync(NAMESPACE, k);
+        if (found) { stored = found; matchedKey = k; }
     }
 
     // 3. Администратор: любой зарегистрированный лейаут, если своего и общего нет.
     //
     // Права администратора уже сквозные везде: серверные скрипты и файлы отдаются ему
-    // без проверки роли (`hasRoleAccess`), RLS он обходит. Подбор лейаута был строже
-    // всего остального, и приложение, объявившее форму как `roles: 'user'` (а так
-    // объявлено большинство: имелось в виду «для всех», а не «для роли user»),
-    // администратору показывало generic-таблицу вместо своей формы — список броней без
-    // вкладки «Календарь», карточку брони без вкладок. Лечить это в каждом приложении
-    // значит ждать, пока каждое следующее наступит на те же грабли.
+    // без проверки роли, RLS он обходит. Подбор лейаута был строже всего остального,
+    // и приложение, объявившее форму как `roles: 'user'` (а так объявлено большинство:
+    // имелось в виду «для всех», а не «для роли user»), администратору показывало
+    // generic-таблицу вместо своей формы — список броней без вкладки «Календарь»,
+    // карточку брони без вкладок. Лечить это в каждом приложении значит ждать, пока
+    // каждое следующее наступит на те же грабли.
     //
     // Осознанно РАЗНЫЕ лейауты по ролям это не ломает: у администратора в таком случае
     // есть собственная запись, и она находится точным совпадением на шаге 1.
-    if (!result && String(userRole) === 'admin') {
-        const roles = _registeredRoles.get(makePrefix(appName, effectiveMode, tableName));
+    if (!stored && String(userRole) === 'admin') {
+        const roles = _registeredRoles.get(prefix);
         if (roles && roles.size) {
             // 'user' первым: это конвенция проекта для «формы для всех».
             const candidates = roles.has('user') ? ['user', ...roles] : Array.from(roles);
             for (const role of candidates) {
                 if (role === 'admin' || role === '*') continue;
-                const k = makeKey(appName, effectiveMode, tableName, role, variant);
-                const stored = memoryStore.getSync(NAMESPACE, k);
-                if (!stored) continue;
-                result = stored.layout !== undefined ? stored : { layout: stored, events: null, clientScript: null, formIcon: null, appCaption: null };
-                matchedKey = k;
+                const k = makeKey(app, formName, role, variant);
+                const found = memoryStore.getSync(NAMESPACE, k);
+                if (!found) continue;
+                stored = found; matchedKey = k;
                 break;
             }
         }
     }
 
-    if (!result) return null;
+    if (!stored) return null;
 
-    // 3. Translate { i18n: 'key' } captions when sessionID is provided
-    if (result && sessionID) {
+    // Свойства формы приезжают из `_formMeta`, а не из записи представления:
+    // переключение вида не должно терять клиентский скрипт и его события.
+    const result = {
+        app, formName,
+        subject: meta.subject || null,
+        layout: Array.isArray(stored.layout) ? stored.layout : [],
+        extraButtons: stored.extraButtons || null,
+        clientScript: meta.clientScript || null,
+        clientEvents: meta.clientEvents || null,
+        formIcon: meta.formIcon || null,
+        listIcon: meta.listIcon || null,
+        appCaption: meta.appCaption || null,
+        recordCaption: meta.recordCaption || null,
+        windowState: meta.windowState || null,
+        formKind: meta.formKind || null
+    };
+
+    // Перевод подписей { i18n: 'key' }, когда известна сессия
+    if (sessionID) {
         try {
             const formsCtx = require('../drive_forms/globalServerContext');
             const { language } = await formsCtx.getSessionContext(sessionID);
@@ -337,7 +433,7 @@ async function getLayoutForUser(appName, tableName, userRole, sessionID, mode, v
                 if (hit) return hit;
             }
             const i18n = require('./i18n');
-            // Deep-clone to avoid mutating the cached original (anti-pattern: mutable memory_store object)
+            // Глубокий клон: закэшированный оригинал мутировать нельзя
             const cloned = JSON.parse(JSON.stringify(result));
             translateLayoutCaptions(cloned.layout, (key) => i18n.t(key, language));
             if (!_TRANSLATE_CACHE_DISABLED) _translatedCache.set(cacheKey, cloned);
@@ -348,6 +444,28 @@ async function getLayoutForUser(appName, tableName, userRole, sessionID, mode, v
     }
 
     return result;
+}
+
+/**
+ * Свойства формы без учёта роли и представления — синхронно.
+ * Нужны до подбора лейаута: по ним ядро узнаёт ПРЕДМЕТ формы (есть он или нет).
+ * @param {string} app
+ * @param {string} formName
+ * @returns {object|null}
+ */
+function getFormMeta(app, formName) {
+    if (!app || !formName) return null;
+    return _formMeta.get(makePrefix(app, formName)) || null;
+}
+
+/**
+ * Приложение-владелец ТАБЛИЧНОЙ формы. Имя выведено из предмета и уникально по
+ * построению, поэтому владелец находится, когда известна только таблица.
+ * @param {string} formName — 'record:bookings' | 'list:bookings'
+ * @returns {string|null}
+ */
+function ownerOfSubjectForm(formName) {
+    return _subjectOwners.get(formName) || null;
 }
 
 /**
@@ -372,15 +490,15 @@ async function getUserRoleBySession(sessionID) {
 }
 
 /**
- * Synchronous check: has saveLayout ever been called for this app+table?
- * If false — no custom layouts exist, skip all async work entirely.
- *
- * @param {string} appName
- * @param {string} tableName
+ * Синхронная проверка: регистрировали ли что-нибудь по этому адресу?
+ * Если нет — асинхронной работы не начинаем вовсе.
+ * @param {string} app
+ * @param {string} formName
  * @returns {boolean}
  */
-function hasRegistered(appName, tableName, mode) {
-    return _registeredPrefixes.has(makePrefix(appName, mode || 'record', tableName));
+function hasRegistered(app, formName) {
+    if (!app || !formName) return false;
+    return _registeredPrefixes.has(makePrefix(app, formName));
 }
 
 /**
@@ -451,17 +569,15 @@ function getListSort(tableName) {
  * «автоматическое» — форму, какой её построит ядро из модели. Именно так он
  * сравнивает свою форму с тем, что даёт ядро, не правя конфигурацию.
  *
- * @param {string} appName
- * @param {string} tableName
+ * @param {string} app
+ * @param {string} formName
  * @param {string|null} userRole
  * @param {string} [sessionID] — когда задан, подписи { i18n } переводятся
- * @param {string} [mode]      — 'record' (default) | 'list'
  * @returns {Promise<Array<{variant:string, caption:string, isDefault:boolean}>>}
  */
-async function listViewsForUser(appName, tableName, userRole, sessionID, mode) {
-    if (!appName || !tableName) return [];
-    const effectiveMode = mode || 'record';
-    const views = _registeredViews.get(makePrefix(appName, effectiveMode, tableName));
+async function listViewsForUser(app, formName, userRole, sessionID) {
+    if (!app || !formName) return [];
+    const views = _registeredViews.get(makePrefix(app, formName));
     if (!views || !views.size) return [];
 
     const isAdmin = String(userRole) === 'admin';
@@ -505,4 +621,10 @@ async function listViewsForUser(appName, tableName, userRole, sessionID, mode) {
     }));
 }
 
-module.exports = { saveLayout, getLayoutForUser, listViewsForUser, getUserRoleBySession, hasRegistered, getTableIcon, getTableCaption, getTableRecordCaption, getTableListIcon, registerListSort, getListSort, MAIN_VARIANT, AUTO_VARIANT };
+module.exports = {
+    saveLayout, getLayoutForUser, getFormMeta, ownerOfSubjectForm,
+    listViewsForUser, getUserRoleBySession, hasRegistered,
+    getTableIcon, getTableCaption, getTableRecordCaption, getTableListIcon,
+    registerListSort, getListSort,
+    MAIN_VARIANT, AUTO_VARIANT
+};
