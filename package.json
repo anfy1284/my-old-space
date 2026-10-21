@@ -12,6 +12,7 @@
     "drive_root/",
     "scripts/",
     "main_server.js",
+    "events_handler.js",
     "server.config.json",
     "АРХИТЕКТУРА_ПРОЕКТА.md",
     "ИНСТРУКЦИИ_ДЛЯ_AI.md"

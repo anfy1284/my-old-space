@@ -58,6 +58,15 @@ async function triggerProjectEvent(eventName, context = {}) {
     
     // 1. Сначала вызываем обработчики фреймворка
     const frameworkHandlerPath = path.resolve(__dirname, '../../events_handler.js');
+    // Обработчик фреймворка ОБЯЗАН быть: без него при старте не создаётся
+    // последовательность моментов документов и не засеваются умолчания настроек.
+    // Раньше его отсутствие пропускалось молча — и так прошло на проде 21.10.2026:
+    // файла не было в `files` package.json, npm-установка из GitHub его не ставила,
+    // и проведение падало на «relation "document_moment_seq" does not exist».
+    if (!fs.existsSync(frameworkHandlerPath)) {
+      console.error(`[events_handler] ОБРАБОТЧИК ФРЕЙМВОРКА НЕ НАЙДЕН: ${frameworkHandlerPath} —`
+        + ` событие "${eventName}" ядра не выполнено (проверьте "files" в package.json my-old-space).`);
+    }
     if (fs.existsSync(frameworkHandlerPath)) {
       const frameworkHandler = require(frameworkHandlerPath).default || require(frameworkHandlerPath);
       if (frameworkHandler && typeof frameworkHandler[eventName] === 'function') {
