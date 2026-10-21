@@ -72,6 +72,15 @@ function forTable(tableName) {
  * такими именами в модели нет, и попав в список атрибутов выборки, они уронили
  * бы запрос — журнал открылся бы пустым.
  */
+/** Контрол ячейки по типу реквизита — как у автоколонок (uniForm buildTableFieldsFromModel). */
+function inputTypeOf(type) {
+    const t = String(type || '').toUpperCase();
+    if (t === 'INTEGER') return 'integer';
+    if (t === 'BOOLEAN') return 'checkbox';
+    if (t === 'DATE' || t === 'DATEONLY') return 'date';
+    return 'textbox';
+}
+
 function append(tableName, fields) {
     const decls = forTable(tableName);
     if (!decls.length || !Array.isArray(fields)) return fields;
@@ -82,6 +91,12 @@ function append(tableName, fields) {
         if (out.some(f => nameOf(f) === a.name)) continue;
         out.push(Object.assign({}, a, {
             name: a.name,
+            // КОНТРОЛ ЯЧЕЙКИ. Клиент рисует ячейку контролом по `inputType`; у колонки
+            // модели его ставит buildTableFieldsFromModel, а объявление реквизита
+            // журнала знает только `type` — и ячейка выходила ПУСТОЙ при верном
+            // значении в строке (21.10.2026: «Anzahlung» и «Zu viel abgerechnet»
+            // в журнале броней не показали ни разу). Те же правила по типу.
+            inputType: a.inputType || inputTypeOf(a.type),
             // Колонка только для чтения всегда: писать некуда — поля нет.
             readOnly: true,
             // И сортировать по ней нельзя — поля с таким именем в таблице нет.

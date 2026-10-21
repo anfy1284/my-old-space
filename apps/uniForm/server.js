@@ -1380,7 +1380,13 @@ function buildTableFields(params) {
     // Журнал регистра и форма его записи отвечают на РАЗНЫЕ вопросы, поэтому и
     // состав колонок у них разный: из журнала убираем то, что дублирует соседей
     // (drive_root/db/registerForms.js#hideInJournal).
+    const named = Array.isArray(params.fields) ? params.fields : [];
     return Promise.resolve(built).then(fields => {
+        // Поле «не колонка журнала» в автоколонки не идёт; лейаут, назвавший его
+        // в `fields` явно, своё получает — то же правило, что у служебных.
+        if (Array.isArray(fields)) {
+            fields = fields.filter(f => !f || f.listColumn !== false || named.indexOf(f.name) !== -1);
+        }
         try {
             return require('../../drive_root/db/registerForms').hideInJournal(tableName, fields);
         } catch (e) { return fields; }
@@ -1461,6 +1467,10 @@ async function buildTableFieldsFromModel(tableName, keepService) {
                 source: 'field',
                 editable: !!f.editable
             };
+            // `"listColumn": false` в db.json — поле формы, но не колонка журнала
+            // (getTableMetadata). Признак едет дальше, а решает buildTableFields:
+            // эта функция строит и форму записи, где поле нужно.
+            if (f.listColumn === false) field.listColumn = false;
 
             // Набор допустимых значений поля (db.json → options) едет до колонки
             // списка и до автоформы: без него ячейка печатает сырое значение из БД

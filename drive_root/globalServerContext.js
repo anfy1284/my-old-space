@@ -1120,6 +1120,11 @@ async function getTableMetadata(modelName) {
             // попадает. Объявляется в db.json (`"service": true`) или инъекцией ядра.
             service: serviceFields.isServiceField(fieldName,
                 modelDef && modelDef.fields && modelDef.fields[fieldName]),
+            // НЕ КОЛОНКА ЖУРНАЛА (`"listColumn": false`): поле пользователя, которое
+            // в списке ничего не говорит — сумма аванса, введённая один раз при
+            // создании брони, у всех остальных строк журнала ноль. Это не
+            // «служебное»: на форме записи поле обычное, вводится и читается.
+            listColumn: !(fieldDecl && fieldDecl.listColumn === false),
             editable: false,  // All fields readonly for now
             isAddress: !!(modelDef && modelDef.fields && modelDef.fields[fieldName] && modelDef.fields[fieldName].isAddress),
             inputType: explicitInputType,
@@ -1203,7 +1208,8 @@ async function getDynamicTableData(options) {
         // Автоколонки списка: служебные реквизиты не показываем — колонку «момент
         // времени» рядом с номером и датой никто не заказывал (db/serviceFields.js).
         fields = require('./db/serviceFields')
-            .withoutService(await getTableMetadata(modelName), { keepUID: true });
+            .withoutService(await getTableMetadata(modelName), { keepUID: true })
+            .filter(f => f.listColumn !== false);
     }
     // Build WHERE clause from filters
     const where = {};
