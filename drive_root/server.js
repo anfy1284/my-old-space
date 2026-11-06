@@ -443,13 +443,11 @@ async function handleRequest(req, res) {
             const m = (req.headers.cookie || '').match(/(?:^|; )sessionID=([^;]+)/i);
             const sid = m ? decodeURIComponent(m[1]) : null;
             if (sid) {
-                const sm = require('./db/sessionManager');
                 await require('./dbGateway').execute({
                     operation: 'delete', table: 'sessions', where: { sessionId: sid },
                     context: { sessionID: '__SYS_INTERNAL__' }
                 });
-                try { sm.sessionCache.delete(sid); } catch (e) {}
-                try { await require('./globalServerContext').invalidateSessionUser(sid); } catch (e) {}
+                try { await require('./globalServerContext').invalidateSession(sid); } catch (e) {}
             }
         } catch (e) {
             console.error('[logout]', e && e.message || e);

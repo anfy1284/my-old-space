@@ -598,6 +598,17 @@ async function runOne(p) {
                 'UNPOST_DENIED', 'posting_err_unpost_from_state', { state: docStatus });
         }
 
+        // 2а. НОМЕР ДОКУМЕНТА, если организация отложила его выдачу до проведения
+        //     (`core.numberOnPost`, drive_root/db/numbering.js). Стоит ДО обработчика
+        //     намеренно: обработчик счёта снимает архивную копию печатной формы, и
+        //     номер обязан уже стоять в документе — в копии он печатается.
+        //     По умолчанию настройка выключена и вызов ничего не делает.
+        const numbering = require('./numbering');
+        const numberBefore = doc[numbering.FIELD] || null;
+        if (action === ACTION.POST) {
+            await numbering.assignOnPost({ table, uid, doc, transaction: tx, sessionID: p.sessionID });
+        }
+
         // 3. Снять всё, что документ создал раньше. Делает ядро — обработчик об этом
         //    не знает и знать не должен.
         const removed = await clearMovements({ table, uid, config, transaction: tx, sessionID: p.sessionID });
@@ -667,6 +678,15 @@ async function runOne(p) {
                 // этом не снимается — переход проверяется как обычно.
                 context: postingContext(tx, p.sessionID)
             });
+        }
+
+        // 5а. ОСВОБОЖДЕНИЕ НОМЕРА при распроведении (`core.numberReleaseOnUnpost`).
+        //     Строго ПОСЛЕ возврата состояния (шаг 5): документ уже снова черновик,
+        //     и замок неизменности открыт. Номер документа, у которого есть архивная
+        //     копия печатной формы, не снимается никогда — он уже у клиента на
+        //     бумаге (см. шапку numbering.js). По умолчанию выключено.
+        if (action === ACTION.UNPOST) {
+            await numbering.releaseOnUnpost({ table, uid, doc, transaction: tx, sessionID: p.sessionID });
         }
 
         // 6. Состояние проведения — только если оно изменилось.
@@ -756,8 +776,13 @@ async function runOne(p) {
                 changedAt: new Date().toISOString(),
                 userId: actor,
                 userName: null,
-                before: JSON.stringify({ postingState: currentState, movements: removed.length }),
-                after: JSON.stringify({ postingState: nextState, movements: written.length })
+                // Номер — в журнале наравне с состоянием: его выдача и освобождение
+                // такая же учётная операция, и «куда делся номер 1467» обязано
+                // иметь ответ в цепочке, а не в логе процесса.
+                before: JSON.stringify({ postingState: currentState, movements: removed.length,
+                    number: numberBefore }),
+                after: JSON.stringify({ postingState: nextState, movements: written.length,
+                    number: doc[numbering.FIELD] || null })
             });
         } catch (e) {
             // Незаписанная строка журнала — дыра в цепочке, молчать нельзя; но и

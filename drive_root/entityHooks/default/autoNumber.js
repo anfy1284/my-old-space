@@ -32,6 +32,14 @@
  *   period     {string|null} — периодичность сброса: null/"year"/"month" (по умолчанию null)
  *   scopeField {string|null} — реквизит области нумерации (по умолчанию "organizationId";
  *                              `null` — сквозная нумерация по всей таблице)
+ *
+ * КОГДА номер выдаётся — не забота этого модуля. По умолчанию при создании, но
+ * вид документа может отложить выдачу до проведения, объявив
+ * `entityConfig.numbering.onPost` (`drive_root/db/numbering.js`): тогда на
+ * создании хук отходит в сторону, а номер считает тот же алгоритм —
+ * `computeNext`, вызванный проведением. Одна реализация на оба момента: две
+ * разошлись бы в первом же нестандартном случае (префикс, ширина, занятые
+ * номера).
  */
 
 'use strict';
@@ -39,11 +47,19 @@
 const { resolveScopeValue, scopeCondition } = require('./numberScope');
 
 module.exports = async function autoNumber(request, params, context) {
-    const { field, length = 5, prefix = '', period = null } = params;
+    const { field } = params;
 
     if (!field) {
         throw new Error('[default.autoNumber] "field" param is required');
     }
+
+    // НОМЕР ПИШЕТ САМО ЯДРО — хук молчит. Так выглядят обе операции модуля
+    // `numbering`: выдача номера при проведении и его освобождение при
+    // распроведении. Признак — токен ядра на это поле, а не флаг в контексте:
+    // флаг подделывает кто угодно, токен не уезжает из памяти процесса.
+    // Без этой проверки освобождение было бы невозможно в принципе: хук на
+    // beforeUpdate видит очищенный номер и тут же выдаёт новый.
+    if (require('../../db/coreWrite').allows(request, field)) return;
 
     // Определяем заполненность поля и тип операции.
     //  create: пустое/отсутствующее поле → присвоить номер; заполненное (ручной ввод) → не трогать.
@@ -61,13 +77,41 @@ module.exports = async function autoNumber(request, params, context) {
         if (!isEmpty) return;
     }
 
-    const { modelsDB, dbGateway } = context;
+    const { modelsDB } = context;
     const globalCtx = require('../../globalServerContext');
     const modelName = globalCtx.getModelNameForTable(request.table);
     if (!modelName) return;
 
     const Model = modelsDB[modelName];
     if (!Model) return;
+
+    // ВЫДАЧА ОТЛОЖЕНА ДО ПРОВЕДЕНИЯ? Вид документа может объявить
+    // `entityConfig.numbering.onPost` (drive_root/db/numbering.js): тогда
+    // черновик живёт без номера и ни одного не занимает, а номер выдаст
+    // проведение — тем же алгоритмом, что ниже. Спрашивается только на
+    // создании: на обновлении очищенный вручную номер по-прежнему означает
+    // «выдай новый».
+    if (op !== 'update' && require('../../db/numbering').deferAtCreate(Model)) return;
+
+    const nextValue = await computeNext(request, Model, params, context);
+    if (nextValue === null || nextValue === undefined) return;
+
+    request.data[field] = nextValue;
+    console.log(`[default.autoNumber] ${request.table}.${field} = "${request.data[field]}"`);
+};
+
+/**
+ * СЛЕДУЮЩИЙ СВОБОДНЫЙ НОМЕР для записи. Вынесен из хука, потому что у номера два
+ * момента выдачи (создание и проведение), а алгоритм обязан быть один.
+ *
+ * @param {object} request — запрос `dbGateway` (нужны `table`, `data`, `where`)
+ * @param {object} Model   — Sequelize-модель таблицы
+ * @param {object} params  — параметры автонумерации (field, length, prefix, period, scopeField)
+ * @param {object} context — `{ modelsDB, dbGateway, sessionID }`
+ * @returns {Promise<string|null>}
+ */
+async function computeNext(request, Model, params, context) {
+    const { field, length = 5, prefix = '', period = null } = params || {};
 
     // Область нумерации: своя непрерывная последовательность у каждой организации.
     const scope = await resolveScopeValue(request, Model, params);
@@ -156,10 +200,13 @@ module.exports = async function autoNumber(request, params, context) {
         nextValue = nextFree(prefix, 1n, length, taken);
     }
 
-    request.data[field] = nextValue;
-    console.log(`[default.autoNumber] ${request.table}.${field} = "${request.data[field]}"`
-        + (scope.scoped ? ` (${scope.field}=${scope.value || '∅'})` : ''));
-};
+    if (scope.scoped) {
+        console.log(`[default.autoNumber] область ${request.table}: ${scope.field}=${scope.value || '∅'}`);
+    }
+    return nextValue;
+}
+
+module.exports.computeNext = computeNext;
 
 /**
  * Первый СВОБОДНЫЙ номер «префикс + число», начиная с `start`: занятый

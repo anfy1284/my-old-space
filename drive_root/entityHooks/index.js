@@ -217,8 +217,16 @@ async function applyPresentation(operation, Model, request, context) {
         // и представление строилось бы из одних изменённых полей.
         const uid = request ? require('../db/whereUid').uidOf(request.where) : null;
         if (uid && Model && typeof Model.findByPk === 'function') {
+            // ДОЧИТЫВАЕМ В ТЕКУЩЕЙ ТРАНЗАКЦИИ (05.11.2026). Без неё запрос видит
+            // снимок ДО транзакции, и в проведении — где в одной транзакции идёт
+            // несколько записей подряд (номер, статус, состояние) — каждая
+            // следующая пересобирала представление из УСТАРЕВШИХ данных и
+            // затирала предыдущую. Снаружи это выглядит так: номер в документе
+            // есть, а в его представлении (и в колонке журнала) его нет.
+            const tx = (request.options && request.options.transaction)
+                || (request.context && request.context.transaction) || null;
             try {
-                const cur = await Model.findByPk(uid, { raw: true });
+                const cur = await Model.findByPk(uid, tx ? { raw: true, transaction: tx } : { raw: true });
                 if (cur) effective = Object.assign({}, cur, (request && request.data) || {});
             } catch (e) { /* строим из изменений */ }
         }

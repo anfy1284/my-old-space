@@ -220,6 +220,79 @@ async function remove(uidOfRow) {
 }
 
 /**
+ * СНЯТЬ ОСТАНОВЛЕННЫЕ СТРОКИ, У КОТОРЫХ ДОКУМЕНТА БОЛЬШЕ НЕТ (06.11.2026).
+ *
+ * У обычной строки это разрешается само: исполнитель берёт её в работу,
+ * `posting.runOne` отвечает «документа нет» и строка снимается молча. Но
+ * ОСТАНОВЛЕННУЮ (`stopsOnFailure` — неудачная ручная команда) не берёт никто:
+ * её повторяет только человек той же командой, а команду не повторить, если
+ * документа уже нет. Такая строка остаётся навсегда — вместе с текстом своей
+ * ошибки.
+ *
+ * Чем это мешало: обновление прода после каждого шага ждёт, пока очередь
+ * опустеет, и считает ошибкой ЛЮБУЮ строку с `lastError`, чья бы она ни была.
+ * Одна строка от удалённого документа останавливала всё обновление. Лечилось
+ * разовым скриптом (`tmp/2026-11-06_warteschlange_verwaiste_zeilen`), но мусор,
+ * который механизм производит сам, он сам и обязан убирать.
+ *
+ * Зовётся в начале каждого прохода исполнителя. Когда остановленных строк нет —
+ * это один пустой запрос.
+ *
+ * @returns {Promise<number>} сколько строк снято
+ */
+async function sweepOrphanStopped() {
+    const dbGateway = require('../dbGateway');
+    const globalCtx = require('../globalServerContext');
+
+    const rows = await dbGateway.execute({
+        operation: 'read', table: TABLE,
+        where: { stopped: true },
+        options: { raw: true },
+        context: { sessionID: SYSTEM_SESSION_ID }
+    });
+    if (!rows || !rows.length) return 0;
+
+    const byTable = new Map();
+    for (const r of rows) {
+        if (!byTable.has(r.documentTable)) byTable.set(r.documentTable, []);
+        byTable.get(r.documentTable).push(r);
+    }
+
+    let removed = 0;
+    for (const [table, list] of byTable) {
+        // Читаем через модель, а не через шлюз: это собственная бухгалтерия
+        // механизма, и RLS к ней отношения не имеет — иначе «документа не видно»
+        // и «документа нет» слились бы в один ответ, и чужая строка снималась бы
+        // по чужой видимости.
+        const modelName = globalCtx.getModelNameForTable(table);
+        const Model = modelName ? globalCtx.modelsDB[modelName] : null;
+        let alive = new Set();
+        if (Model) {
+            const uids = Array.from(new Set(list.map(r => r.documentUID)));
+            try {
+                const found = await Model.findAll({ where: { UID: uids }, attributes: ['UID'], raw: true });
+                alive = new Set(found.map(f => f.UID));
+            } catch (e) {
+                // Не смогли спросить — ничего не снимаем: лишняя строка безобиднее
+                // снятой задачи, которую кто-то ещё ждёт.
+                console.error(`[postingQueue] Проверка документов «${table}» не выполнена: ${e.message}`);
+                continue;
+            }
+        }
+        // Модели нет вовсе (таблицу убрали) — живых документов тоже нет.
+        for (const r of list) {
+            if (alive.has(r.documentUID)) continue;
+            await remove(r.UID);
+            removed++;
+        }
+    }
+    if (removed) {
+        console.log(`[postingQueue] Снято остановленных строк без документа: ${removed}`);
+    }
+    return removed;
+}
+
+/**
  * Следующая строка очереди: строго по моменту времени документа, пропуская те, до
  * которых ещё не дошёл `nextAttemptAt`.
  */
@@ -496,6 +569,7 @@ module.exports = {
     enqueueMany,
     next,
     pending,
+    sweepOrphanStopped,
     remove,
     cancelQueued,
     markStarted,

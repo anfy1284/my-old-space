@@ -233,6 +233,13 @@ async function pass(ctx) {
     const failedThisPass = [];
     const acc = tally();
 
+    // Мусор, который механизм произвёл сам: остановленные строки документов,
+    // которых уже нет. Исполнитель их не берёт (на то они и остановленные), а
+    // человек повторить команду не может — документа нет. Снимаем здесь, перед
+    // работой; когда таких строк нет, это один пустой запрос.
+    try { await postingQueue.sweepOrphanStopped(); }
+    catch (e) { console.error('[postingRunner] Уборка строк без документа:', e && e.message || e); }
+
     for (let i = 0; i < MAX_PER_PASS; i++) {
         if (ctx && typeof ctx.isCancelled === 'function' && ctx.isCancelled()) break;
 

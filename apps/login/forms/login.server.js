@@ -56,6 +56,14 @@ module.exports = function (modelsDB, Utilities) {
             await modelsDB.Sessions.create({ sessionId: sessionID, userId: user.UID });
         }
 
+        // У СЕССИИ СМЕНИЛСЯ ХОЗЯИН — всё, что про неё помнится, надо забыть
+        // (05.11.2026). Строка `sessions` уже принадлежит вошедшему, а кэши —
+        // снимок пользователя и контекст сессии с РОЛЬЮ — всё ещё держали
+        // предыдущего: вход поверх непогашенной сессии давал работу в чужом
+        // доступе. Сброс один, в ядре (`invalidateSession`), чтобы вход и выход
+        // забывали одно и то же.
+        await globalCtx.invalidateSession(sessionID);
+
         return { success: true, mustChangePassword: !!user.mustChangePassword };
     }
 

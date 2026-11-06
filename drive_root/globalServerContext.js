@@ -634,6 +634,33 @@ async function invalidateSessionUser(sessionID) {
     try { await _memoryStore.del(_SESSION_USER_NS, sessionID); } catch (e) {}
 }
 
+/**
+ * ЗАБЫТЬ ВСЁ, ЧТО ПОМНИТСЯ ПРО ЭТУ СЕССИЮ. Звать, когда у сессии СМЕНИЛСЯ ХОЗЯИН
+ * (вход) или её не стало (выход).
+ *
+ * Про одну сессию помнят ТРИ кэша, и каждый про своё:
+ *   1. `sessionManager.sessionCache` — строка `sessions` (в ней `userId`);
+ *   2. `_SESSION_USER_NS` — снимок строки пользователя (`getUserBySessionID`);
+ *   3. `_SESSION_CTX_NS` в `drive_forms/globalServerContext` — `{userId, name,
+ *      РОЛЬ, язык}` (`getSessionContext`).
+ *
+ * Вход переписывал `sessions.userId` и не трогал ни один из них: в базе сессия
+ * уже принадлежала новому человеку, а сервер продолжал отдавать имя, данные и
+ * РОЛЬ предыдущего — то есть вошедший работал в чужом доступе, пока кэш не
+ * протухнет (найдено 05.11.2026). Поэтому сброс один и общий: три вызова
+ * вразнобой — это три места, где назавтра забудут четвёртый кэш.
+ *
+ * @param {string} sessionID
+ */
+async function invalidateSession(sessionID) {
+    if (!sessionID) return;
+    try { require('./db/sessionManager').sessionCache.delete(sessionID); } catch (e) {}
+    await invalidateSessionUser(sessionID);
+    // Ленивый require: `drive_forms/globalServerContext` грузит этот модуль сам —
+    // статическая зависимость замкнула бы круг.
+    try { require('../drive_forms/globalServerContext').invalidateSessionContext(sessionID); } catch (e) {}
+}
+
 // Process default values
 // Adds _level to each record and checks id uniqueness within the level
 function processDefaultValues(data, level) {
@@ -773,6 +800,7 @@ Object.defineProperty(module.exports, 'modelsDB', {
 module.exports.getServerTime = getServerTime;
 module.exports.helloFromGlobal = helloFromGlobal;
 module.exports.getUserBySessionID = getUserBySessionID;
+module.exports.invalidateSession = invalidateSession;
 module.exports.invalidateSessionUser = invalidateSessionUser;
 module.exports.getSessionIdFromRequest = getSessionIdFromRequest;
 module.exports.extractSessionIdFromCookie = extractSessionIdFromCookie;
